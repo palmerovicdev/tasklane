@@ -128,6 +128,27 @@ class TaskTreeRendererTest {
         assertTrue(scanAll(tree, bounds) { point -> renderer.targetAt(tree, point) }.isEmpty())
     }
 
+    /**
+     * La banda que el doble clic ignora. No se comprueba dónde acaba —eso depende del
+     * tema— sino lo que hace falta para que el gesto no se pise con el de marcar: que
+     * el borde izquierdo de la fila sea casilla y el centro no.
+     */
+    @Test
+    fun `la casilla ocupa el borde izquierdo y nada mas`() {
+        val tree = treeWith(task("Comprar pan"))
+        val bounds = tree.getRowBounds(0)
+        val y = bounds.y + bounds.height / 2
+
+        assertTrue(
+            "el borde izquierdo de la fila es la casilla",
+            renderer.isOnCheckbox(tree, Point(bounds.x + 1, y)),
+        )
+        assertTrue(
+            "el centro de la tarjeta tiene que abrir la tarea, no marcarla",
+            !renderer.isOnCheckbox(tree, Point(bounds.x + bounds.width / 2, y)),
+        )
+    }
+
     @Test
     fun `una tarea sin enlaces no responde en ningun punto`() {
         val tree = treeWith(task("Comprar pan"))

@@ -256,7 +256,7 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
 
   <div class="layers">
     <div class="layer"><span class="lname">ui · actions</span><span class="lbody">
-      <span class="chip">TasklaneToolWindowFactory</span><span class="chip">StateTabPanel</span><span class="chip">QuickAddPopup</span><span class="chip">TaskEditorPopup</span><span class="chip">TasklaneConfigurable</span><span class="chip">AnAction ×12</span>
+      <span class="chip">TasklaneToolWindowFactory</span><span class="chip">StateTabPanel</span><span class="chip">TaskEditDialog</span><span class="chip">TasklaneConfigurable</span><span class="chip">AnAction ×12</span>
     </span></div>
     <div class="flowline"><span>↓ comandos tipados</span><span>↑ StateFlow&lt;Snapshot&gt;</span></div>
     <div class="layer"><span class="lname">application</span><span class="lbody">
@@ -337,8 +337,20 @@ data class Task(
     val links: List&lt;TaskLink&gt;,        // derivado de body, cacheado
     val attachments: List&lt;AttachmentRef&gt;,
     val tags: List&lt;String&gt; = emptyList(),
+    val dueDate: Instant? = null,     // lo unico del modelo que mira al futuro
+    val bookmarked: Boolean = false,  // fijada por el usuario: sube en su grupo
     val extra: Map&lt;String, String&gt; = emptyMap()   // forward-compat
 )
+
+// Derivados del cuerpo y cacheados, como links y attachments:
+//   title / titleRange   primera linea con texto que no sea solo una imagen
+//   description          primera linea del detalle que no sea de la lista
+//   checklist            "- [ ] algo" / "- [x] algo"</code></pre>
+  <div class="adr">
+    <span class="tag">Rediseño a tarjetas · la lista de comprobación se deriva, no se guarda</span>
+    <p><code>dueDate</code> y <code>bookmarked</code> son campos del modelo porque no se pueden escribir: no hay forma de teclear «esto vence el viernes» dentro del cuerpo sin inventar una sintaxis. La <strong>lista de comprobación, en cambio, sí es Markdown</strong> —<code>- [ ] algo</code>— y por eso se deriva del cuerpo y se cachea, igual que los enlaces. Guardarla aparte daría dos fuentes de verdad que pueden discrepar: quien edite el texto a mano vería un contador que no cuadra con lo que está leyendo.</p>
+  </div>
+  <pre><code>
 
 data class TaskLink(val url: String, val display: String, val range: IntRange)
 data class AttachmentRef(val id: AttachmentId, val range: IntRange)</code></pre>
@@ -352,7 +364,7 @@ data class AttachmentRef(val id: AttachmentId, val range: IntRange)</code></pre>
     val id: StateId,
     val name: String,
     val order: Int,
-    val grouping: Grouping,          // NONE | BY_DATE
+    val grouping: Grouping,          // NONE | BY_DATE | BY_PRIORITY | BY_TAG
     val anchor: DateAnchor,          // CREATED | UPDATED | COMPLETED
     val terminal: Boolean,           // al entrar se fija completedAt
     val isDefault: Boolean           // destino por defecto de Quick Add
@@ -435,7 +447,7 @@ data class RepositoryRef(
 │   ├── toolwindow/  TasklaneToolWindowFactory, TasklanePanel, StateTabPanel,
 │   │                TaskTreeStructure, TaskNode, GroupNode, TaskRowRenderer,
 │   │                RepoSelectorAction, TasklaneSearchField
-│   ├── quickadd/    QuickAddPopup, QuickAddModel
+│   ├── quickadd/    QuickAddAction (abre el TaskEditDialog de editor/)
 │   ├── editor/      TaskEditDialog, MarkdownField, ImageInlays,
 │   │                ImageInlayRenderer, ImagePasteHandler
 │   └── common/      TasklaneIcons, PriorityStripe, LinkChip, TasklaneDataKeys
@@ -495,12 +507,17 @@ data class RepositoryRef(
   <h4>Formato</h4>
   <pre><code>&lt;tasks version="1" repoKey="sinonte-backend-api-a3f91d0e"&gt;
   &lt;task id="7c2f…" state="s-todo" priority="p-high" order="3000"
-        createdAt="1757635200000" updatedAt="1757638800000"&gt;
+        createdAt="1757635200000" updatedAt="1757638800000"
+        tags="api,urgente" dueDate="1758067199999" bookmarked="true"&gt;
     &lt;body&gt;Revisar https://youtrack.jetbrains.com/issue/ABC-123
 ![](tasklane:9f86d08188…e7cf)&lt;/body&gt;
   &lt;/task&gt;
 &lt;/tasks&gt;</code></pre>
   <p>XML y no JSON por una razón concreta: <strong>empaquetar kotlinx-serialization en un plugin provoca conflictos de classloader</strong> con la copia que trae la plataforma, un fallo que aparece en runtime y sólo en algunas versiones del IDE. JDOM ya está en la plataforma y no añade nada. Además <code>.idea</code> es un mundo XML: el formato queda consistente con sus vecinos.</p>
+  <div class="adr">
+    <span class="tag">Rediseño a tarjetas · <code>version</code> sigue siendo 1</span>
+    <p><code>tags</code>, <code>dueDate</code> y <code>bookmarked</code> son <strong>atributos nuevos, no un formato nuevo</strong>. Los tres se omiten cuando están vacíos, y el códec conserva los desconocidos en <code>extra</code> y los vuelve a escribir: una versión del plugin anterior a ellos abre el fichero, no entiende los tres atributos, los guarda tal cual y los devuelve intactos al volver a escribir. Subir <code>version</code> habría hecho justo lo contrario de lo que hay que hacer — abrir el repositorio en solo lectura por tres atributos que no rompen nada.</p>
+  </div>
   <p>El mapeo lo hace <code>TasksCodec</code> a mano, no <code>XmlSerializer</code>. La razón es concreta: xmlb <strong>descarta los atributos que no conoce</strong>, y eso vacía de contenido la promesa de <code>extra</code>. Mapeando a mano, un atributo escrito por una versión futura se lee, se guarda y se vuelve a escribir intacto.</p>
 
   <h4>Escritura segura</h4>
@@ -572,53 +589,58 @@ data class RepositoryRef(
   </ul>
 
   <h3>La fila</h3>
-  <p>Renderer propio de dos líneas — <code>tree.rowHeight = 0</code> habilita altura variable por fila. De izquierda a derecha: franja de prioridad de 3 px pintada con <code>JBColor(colorLight, colorDark)</code>, checkbox, texto (primera línea del cuerpo, con elipsis), y fecha alineada a la derecha vía <code>appendTextPadding</code> de <code>SimpleColoredComponent</code>. Segunda línea, sólo si hay algo que mostrar: tags, indicador de enlaces y de imágenes.</p>
+  <p>Renderer propio de altura variable — <code>tree.rowHeight = 0</code>. La fila es una <strong>tarjeta</strong>: fondo redondeado con la franja de prioridad de 3 px dentro, recortada por la misma forma, checkbox a la izquierda y a la derecha el marcador y el menú <code>⋮</code>. En medio, una pila de líneas que crece con lo que la tarea tenga que decir: título envuelto en hasta <strong>tres</strong> líneas, una de descripción si hay cuerpo debajo, y la de distintivos —prioridad, vencimiento, lista de comprobación, etiquetas, enlaces e imágenes, fecha—. Cada línea que sobra se oculta, así que una tarea de una frase sigue midiendo una línea.</p>
+  <div class="adr">
+    <span class="tag">Rediseño a tarjetas · <code>TitleWrap</code>, envolver a mano</span>
+    <p>El título se trocea en líneas con una clase propia y no metiéndolo en un <code>JTextArea</code>, que es lo que haría cualquiera. El motivo es que envolver a mano <strong>conserva tres cosas que un área de texto pierde</strong>: los fragmentos etiquetados con su <code>TaskLink</code> —que es como se resuelve el clic sin volver a medir texto—, el resaltado de la búsqueda de la plataforma (<code>SpeedSearchUtil</code>), y el tachado de las tareas cerradas.</p>
+    <p><code>TitleWrap</code> recibe la función de medida como parámetro en vez de llamar a <code>FontMetrics</code>: así el troceado —que es aritmética de posiciones, donde se falla— se prueba sin fuentes ni IDE. Quien mide de verdad repite la derivación de fuente de <code>SimpleColoredComponent</code>, porque medir con la fuente base cortaría las líneas donde no toca en cuanto la fila mezcla tamaños.</p>
+  </div>
+  <div class="adr">
+    <span class="tag">Rediseño a tarjetas · <code>GroupKey</code> como identidad de grupo</span>
+    <p>Con cuatro agrupaciones —<code>NONE</code>, <code>BY_DATE</code>, <code>BY_PRIORITY</code>, <code>BY_TAG</code>— un grupo ya no es «un <code>DateGroup</code>». <code>GroupKey</code> es la suma sellada de las tres identidades posibles (<code>OfDate</code>, <code>OfPriority</code>, <code>OfTag</code>), y es lo que se recuerda cuando el usuario pliega una sección.</p>
+    <p>Por clave y <strong>no por índice de fila</strong>: repintar reconstruye el árbol entero, así que por índice el plegado saltaría de grupo en cuanto entrara una tarea. Y la clave guarda el <em>ID</em> de la prioridad, no su nombre: renombrarla en <em>Settings</em> cambia la cabecera sin deshacer lo plegado.</p>
+    <p>Agrupando por etiqueta, una tarea con dos etiquetas sale bajo las dos. Es deliberado —agrupar por etiqueta sirve para ver junto todo lo de una— y tiene una consecuencia que hay que conocer: el contador de la pestaña cuenta <em>tareas</em>, no filas, así que puede decir menos de las que se ven.</p>
+  </div>
   <div class="adr">
     <span class="tag">Fase 5 · la segunda línea reorganiza el panel de la plataforma, no lo sustituye</span>
     <p>El renderer de <code>CheckboxTree</code> es un <code>JPanel</code> con <code>BorderLayout</code>: checkbox al oeste, texto al centro. En vez de escribir un <code>TreeCellRenderer</code> desde cero —lo que obligaría a reimplementar el checkbox, los colores de selección y el foco—, se saca el texto del centro y se mete en su lugar una pila de dos <code>ColoredTreeCellRenderer</code>. La segunda línea se prepara con el mismo <code>getTreeCellRendererComponent</code> que la primera, así que hereda gratis ese tratamiento en cualquier tema.</p>
     <p>El precio es depender de una estructura interna de la plataforma. Lo cubre <code>TaskTreeRendererTest</code>, que mide la fila con un <code>JTree</code> normal —sin <code>Application</code>— y comprueba que hay zona clicable para el enlace del título y para el indicador, y que el checkbox no es ninguna de las dos. Si una versión futura del IDE cambia ese panel, falla un test en vez de fallar un clic.</p>
   </div>
-  <p>La prioridad es una <em>propiedad visual de la fila</em>, no un eje de navegación: no hay secciones «HIGH / MEDIUM / LOW». Por debajo de unos 220 px de ancho el renderer retira la columna de fecha y luego la segunda línea, de modo que el título siempre se lee.</p>
+  <p>Cada fila ocupa <strong>todo el ancho visible</strong>, y eso <em>no</em> hay que forzarlo: <code>DefaultTreeUI</code> ya estira el renderer hasta el borde, descontando el margen que reserva para pintar la selección. Forzarlo —como se hizo al principio— hacía justo el daño contrario: el rectángulo de la selección y el del ratón se calculan sobre <code>bounds.width</code>, así que con una fila más ancha que el hueco asomaban por la derecha de la tarjeta. El resalte del ratón se apaga (<code>RenderingUtil.setHoverPaintingDisabled</code>) y se pinta dentro de la tarjeta; la selección se deja a la plataforma. El título se envuelve contra el ancho visible —descontando sangría, franja, casilla y los controles de la derecha—, medido contra el <em>viewport</em> y no contra el árbol, que crece hasta la fila más ancha.</p>
 
   <h3>Barra de herramientas</h3>
-  <p><code>ActionToolbar</code> construida desde un <code>ActionGroup</code> declarado en <code>plugin.xml</code>, con <code>targetComponent</code> apuntando al árbol para que las acciones reciban el contexto correcto. Contiene: nueva tarea, selector de repositorio (<code>ComboBoxAction</code> con speed search), toggle de agrupación por fecha, filtros de prioridad y estado, exportar, expandir/colapsar y acceso a los ajustes. El campo de búsqueda (<code>SearchTextField</code>, con historial persistido) va sobre el árbol.</p>
+  <p><code>ActionToolbar</code> construida desde un <code>ActionGroup</code> declarado en <code>plugin.xml</code>, con <code>targetComponent</code> apuntando al árbol para que las acciones reciban el contexto correcto. Contiene: <em>New Task</em> como <strong>botón partido</strong> —el cuerpo crea en el estado visible, la flecha deja elegir otro—, editar, borrar, el desplegable de agrupación con las cuatro, el alcance de la búsqueda, exportar y los ajustes. Debajo van la fila de estados y el campo de búsqueda (<code>SearchTextField</code>, con historial persistido).</p>
+  <p>En la <strong>cabecera de la ventana</strong> —<code>setTitleActions</code>— viven los dos controles que no son de un estado sino de la ventana entera: el selector de repositorio y el filtro de vista (<em>todas · abiertas · vencidas · marcadas</em>). El filtro no es una consulta: no se escribe, no tiene sintaxis y borrar la búsqueda no se lo lleva por delante. Se guarda en <code>workspace.xml</code>, como el repositorio activo y el estado abierto.</p>
   <p>El menú contextual del árbol es un <code>ActionGroup</code> registrado, así que todas sus entradas aparecen en <em>Settings → Keymap</em> y en <em>Search Everywhere</em> sin trabajo extra.</p>
 </section>
 
 <!-- ============ 6 ============ -->
 <section id="d6">
   <div class="sec-head"><span class="sec-num">06</span><h2>Quick Add</h2></div>
-  <pre><code>┌────────────────────────────────────────────────┐
-│ !!! Resolver fallo de autenticación en Android  │  ← foco inmediato
-├────────────────────────────────────────────────┤
-│ ⬤ High ▾    ToDo ▾    api ▾          ⏎ Create   │
-└────────────────────────────────────────────────┘</code></pre>
-  <p>Un <code>JBPopup</code> construido con <code>createComponentPopupBuilder(panel, textField)</code>, centrado en la ventana, <code>setRequestFocus(true)</code> y <code>setCancelOnWindowDeactivation(false)</code> para que cambiar de ventana no pierda lo escrito. Tres <code>DropDownLink</code> para prioridad, estado y proyecto. Nada de <code>DialogWrapper</code>: un diálogo modal con botones OK/Cancel es demasiada fricción para algo que debe durar tres segundos.</p>
+  <p>Crear una tarea desde cualquier sitio del IDE, sin abrir la tool window. <code>⌘⌥R</code> abre <strong>el mismo <code>TaskEditDialog</code></strong> que <em>New Task</em>, con el foco ya en el cuerpo, y la crea en el repositorio activo. Quick Add no es una pantalla: es un atajo a la que ya hay.</p>
 
-  <h3>Teclado</h3>
-  <div class="tw"><table>
-    <thead><tr><th>Tecla</th><th>Acción</th></tr></thead>
-    <tbody>
-      <tr><td><code>Enter</code></td><td>Crear y cerrar</td></tr>
-      <tr><td><code>⌘Enter</code></td><td>Crear y dejar el popup abierto, para encadenar varias</td></tr>
-      <tr><td><code>⇧Enter</code></td><td>Salto de línea</td></tr>
-      <tr><td><code>Tab</code> / <code>⇧Tab</code></td><td>Recorrer prioridad → estado → proyecto</td></tr>
-      <tr><td><code>⌥1…9</code></td><td>Seleccionar prioridad por posición</td></tr>
-      <tr><td><code>Esc</code></td><td>Cancelar</td></tr>
-    </tbody>
-  </table></div>
-
-  <div class="adr">
-    <span class="tag">Precisado durante la Fase 4 · estas teclas no pasan por el keymap</span>
-    <p>La decisión de §2 —acciones en <code>plugin.xml</code> en vez de bindings Swing— es sobre <em>comandos</em>, los que alguien querría reasignar. Las teclas de esta tabla no lo son: <code>Enter</code> para aceptar y <code>⇧Enter</code> para saltar de línea son estructura del control, lo mismo que hace <code>DialogWrapper</code>. Van por <code>InputMap</code>/<code>ActionMap</code> del área de texto, que además es lo único que garantiza ganarle al <code>insert-break</code> que el LAF ya tiene puesto ahí.</p>
+  <div class="adr warn">
+    <span class="tag">0.6.8 · el popup propio desaparece</span>
+    <p>Hasta aquí Quick Add era un <code>JBPopup</code> compacto con tres <code>DropDownLink</code> —prioridad, estado, proyecto— y sin <code>DialogWrapper</code>, por fricción: un modal con OK/Cancel era demasiado para algo que debe durar tres segundos. El argumento seguía siendo bueno; el problema era el otro lado del reparto.</p>
+    <p>Cada campo nuevo del rediseño entró <strong>sólo en el diálogo</strong>: vencimiento, etiquetas, barra de formato, zona de arrastre, vista previa de las imágenes. El popup se quedó con la mitad del modelo, así que una tarea apuntada de prisa nacía distinta de una escrita con calma y había que abrirla otra vez para terminarla. Y eran dos sitios donde arreglar cada cosa: la captura pegada, sin ir más lejos, hubo que resolverla dos veces y de dos maneras.</p>
+    <p>Lo que se pierde es real y se acepta: <code>⌘Enter</code> para encadenar varias sin cerrar, <code>⌥1…9</code> para elegir prioridad por posición y el selector de repositorio. Lo que <strong>no</strong> se pierde son los triggers, que era lo único que el popup sabía hacer y el diálogo no: se mudaron con él.</p>
   </div>
 
   <h3>Triggers de prioridad en vivo</h3>
-  <p>Un <code>DocumentListener</code> pasa el texto por <code>TriggerParser</code> en cada pulsación. Si el prefijo coincide, el chip de prioridad cambia de color al instante y el trigger <strong>se consume</strong>: lo que se guarda es <code>"Resolver fallo de autenticación en Android"</code>, no <code>"!!! Resolver…"</code>. Si el usuario borra el trigger, la prioridad vuelve a la anterior.</p>
+  <p>Un <code>DocumentListener</code> sobre el documento del editor pasa el texto por <code>TriggerParser</code> en cada pulsación. Si el prefijo coincide, el desplegable de prioridad cambia al instante y el trigger <strong>se consume</strong>: lo que se guarda es <code>"Resolver fallo de autenticación en Android"</code>, no <code>"!!! Resolver…"</code>. Se actúa sólo cuando el trigger <em>cambia</em>, que es lo que permite las otras dos reglas: elegir la prioridad a mano gana sobre el prefijo hasta que se escriba otro, y borrarlo devuelve la que hubiera antes.</p>
   <p>La resolución es por <strong>coincidencia más larga primero</strong> sobre el primer token, y exige un espacio detrás. Así <code>!!!</code> gana a <code>!</code>, y un texto como <code>!importante revisar</code> no dispara nada.</p>
 
-  <h3>Valores por defecto sensatos</h3>
-  <p>El proyecto propuesto no es «el último usado» sino <strong>el repositorio del fichero abierto en el editor</strong> (<code>FileEditorManager.selectedTextEditor</code> → repositorio que contiene ese fichero), con el último seleccionado en la tool window como respaldo. Es el detalle que hace que crear una tarea desde el fichero en el que estás trabajando no requiera tocar el selector.</p>
+  <div class="adr">
+    <span class="tag">Los triggers sólo actúan al crear</span>
+    <p>En una tarea que ya existe el desplegable está a un clic, así que el prefijo no aporta; y sí quita. Un cuerpo que empiece por <code>!!! </code> puede ser texto legítimo —escrito antes de configurar ese prefijo, o importado—, y con los triggers vivos al editar bastaría abrir la tarea y aceptar para cambiarle la prioridad y recortarle el cuerpo sin que nadie lo pidiera. El diálogo instala el listener sólo cuando nace vacío, y <code>strip</code> se aplica bajo la misma condición.</p>
+  </div>
+
+  <h3>Repositorio destino</h3>
+  <p>El <strong>activo</strong>, el mismo que usa <em>New Task</em>, y capturado antes de abrir el diálogo: el snapshot se reasigna mientras está abierto, y releerlo al confirmar podría escribir la captura pegada en un repositorio y la tarea en otro.</p>
+  <div class="adr alt">
+    <span class="tag">Descartado · proponer el repositorio del fichero abierto</span>
+    <p>Es lo que hacía el popup —<code>FileEditorManager.selectedEditor</code> → la raíz más larga que contiene ese fichero, para que un submódulo gane a su padre—, y funcionaba porque llevaba al lado un selector con el que corregirlo. El diálogo no lo lleva, y no puede: <code>MarkdownField</code> fija el repositorio al construirse porque es donde escribe los blobs, así que cambiarlo a media edición dejaría los adjuntos ya pegados apuntando al sitio equivocado. Sin selector, adivinar es mandar tareas a un repositorio que quizá ni se está mirando; el activo, al menos, está escrito en la cabecera de la ventana.</p>
+  </div>
 </section>
 
 <!-- ============ 7 ============ -->
@@ -859,7 +881,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <li>Miles de tareas en un estado: modelo construido fuera del EDT; grupos anteriores a «Yesterday» colapsados por defecto.</li>
     <li>Cambio de tema en caliente: colores vía <code>JBColor</code>, repintado por <code>LafManagerListener</code>.</li>
     <li>Escalado al 200 %: todas las medidas del renderer y de los inlays pasan por <code>JBUI.scale</code>.</li>
-    <li>Tarea vacía: Quick Add deshabilita <code>Enter</code>.</li>
+    <li>Tarea vacía: el diálogo deshabilita <em>Create</em> —medido sobre el cuerpo sin el trigger, o <code>!!!</code> a secas pasaría por tarea—.</li>
     <li>Texto pegado de megabytes: se acepta, pero la fila usa sólo la primera línea y el renderer corta a un máximo de caracteres.</li>
   </ul>
 

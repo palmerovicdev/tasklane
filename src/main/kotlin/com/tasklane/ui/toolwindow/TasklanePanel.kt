@@ -21,9 +21,9 @@ import com.intellij.ui.CheckboxTree
 import com.intellij.ui.CheckboxTreeBase
 import com.intellij.ui.CheckedTreeNode
 import com.intellij.ui.DocumentAdapter
-import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.render.RenderingUtil
 import com.intellij.ui.SearchTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
@@ -63,6 +63,7 @@ import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.time.Instant
 import java.time.LocalDate
@@ -158,6 +159,10 @@ internal class TasklanePanel(
         // Altura variable por fila: desde la Fase 5 el renderer tiene una segunda
         // línea que sólo aparece cuando hay enlaces o etiquetas que enseñar.
         tree.rowHeight = 0
+        // El resalte del ratón lo pinta la tarjeta, no el árbol: el del árbol va
+        // detrás del renderer y más ancho que él, así que asomaba por los bordes
+        // redondeados. Ver [TaskTreeRenderer.paintComponent].
+        RenderingUtil.setHoverPaintingDisabled(tree, true)
         // Sin speed search del árbol: desde la Fase 4 el campo de búsqueda hace ese
         // trabajo, y mejor —entiende operadores y busca en el cuerpo, no sólo en la
         // fila—. Con los dos vivos, teclear sobre el árbol abriría un buscador
@@ -307,18 +312,36 @@ internal class TasklanePanel(
         localShortcut(ACTION_DELETE, CommonShortcuts.getDelete(), tree) { deleteSelected() }
         localShortcut(ACTION_FOCUS_SEARCH, searchShortcut(), this) { focusSearch() }
 
-        object : DoubleClickListener() {
-            override fun onDoubleClick(event: MouseEvent): Boolean {
+        installDoubleClick()
+    }
+
+    /**
+     * Doble clic == abrir la tarea.
+     *
+     * Se atiende en `mouseClicked` y **no** con un `DoubleClickListener`, que es lo
+     * que parecería natural. `CheckboxTree` instala su propio `ClickListener` en el
+     * constructor —antes que cualquier oyente nuestro— y, en cuanto el clic es doble
+     * y no cae en la casilla, **consume el evento de soltar** para poder disparar su
+     * gancho `onDoubleClick`. `DoubleClickListener` vive precisamente de ese evento,
+     * así que no llegaba a enterarse y el gesto no hacía nada. `MOUSE_CLICKED` es
+     * otro evento distinto y sí llega.
+     */
+    private fun installDoubleClick() {
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(event: MouseEvent) {
+                if (event.clickCount != 2 || event.button != MouseEvent.BUTTON1 || event.isPopupTrigger) return
                 // Sobre un enlace manda el enlace: el primer clic ya lo abrió, y
                 // abrir el editor encima sería una segunda cosa que nadie pidió. Lo
-                // mismo con el marcador y el menú: el primer clic ya hizo lo suyo.
-                if (renderer.linksAt(tree, event.point).isNotEmpty()) return false
-                if (renderer.targetAt(tree, event.point) != null) return false
-                if (selectedTasks().size != 1) return false
+                // mismo con el marcador, el menú y la casilla: el primer clic ya hizo
+                // lo suyo.
+                if (renderer.linksAt(tree, event.point).isNotEmpty()) return
+                if (renderer.targetAt(tree, event.point) != null) return
+                if (renderer.isOnCheckbox(tree, event.point)) return
+                if (selectedTasks().size != 1) return
+                event.consume()
                 editSelected()
-                return true
             }
-        }.installOn(tree)
+        })
     }
 
     /**

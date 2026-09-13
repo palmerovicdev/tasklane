@@ -127,6 +127,11 @@
                 class="com.tasklane.ui.actions.ExportAndRemoveRepoAction"
                 icon="AllIcons.Actions.GC"/>
 
+        <!-- Las cuatro agrupaciones. Tasklane.GroupByDate sigue declarada arriba
+             porque es asignable en el keymap, aunque ya no este en la barra. -->
+        <group id="Tasklane.Grouping" popup="true" class="com.tasklane.ui.actions.GroupingActionGroup"
+               icon="AllIcons.Actions.GroupBy"/>
+
         <group id="Tasklane.Export" popup="true" icon="AllIcons.ToolbarDecorator.Export">
             <reference ref="Tasklane.ExportState"/>
             <reference ref="Tasklane.ExportGroup"/>
@@ -142,7 +147,7 @@
             <reference ref="Tasklane.EditTask"/>
             <reference ref="Tasklane.DeleteTask"/>
             <separator/>
-            <reference ref="Tasklane.GroupByDate"/>
+            <reference ref="Tasklane.Grouping"/>
             <reference ref="Tasklane.SearchAllRepos"/>
             <separator/>
             <reference ref="Tasklane.Export"/>

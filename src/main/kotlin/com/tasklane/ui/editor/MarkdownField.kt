@@ -11,12 +11,16 @@ import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.fileTypes.PlainTextFileType
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileTypes.UnknownFileType
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
 import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.RepoKey
+import java.awt.Image
+import java.io.File
 
 /**
  * El cuerpo de una tarea, editado en un editor de verdad del IDE.
@@ -62,6 +66,14 @@ internal class MarkdownField(
         setOneLineMode(false)
         preferredSize = JBUI.size(WIDTH, HEIGHT)
     }
+
+    /**
+     * Quien adjunta imágenes. Es nulo hasta que la plataforma crea el editor —lo hace
+     * al entrar el campo en la jerarquía de componentes—, así que los tres gestos que
+     * adjuntan comprueban antes de disparar en vez de guardar una referencia temprana
+     * que sería siempre la de un editor que ya no existe.
+     */
+    private var inserter: ImageInserter? = null
 
     var text: String
         get() = component.text
@@ -123,6 +135,35 @@ internal class MarkdownField(
         component.requestFocusInWindow()
     }
 
+    /** Adjunta una imagen ya decodificada —la del portapapeles— en el cursor. */
+    fun attachImage(image: Image) {
+        inserter?.attach(image)
+    }
+
+    /** Adjunta ficheros soltados en la zona de arrastre. */
+    fun attachFiles(files: List<File>) {
+        val inserter = inserter ?: return
+        files.forEach(inserter::attachFile)
+    }
+
+    /**
+     * Abre el selector de ficheros del IDE y adjunta lo que se elija.
+     *
+     * Se usa el del IDE y no un `JFileChooser` porque respeta el tema, recuerda la
+     * última carpeta y en macOS sale nativo. El filtro por extensión es el mismo que
+     * acepta el pegado: una sola lista de formatos.
+     */
+    fun chooseImage() {
+        if (inserter == null) return
+        // `withFileFilter` y no `withExtensionFilter`: el segundo es reciente y este
+        // plugin se compila contra 2025.2, que es el suelo declarado en sinceBuild.
+        val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
+            .withTitle(TasklaneBundle.message("dialog.task.attach.choose"))
+            .withFileFilter { file -> file.extension?.lowercase() in ImageInserter.IMAGE_EXTENSIONS }
+        val chosen = FileChooser.chooseFile(descriptor, project, null) ?: return
+        attachFiles(listOf(File(chosen.path)))
+    }
+
     private fun configure(editor: EditorEx) {
         editor.settings.apply {
             isUseSoftWraps = true
@@ -140,7 +181,9 @@ internal class MarkdownField(
         // Ambos cuelgan del disposable del diálogo, así que se van con él. No hace
         // falta guardarlos: el editor es quien los tiene enganchados.
         val inlays = ImageInlays(project, repo, editor, parent)
-        val paste = ImagePasteHandler(project, repo, editor) { inlays.invalidate(it) }
+        val inserter = ImageInserter(project, repo, editor) { inlays.invalidate(it) }
+        this.inserter = inserter
+        val paste = ImagePasteHandler(editor, inserter)
         // El atajo sale del keymap y no de una constante: quien haya movido «pegar»
         // espera que siga siendo el suyo también aquí.
         ActionManager.getInstance().getAction(IdeActions.ACTION_PASTE)?.shortcutSet?.let {

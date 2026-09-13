@@ -90,4 +90,16 @@ class DueDatesTest {
         val dentroDeUnMes = today.plusMonths(1).atTime(9, 30).atZone(zone).toInstant()
         assertNull(DueDates.presetOf(dentroDeUnMes, today, zone, monday))
     }
+
+    @Test
+    fun `una fecha concreta vence al acabar el dia, como los preajustes`() {
+        val date = LocalDate.of(2026, 9, 20)
+
+        val exact = DueDates.atEndOfDay(date, zone)
+
+        // El mismo instante que daría el preajuste si ese día fuese hoy: si no, una
+        // tarea puesta a mano para hoy nacería vencida.
+        assertEquals(DueDates.resolve(DuePreset.TODAY, date, zone, DayOfWeek.MONDAY), exact)
+        assertEquals(date, exact.atZone(zone).toLocalDate())
+    }
 }

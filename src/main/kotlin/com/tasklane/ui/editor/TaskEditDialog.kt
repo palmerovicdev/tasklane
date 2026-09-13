@@ -1,11 +1,12 @@
 package com.tasklane.ui.editor
 
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
@@ -17,6 +18,7 @@ import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.text.TriggerParser
 import java.awt.BorderLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
@@ -32,14 +34,16 @@ import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.SwingUtilities
 
 /**
  * Alta y edición de una tarea.
  *
- * Sigue siendo un [DialogWrapper] después de la Fase 4, y a propósito: el popup
- * compacto es para **apuntar** algo en tres segundos —ahí la fricción de un OK/Cancel
- * se nota—, mientras que editar es una tarea deliberada sobre algo que ya existe, con
- * cuerpo largo y sin prisa. Ahí un diálogo con confirmación explícita es lo correcto.
+ * Es el **único** sitio donde se escribe una tarea: lo abren *New Task*, `Enter` o el
+ * doble clic sobre una fila, y desde la `0.6.8` también `⌘⌥R`. Hasta entonces Quick
+ * Add tenía un popup propio, más ligero pero con la mitad de los campos —sin
+ * vencimiento, sin etiquetas, sin barra de formato—, y una tarea apuntada de prisa
+ * nacía distinta de una escrita con calma. Un solo diálogo y un solo sitio que tocar.
  *
  * Desde la Fase 6 el cuerpo se edita en un [MarkdownField] —un editor de verdad del
  * IDE— en vez de en un área de texto: es lo que permite pegar una captura y verla
@@ -51,9 +55,13 @@ import javax.swing.JPanel
  * dentro del editor; este diálogo es su única entrada. La excepción deliberada es la
  * lista de comprobación, que sí es Markdown del cuerpo y por eso vive en la barra de
  * formato y no en un control propio.
+ *
+ * La otra excepción son los **triggers de prioridad** —`!!! Resolver el fallo`—, que
+ * antes sólo existían en el popup de Quick Add y desde la `0.6.8` viven aquí, que es
+ * el único sitio donde se crea una tarea. Ver [installTriggers].
  */
 internal class TaskEditDialog(
-    project: Project,
+    private val project: Project,
     private val config: TasklaneConfig,
     repo: RepoKey,
     initialBody: String = "",
@@ -69,10 +77,14 @@ internal class TaskEditDialog(
         component.setPlaceholder(TasklaneBundle.message("dialog.task.placeholder"))
     }
 
-    private val hint = JBLabel(TasklaneBundle.message("dialog.task.paste.hint")).apply {
-        font = UIUtil.getFont(UIUtil.FontSize.SMALL, font)
-        foreground = UIUtil.getContextHelpForeground()
-    }
+    /**
+     * Sustituye a la pista de «pega una captura»: dice lo mismo y además se puede
+     * usar. Soltar y elegir acaban los dos en [MarkdownField], igual que el pegado.
+     */
+    private val dropZone = AttachmentDropZone(
+        onFiles = bodyField::attachFiles,
+        onClick = bodyField::chooseImage,
+    )
 
     private val stateCombo = comboOf(config.states, initialState?.let(config::state) ?: config.defaultState) { it.name }
     private val priorityCombo =
@@ -91,18 +103,8 @@ internal class TaskEditDialog(
         dueOptions.firstOrNull { it.instant == initialDueDate } ?: dueOptions.first(),
     ) { it.label }
 
-    /**
-     * Las etiquetas se escriben separadas por comas en un campo de texto normal.
-     *
-     * No es un control de fichas como el del boceto porque la plataforma no trae
-     * ninguno, y escribir uno desde cero —con su borrado por retroceso, su navegación
-     * con flechas y su accesibilidad— es un proyecto en sí mismo. Un campo con
-     * comas es lo que hace que la función **exista** hoy; el control bonito es una
-     * mejora encima, no un requisito para poder etiquetar.
-     */
-    private val tagsField = JBTextField(initialTags.joinToString(", ")).apply {
-        emptyText.text = TasklaneBundle.message("dialog.task.tags.hint")
-    }
+    /** Las etiquetas, como fichas. Ver [TagChipsField]. */
+    private val tagsField = TagChipsField(initialTags)
 
     init {
         title = TasklaneBundle.message(if (isNew) "dialog.task.new.title" else "dialog.task.edit.title")
@@ -115,9 +117,9 @@ internal class TaskEditDialog(
             JPanel(BorderLayout(0, JBUI.scale(2))).apply {
                 add(bodyField.component, BorderLayout.CENTER)
                 add(
-                    JPanel(BorderLayout()).apply {
-                        add(MarkdownToolbar.create(bodyField, bodyField.component), BorderLayout.WEST)
-                        add(hint, BorderLayout.EAST)
+                    JPanel(BorderLayout(0, JBUI.scale(2))).apply {
+                        add(MarkdownToolbar.create(bodyField, bodyField.component), BorderLayout.NORTH)
+                        add(dropZone, BorderLayout.SOUTH)
                     },
                     BorderLayout.SOUTH,
                 )
@@ -156,34 +158,93 @@ internal class TaskEditDialog(
 
     override fun getPreferredFocusedComponent(): JComponent = bodyField.component
 
-    /** Una tarea sin texto no es una tarea: se bloquea el OK en vez de crear ruido. */
+    /**
+     * Una tarea sin texto no es una tarea: se bloquea el OK en vez de crear ruido. Se
+     * mide sobre el cuerpo **sin el trigger**, o `!!!` a secas pasaría por tarea.
+     */
     override fun doValidate(): ValidationInfo? =
-        if (bodyField.text.isBlank()) {
+        if (stripTrigger(bodyField.text).isBlank()) {
             ValidationInfo(TasklaneBundle.message("dialog.task.empty"), bodyField.component)
         } else {
             null
         }
 
-    val body: String get() = bodyField.text.trim()
+    val body: String get() = stripTrigger(bodyField.text).trim()
     val stateId: StateId get() = (stateCombo.selectedItem as TaskState).id
     val priorityId: PriorityId get() = (priorityCombo.selectedItem as TaskPriority).id
     val dueDate: Instant? get() = (dueCombo.selectedItem as DueOption).instant
 
-    /**
-     * Se acepta la coma y también la almohadilla de delante: quien copia `#api` de una
-     * tarea no tiene por qué saber que aquí la marca sobra.
-     */
-    val tags: List<String>
-        get() = tagsField.text
-            .split(',', ' ', '\n')
-            .map { it.trim().removePrefix("#") }
-            .filter { it.isNotEmpty() }
-            .distinct()
+    val tags: List<String> get() = tagsField.tags
 
     // ------------------------------------------------------------- vencimiento
 
-    /** Una entrada del desplegable de vencimiento. [instant] nulo == sin fecha. */
-    private class DueOption(val label: String, val instant: Instant?)
+    /**
+     * Una entrada del desplegable de vencimiento. [instant] nulo == sin fecha, salvo
+     * en la de [pick], que no es una fecha sino la puerta al calendario.
+     */
+    private class DueOption(
+        val label: String,
+        val instant: Instant?,
+        val pick: Boolean = false,
+        /** La fecha concreta, la única entrada que se sustituye al elegir otra. */
+        val exact: Boolean = false,
+    )
+
+    /** La última opción que era de verdad una fecha, para volver si se cancela el calendario. */
+    private var lastDue: DueOption? = null
+
+    /** La entrada de fecha concreta que haya ahora mismo en la lista, si hay alguna. */
+    private var exactOption: DueOption? = null
+
+    /**
+     * Segundo bloque de inicialización, y tiene que ir **aquí**: los dos campos de
+     * arriba se declaran después del primero, y en Kotlin un `init` no puede escribir
+     * en una propiedad que todavía no se ha declarado.
+     */
+    init {
+        // La que traía la tarea, si no la produce ningún preajuste: es la que hay que
+        // reemplazar cuando se elija otra en el calendario.
+        exactOption = dueOptions.firstOrNull { it.exact }
+        lastDue = dueCombo.selectedItem as? DueOption
+        dueCombo.addActionListener { onDueChanged() }
+    }
+
+    /**
+     * Abre el calendario cuando se elige «elegir fecha…», y deja el desplegable como
+     * estaba si se cancela. Va en un `invokeLater` para que el desplegable termine de
+     * cerrarse antes: abrir un diálogo con la lista aún desplegada deja el popup
+     * colgado por encima.
+     */
+    private fun onDueChanged() {
+        val option = dueCombo.selectedItem as? DueOption ?: return
+        if (!option.pick) {
+            lastDue = option
+            return
+        }
+        SwingUtilities.invokeLater {
+            val zone = ZoneId.systemDefault()
+            val start = lastDue?.instant?.atZone(zone)?.toLocalDate() ?: LocalDate.now(zone)
+            val picker = DueDateDialog(project, start, WeekFields.of(Locale.getDefault()).firstDayOfWeek)
+            if (picker.showAndGet()) selectExact(picker.date, zone) else dueCombo.selectedItem = lastDue
+        }
+    }
+
+    /**
+     * Mete la fecha elegida en la lista y la selecciona. Sustituye a la exacta
+     * anterior en vez de acumularlas: un desplegable con cinco fechas concretas de
+     * intentos previos no ayuda a nadie.
+     */
+    private fun selectExact(date: LocalDate, zone: ZoneId) {
+        val model = dueCombo.model as DefaultComboBoxModel<DueOption>
+        exactOption?.let(model::removeElement)
+        val instant = DueDates.atEndOfDay(date, zone)
+        val option = DueOption(formatExact(instant, zone), instant, exact = true)
+        exactOption = option
+        // Delante de «elegir fecha…», que siempre cierra la lista.
+        model.insertElementAt(option, model.size - 1)
+        dueCombo.selectedItem = option
+        lastDue = option
+    }
 
     private fun buildDueOptions(current: Instant?): List<DueOption> {
         val zone = ZoneId.systemDefault()
@@ -199,9 +260,10 @@ internal class TaskEditDialog(
         // el vencimiento al lunes más cercano sin avisar.
         val exact = current
             ?.takeIf { due -> presets.none { it.instant == due } }
-            ?.let { DueOption(formatExact(it, zone), it) }
+            ?.let { DueOption(formatExact(it, zone), it, exact = true) }
 
-        return listOfNotNull(none) + presets + listOfNotNull(exact)
+        return listOfNotNull(none) + presets + listOfNotNull(exact) +
+            DueOption(TasklaneBundle.message("dialog.task.due.pick"), null, pick = true)
     }
 
     private fun bundleKey(preset: DuePreset): String = when (preset) {
@@ -215,6 +277,74 @@ internal class TaskEditDialog(
         java.time.format.DateTimeFormatter.ofLocalizedPattern("yMMMd")
             .withZone(zone)
             .format(due)
+
+    // ---------------------------------------------------------------- triggers
+
+    /**
+     * La prioridad elegida **a mano**, que es a la que se vuelve al borrar el
+     * trigger. No basta con leer el desplegable: ahí puede estar la que dictó el
+     * prefijo.
+     */
+    private var chosenPriority: TaskPriority = priorityCombo.selectedItem as TaskPriority
+
+    /**
+     * El último trigger reconocido. Se compara con el nuevo para actuar sólo cuando
+     * **cambia**: así elegir una prioridad a mano no se pierde en la siguiente tecla,
+     * y borrar el trigger devuelve la que había antes.
+     */
+    private var lastTrigger: String? = null
+
+    /** Para no confundir un cambio nuestro del desplegable con una elección del usuario. */
+    private var applyingTrigger = false
+
+    /**
+     * Tercer bloque de inicialización, y por lo mismo que el segundo: [installTriggers]
+     * escribe en las tres propiedades de arriba, y en Kotlin un `init` no puede tocar
+     * una propiedad que todavía no se ha declarado.
+     */
+    init {
+        if (isNew) installTriggers()
+    }
+
+    /**
+     * `!!! Resolver el fallo` crea la tarea *Resolver el fallo* con prioridad *High*:
+     * el prefijo elige la prioridad y no se guarda. Vivía en el popup de Quick Add,
+     * que era donde se escribía una tarea de un tirón; al pasar Quick Add a este
+     * diálogo tenía que venirse con él o el gesto se perdía.
+     *
+     * **Sólo al crear.** El prefijo es una forma de teclear la prioridad mientras se
+     * apunta algo, y sobre una tarea que ya existe el desplegable está a un clic. Es
+     * además lo que evita que abrir una tarea cuyo cuerpo empieza por `!!! ` —texto
+     * legítimo, escrito antes de configurar el prefijo— le cambie la prioridad y le
+     * recorte el cuerpo sólo por haberla abierto y aceptado.
+     */
+    private fun installTriggers() {
+        priorityCombo.addActionListener {
+            if (applyingTrigger) return@addActionListener
+            chosenPriority = priorityCombo.selectedItem as TaskPriority
+        }
+        bodyField.component.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) = onBodyChanged()
+        })
+    }
+
+    private fun onBodyChanged() {
+        val match = TriggerParser.match(bodyField.text, config)
+        if (match?.trigger == lastTrigger) return
+        lastTrigger = match?.trigger
+
+        val priority = match?.let { config.priority(it.priorityId) } ?: chosenPriority
+        applyingTrigger = true
+        try {
+            priorityCombo.selectedItem = priority
+        } finally {
+            applyingTrigger = false
+        }
+    }
+
+    /** El cuerpo sin el trigger: es una forma de escribir la prioridad, no parte de la tarea. */
+    private fun stripTrigger(text: String): String =
+        if (isNew) TriggerParser.strip(text, config) else text
 
     private fun <T : Any> comboOf(items: List<T>, selected: T, label: (T) -> String): JComboBox<T> {
         // Nada de items.toTypedArray(): exigiria un parametro de tipo reificado.

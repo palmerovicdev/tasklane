@@ -1,13 +1,18 @@
 package com.tasklane.ui.actions
 
+import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.DumbAwareToggleAction
 import com.tasklane.domain.model.Grouping
 import com.tasklane.service.SearchService
 import com.tasklane.ui.settings.TasklaneConfigurable
+import com.tasklane.ui.settings.label
 import com.tasklane.ui.toolwindow.TasklanePanel
 
 /**
@@ -114,6 +119,50 @@ internal class GroupByDateAction : DumbAwareToggleAction() {
     override fun setSelected(e: AnActionEvent, selected: Boolean) {
         TasklaneDataKeys.PANEL.getData(e.dataContext)
             ?.setGrouping(if (selected) Grouping.BY_DATE else Grouping.NONE)
+    }
+}
+
+/**
+ * Las cuatro agrupaciones, en un desplegable de la barra.
+ *
+ * Sustituye al interruptor de *agrupar por fecha*, que sólo alcanzaba a una de las
+ * cuatro: las otras dos —prioridad y etiqueta— existían desde el rediseño de las
+ * filas y había que ir a *Settings* para llegar a ellas, que es un viaje largo para
+ * algo que se cambia mirando la lista. [GroupByDateAction] sigue declarada porque es
+ * asignable en el keymap y quien le puso un atajo espera que siga funcionando.
+ */
+internal class GroupingActionGroup : ActionGroup(), DumbAware {
+
+    init {
+        isPopup = true
+    }
+
+    override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabledAndVisible = TasklaneDataKeys.PANEL.getData(e.dataContext) != null
+    }
+
+    override fun getChildren(e: AnActionEvent?): Array<AnAction> =
+        Grouping.entries.map(::SelectGroupingAction).toTypedArray()
+}
+
+/**
+ * Las cuatro son excluyentes, así que se pintan marcadas. La agrupación es una
+ * propiedad **del estado** y no de la vista: esto escribe en la configuración del
+ * proyecto y el cambio vuelve por el snapshot, que es lo que hace que quede recordada
+ * y se comparta con el equipo.
+ */
+private class SelectGroupingAction(private val target: Grouping) :
+    ToggleAction(target.label()), DumbAware {
+
+    override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+    override fun isSelected(e: AnActionEvent): Boolean =
+        TasklaneDataKeys.PANEL.getData(e.dataContext)?.grouping == target
+
+    override fun setSelected(e: AnActionEvent, state: Boolean) {
+        if (state) TasklaneDataKeys.PANEL.getData(e.dataContext)?.setGrouping(target)
     }
 }
 

@@ -24,10 +24,10 @@ import com.tasklane.domain.model.TaskLink
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.ui.common.GroupLabels
+import com.tasklane.ui.common.TasklaneIcons
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Container
-import java.awt.Dimension
 import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -36,7 +36,6 @@ import java.awt.geom.RoundRectangle2D
 import java.time.Instant
 import javax.swing.JPanel
 import javax.swing.JTree
-import javax.swing.JViewport
 import javax.swing.plaf.basic.BasicTreeUI
 
 /**
@@ -47,7 +46,16 @@ import javax.swing.plaf.basic.BasicTreeUI
  * esquinas. Va en [paintComponent] y no en un borde porque el fondo es de la fila
  * entera, y un borde sólo puede pintar en sus insets. Una fila **seleccionada** no
  * pinta tarjeta: ahí el fondo lo pone el árbol —selección ancha, con el color y el
- * redondeo del tema— y taparlo sería pelear con la plataforma.
+ * redondeo del tema— y taparlo sería pelear con la plataforma. El **resalte del
+ * ratón**, en cambio, sí es nuestro: el del árbol se pinta detrás del renderer y más
+ * ancho que él, así que asomaba por fuera de la tarjeta. Se apaga en [TasklanePanel]
+ * con `RenderingUtil.setHoverPaintingDisabled`.
+ *
+ * El ancho de la fila **no se fuerza**: el árbol ya estira el renderer hasta el borde
+ * visible, descontando el margen que él mismo reserva para pintar la selección.
+ * Pedirle más —que es lo que hacía este renderer al principio— hacía que el rectángulo
+ * de la selección y el del ratón se calcularan sobre un ancho mayor que el hueco y
+ * sobresalieran por la derecha.
  *
  * **La tarjeta.** Franja de prioridad y casilla a la izquierda, y a la derecha una
  * pila de líneas que crece con lo que la tarea tenga que decir: el título envuelto
@@ -124,10 +132,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
     /** Lo que hace falta en el momento de pintar, cuando ya no hay nodo a mano. */
     private var pendingSelected = false
+    private var pendingHovered = false
     private var cardColor: Color? = null
     private var stripeColor: Color? = null
-    private var pendingIndent = 0
-    private var currentTree: JTree? = null
 
     /** Líneas 2 y 3 del título. La primera es el `textRenderer` de la plataforma. */
     private val titleOverflow = List(MAX_TITLE_LINES - 1) { index ->
@@ -187,7 +194,6 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         row: Int,
         hasFocus: Boolean,
     ) {
-        currentTree = tree
         pendingSelected = selected
         when (value) {
             is GroupNode -> {
@@ -222,6 +228,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         pendingTask = null
         cardColor = null
         stripeColor = null
+        pendingHovered = false
         bookmarkActive = false
         menuActive = false
         titleOverflow.forEach { it.isVisible = false }
@@ -236,7 +243,6 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // Sin tarjeta ni franja: la prioridad es una propiedad de la tarea, no del
         // grupo. El borde sólo alinea la cabecera con el texto de las tarjetas.
         border = groupBorder
-        pendingIndent = 0
         textRenderer.append(GroupLabels.of(node.key, config), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
         textRenderer.append("  ${node.size}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
     }
@@ -244,7 +250,6 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** El «no hay nada aquí» de un grupo que existe pero está vacío. */
     private fun renderEmpty(node: EmptyGroupNode) {
         border = emptyGroupBorder
-        pendingIndent = 0
         textRenderer.icon = AllIcons.General.InspectionsOK
         textRenderer.append(node.text, SimpleTextAttributes.GRAYED_ATTRIBUTES)
     }
@@ -258,7 +263,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // JBColor resuelve claro/oscuro solo; por eso el modelo guarda ambos valores.
         stripeColor = JBColor(priority.colorLight, priority.colorDark)
         cardColor = cardColorFor(tree)
-        renderActions(task, hovered = row >= 0 && row == hoveredRow)
+        pendingHovered = row >= 0 && row == hoveredRow
+        renderActions(task, hovered = pendingHovered)
 
         val titleStyle = if (state.terminal) {
             SimpleTextAttributes(SimpleTextAttributes.STYLE_STRIKEOUT, JBColor.GRAY)
@@ -375,16 +381,16 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             chip(priority.name, ColorIcon(JBUI.scale(DOT), color), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
 
-        // El vencimiento va con la palabra delante y no con un icono porque la
-        // plataforma no trae ninguno de calendario ni de reloj, y una fecha suelta
-        // junto a la de modificación no se distingue de ella.
+        // El vencimiento lleva calendario propio: `AllIcons` no trae ninguno, y sin él
+        // hacía falta escribir «Due» delante para que una fecha suelta no se
+        // confundiera con la de modificación, que va justo al lado.
         task.dueDate?.let { due ->
             val style = if (task.isOverdue(now())) {
                 SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, JBColor.RED)
             } else {
                 SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES
             }
-            chip(TasklaneBundle.message("toolwindow.row.due", formatDate(due)), null, style)
+            chip(formatDate(due), TasklaneIcons.Calendar, style)
         }
 
         task.checklist.takeIf { it.isNotEmpty() }?.let { items ->
@@ -488,6 +494,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 if (!pendingSelected) {
                     g2.color = card
                     g2.fill(shape)
+                    // El resalte del ratón va **aquí dentro**, con la forma de la
+                    // tarjeta. El del árbol se apaga en el panel: lo pinta detrás del
+                    // renderer y más ancho que él, así que asomaba por los bordes.
+                    if (pendingHovered) {
+                        g2.color = JBUI.CurrentTheme.ActionButton.hoverBackground()
+                        g2.fill(shape)
+                    }
                 }
                 stripeColor?.let { color ->
                     g2.clip(shape)
@@ -499,23 +512,6 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             }
         }
         super.paintComponent(g)
-    }
-
-    /**
-     * Una fila ocupa **todo el ancho visible**, no lo que mida su texto.
-     *
-     * Sin esto cada tarjeta sería tan ancha como su contenido y la lista quedaría
-     * dentada. El árbol da a cada fila el tamaño que pida el renderer, así que se
-     * pide el del viewport menos la sangría del nivel. No provoca barra horizontal:
-     * el título ya se envuelve contra ese mismo ancho.
-     */
-    override fun getPreferredSize(): Dimension {
-        val size = super.getPreferredSize()
-        val tree = currentTree ?: return size
-        val visible = (tree.parent as? JViewport)?.width?.takeIf { it > 0 } ?: tree.width
-        if (visible <= 0) return size
-        size.width = maxOf(size.width, visible - pendingIndent)
-        return size
     }
 
     /**
@@ -554,7 +550,6 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val stripe = insets?.left ?: 0
         val box = if (checkbox.isVisible) checkbox.preferredSize.width else 0
         val right = (insets?.right ?: 0) + if (actions.isVisible) actions.preferredSize.width else 0
-        pendingIndent = indent
         return total - indent - stripe - box - right - JBUI.scale(MARGIN)
     }
 
@@ -660,6 +655,30 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             child === more && menuActive -> RowTarget.MENU
             else -> null
         }
+    }
+
+    /**
+     * Si [point] cae en la banda de la casilla de completar. Se prepara la fila y se
+     * mide igual que en [targetAt]; el componente que se busca aquí es el que pone la
+     * plataforma.
+     *
+     * Es una **banda** —todo lo que quede a la izquierda del borde derecho de la
+     * casilla— y no su rectángulo exacto, porque lo único que se decide con esto es
+     * qué ignora el doble clic. `CheckboxTree` resuelve el clic simple con una cuenta
+     * propia que no coincide píxel a píxel con ésta, y quedarse corto dejaría puntos
+     * donde el primer clic marca la tarea y el segundo abre además el diálogo.
+     */
+    fun isOnCheckbox(tree: JTree, point: Point): Boolean {
+        val row = tree.getRowForLocation(point.x, point.y)
+        if (row < 0) return false
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return false
+        val bounds = tree.getRowBounds(row) ?: return false
+
+        getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
+        setBounds(0, 0, bounds.width, bounds.height)
+        doLayout()
+        val box = threeStateCheckBox
+        return box.isVisible && point.x - bounds.x < box.x + box.width
     }
 
     private fun childAt(parent: Container, x: Int, y: Int): java.awt.Component? =

@@ -3,9 +3,10 @@
 Plugin de IntelliJ Platform para gestionar TODOs por repositorio sin salir del IDE.
 
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
-- **Estado:** v0.6.3 — Fase 6 cerrada (imágenes) y el rediseño a tarjetas por la
-  iteración R4: filas como tarjeta, estados en una fila con su recuento encima del
-  buscador, filtro de vista, y marcador y menú por fila.
+- **Estado:** v0.6.8 — Fase 6 cerrada (imágenes) y **rediseño a tarjetas completo**:
+  filas como tarjeta, estados en una fila con su recuento, filtro de vista, adjuntos
+  por arrastre, etiquetas como fichas y calendario para el vencimiento. Siguiente, la
+  Fase 7: robustez y pulido.
 
 ## Arquitectura en una frase
 
@@ -71,29 +72,69 @@ El filtro **no** es una consulta: no se escribe, no tiene sintaxis y borrar la b
 no se lo lleva por delante. Son dos cosas que se acumulan —«vencidas» *y* lo que diga
 el campo—, y por eso el desplegable está en la cabecera y no dentro del campo.
 
+### La tarjeta
+
+Cada tarea es una tarjeta de altura variable: crece con lo que tenga que decir y una
+tarea de una frase sigue midiendo una línea.
+
+| Parte | Cuándo aparece |
+|---|---|
+| Franja de color a la izquierda | Siempre — es la prioridad, dentro de la tarjeta y recortada por ella |
+| Título | Hasta **tres** líneas; lo que no cabe se recorta. Doble clic abre la tarea entera |
+| Descripción | Si hay cuerpo bajo el título. Una línea, recortada |
+| Distintivos | Prioridad (si no es la de por defecto), vencimiento, `2/5` de la lista de comprobación, etiquetas, enlaces, imágenes y fecha |
+
+Los enlaces del título se abren con **un clic** desde la fila, sin entrar a editar; el
+doble clic sigue siendo «abrir la tarea» en todo lo demás. La lista de comprobación
+sale del propio cuerpo (`- [ ]` / `- [x]`), así que escribirla a mano en el editor la
+cuenta igual: no hay dos sitios donde pueda decir cosas distintas.
+
+### Agrupar
+
+Cuatro formas, elegidas en el desplegable de la barra y recordadas **por estado**
+—*ToDo* puede agrupar por fecha y *Done* por prioridad—:
+
+| | |
+|---|---|
+| Sin agrupar | Lo marcado arriba, luego por prioridad, y dentro de cada una lo más reciente |
+| Por fecha | *Hoy · Ayer · Esta semana · días · meses · Sin fecha*, contra la fecha que el estado ancle (creación, modificación o cierre) |
+| Por prioridad | De la más alta a la más baja, y sólo las que tengan algo |
+| Por etiqueta | Una tarea con dos etiquetas sale bajo las dos; las que no tienen ninguna, en un grupo al final |
+
+Agrupando por fecha, **«hoy» se enseña aunque esté vacío**: que no haya nada hoy es
+justo lo que se viene a mirar. Sólo ése, y sólo si la lista tiene algo más y no hay
+búsqueda ni filtro.
+
+### Vencimiento, etiquetas y marcadores
+
+Los tres se editan en el diálogo de la tarea y son campos del modelo, no texto del
+cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sintaxis.
+
+- **Vencimiento** por preajustes —hoy, mañana, fin de semana, semana que viene— o
+  con una fecha concreta del calendario. Vence al **acabar** el día, así que algo
+  puesto para hoy no nace vencido. Pasada la fecha, la tarjeta lo pinta en rojo.
+- **Etiquetas** como fichas: se escriben separadas por coma o espacio y se quitan con
+  su aspa. En el buscador son `#api`.
+- **Marcador**: sube la tarea al principio de su grupo pase lo que pase, porque
+  marcar es precisamente decir «que no se me pierda esto». Se pulsa en la propia fila.
+
 ## Quick Add
 
-`⌘⌥R` abre un popup centrado pensado para durar tres segundos: se escribe y se pulsa
-`Enter`. Cambiar de ventana a media frase no lo cierra.
-
-| Tecla | Qué hace |
-|---|---|
-| `Enter` | Crear y cerrar |
-| `⌘Enter` | Crear y dejar el popup abierto, para encadenar varias |
-| `⇧Enter` | Salto de línea |
-| `Tab` / `⇧Tab` | Recorrer prioridad → estado → repositorio |
-| `⌥1…9` | Seleccionar prioridad por posición |
-| `Esc` | Cancelar |
+`⌘⌥R` abre **el mismo diálogo** que *New Task*, desde cualquier sitio del IDE y sin
+pasar por la Tool Window. Hasta la `0.6.7` abría un popup compacto propio: se escribía
+más rápido, pero tenía la mitad de los campos —sin vencimiento, sin etiquetas, sin
+barra de formato ni vista previa de las imágenes—, así que una tarea apuntada de prisa
+nacía distinta de una escrita con calma. La tarea se crea en el **repositorio activo**,
+el mismo que usa *New Task*.
 
 **Triggers.** Escribir `!!! Resolver el fallo` crea la tarea *Resolver el fallo* con
-prioridad *High*: el prefijo elige la prioridad y **no se guarda**. Gana la
-coincidencia más larga y hace falta un espacio detrás, así que `!importante revisar`
-no dispara nada. Borrar el trigger devuelve la prioridad anterior. Los prefijos se
-configuran por prioridad y se apagan enteros desde *Settings → Tools → Tasklane*.
-
-**Repositorio propuesto.** No es «el último usado» sino el del fichero abierto en el
-editor — con la raíz más larga que lo contiene, para que un submódulo gane a su
-padre. Si no hay editor abierto, el repositorio seleccionado en la ventana.
+prioridad *High*: el prefijo mueve el desplegable de prioridad mientras se escribe y
+**no se guarda**. Gana la coincidencia más larga y hace falta un espacio detrás, así
+que `!importante revisar` no dispara nada; borrarlo devuelve la prioridad anterior y
+elegirla a mano gana sobre el prefijo. Funcionan **sólo al crear**: sobre una tarea que
+ya existe el desplegable está a un clic, y un cuerpo que empiece por `!!! ` no tiene
+por qué perderlo sólo por haberlo abierto. Los prefijos se configuran por prioridad y
+se apagan enteros desde *Settings → Tools → Tasklane*.
 
 ## Búsqueda
 
@@ -242,8 +283,8 @@ cualquier uso accidental de una API posterior.
 ## Comandos
 
 ```bash
-./gradlew test                             # 163 tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-0.5.0.zip
+./gradlew test                             # 265 tests de dominio, búsqueda, almacén y renderer, sin IDE
+./gradlew buildPlugin                      # -> build/distributions/tasklane-0.6.8.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -282,7 +323,24 @@ instalable en vez de esperar a que el plan entero esté cerrado.
 | 6 | Imágenes | `0.6.0` | ✅ |
 | 7 | Robustez y pulido | `0.7.0` | pendiente |
 
-En paralelo al plan de ocho fases hay un **rediseño a tarjetas** en curso, con su propio
-plan y su propia numeración: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Va por la
-R4 —filas, diálogo, cabecera y aspecto de tarjeta—, que es lo que hay en la `0.6.3`
-con 250 tests verdes.
+En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
+numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
+**cerrado** en la `0.6.6`; cada iteración subió la versión baja y dejó un plugin
+instalable.
+
+| | | | |
+|---|---|---|---|
+| R1 | Filas | — | ✅ salió dentro de la `0.6.0` |
+| R2 | Diálogo | — | ✅ salió dentro de la `0.6.0` |
+| R3 | Cabecera y barra | `0.6.1` | ✅ |
+| R3.1 | Las pestañas bajan al panel | `0.6.2` | ✅ |
+| R4 | Aspecto de tarjeta | `0.6.3` | ✅ |
+| R5 | Adjuntos en el diálogo | `0.6.4` | ✅ |
+| R6 | Deudas conscientes | `0.6.5` | ✅ |
+| R7 | Documentación | `0.6.6` | ✅ |
+| — | Correcciones de uso | `0.6.7` | resalte del ratón y pegar imágenes en Quick Add |
+| — | Un solo sitio donde crear | `0.6.8` | el doble clic vuelve a abrir la tarea y Quick Add pasa a ser el diálogo |
+
+El **formato de fichero no sube de versión** con el rediseño: `tags`, `dueDate` y
+`bookmarked` son atributos nuevos, se omiten cuando están vacíos y el códec conserva
+los desconocidos, así que una versión vieja del plugin abre el fichero sin perder nada.

@@ -39,6 +39,10 @@ internal object MarkdownToolbar {
             // El cursor queda entre los corchetes, que es donde se escribe el texto
             // del enlace; la URL va detrás, ya seleccionable de un doble clic.
             button("link", icon = AllIcons.ToolbarDecorator.AddLink) { field.wrapSelection("[", "](url)") },
+            // La imagen no se inserta como marca: se elige el fichero, se guarda y lo
+            // que entra en el texto es la referencia al blob. Por eso vive aquí y no
+            // en un `wrapSelection` como el resto.
+            button("image", icon = AllIcons.FileTypes.Image) { field.chooseImage() },
             Separator.getInstance(),
             button("bullet", icon = AllIcons.Actions.ListFiles) { field.prefixLines("- ") },
             button("numbered", glyph = "1.") { field.prefixLines("", numbered = true) },

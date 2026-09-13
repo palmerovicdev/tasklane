@@ -52,6 +52,13 @@ object DueDates {
         return today.plusDays((DAYS_IN_WEEK - 1 - elapsed).toLong())
     }
 
+    /**
+     * El instante en que acaba [date]. Es público porque la fecha concreta que se
+     * elige en el calendario tiene que vencer igual que un preajuste: al acabar el
+     * día, no al empezarlo.
+     */
+    fun atEndOfDay(date: LocalDate, zone: ZoneId): Instant = endOfDay(date, zone)
+
     private fun endOfDay(date: LocalDate, zone: ZoneId): Instant =
         date.atTime(LocalTime.MAX).atZone(zone).toInstant()
 
