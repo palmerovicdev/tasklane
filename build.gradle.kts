@@ -38,11 +38,14 @@ tasks.withType<JavaCompile>().configureEach {
     options.release = 21
 }
 
+// null -> no hay IDE local configurado: camino de CI y de release, que descarga
+// platformVersion. No-null -> dev loop local contra el IDE ya instalado.
+val localIde: String? = providers.gradleProperty("localIdePath").orNull?.takeIf(String::isNotBlank)
+
 dependencies {
     testImplementation("junit:junit:4.13.2")
 
     intellijPlatform {
-        val localIde = providers.gradleProperty("localIdePath").orNull?.takeIf(String::isNotBlank)
         if (localIde != null) {
             // Descarga cero: se compila contra el IDE ya instalado.
             local(localIde)
@@ -83,5 +86,17 @@ intellijPlatform {
 tasks {
     wrapper {
         gradleVersion = providers.gradleProperty("gradleVersion").get()
+    }
+
+    // Indexa las etiquetas del Configurable para que aparezcan en la busqueda de
+    // Settings. Para hacerlo arranca un IDE headless, y contra el IDE local eso
+    // comparte el sandbox con la instancia de `runIde`: el segundo proceso muere
+    // con "Only one instance of IDEA can be run at a time".
+    //
+    // Se desactiva solo en el dev loop. En CI y en release (localIdePath vacio ->
+    // plataforma descargada, sandbox propio) si se ejecuta, que es donde importa:
+    // es el zip que se publica.
+    buildSearchableOptions {
+        enabled = localIde == null
     }
 }
