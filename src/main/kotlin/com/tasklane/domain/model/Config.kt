@@ -1,7 +1,15 @@
 package com.tasklane.domain.model
 
 /** Cómo agrupa un estado sus tareas en la Tool Window. */
-enum class Grouping { NONE, BY_DATE }
+/**
+ * Cómo se parte en bloques la lista de un estado.
+ *
+ * Sólo [BY_DATE] usa [DateAnchor]; el resto ignoran ese ajuste. Una tarea con varias
+ * etiquetas aparece en [BY_TAG] bajo **todas** las suyas: agrupar por etiqueta sirve
+ * para ver de un vistazo todo lo de una, y esconderla en la primera por orden
+ * alfabético haría justo lo contrario.
+ */
+enum class Grouping { NONE, BY_DATE, BY_PRIORITY, BY_TAG }
 
 /** Qué fecha usa la agrupación de un estado. */
 enum class DateAnchor { CREATED, UPDATED, COMPLETED }
@@ -51,6 +59,13 @@ data class TasklaneConfig(
      * «Other». Ver `RepoCatalog`.
      */
     val repoDepth: Int = DEFAULT_REPO_DEPTH,
+    /**
+     * Lado mayor al que se reescala una imagen pegada, en píxeles. Fase 6.
+     *
+     * Se guarda antes de escribir y no al pintar: la resolución que nadie va a mirar
+     * no vale lo que ocupa en el `.idea` del usuario.
+     */
+    val imageMaxSize: Int = DEFAULT_IMAGE_MAX_SIZE,
 ) {
     val defaultState: TaskState get() = states.firstOrNull { it.isDefault } ?: states.first()
     val defaultPriority: TaskPriority get() = priorities.firstOrNull { it.isDefault } ?: priorities.first()
@@ -74,6 +89,7 @@ data class TasklaneConfig(
         val defaultPriorityIndex = priorities.indexOfFirst { it.isDefault }.takeIf { it >= 0 } ?: 0
         return copy(
             repoDepth = repoDepth.coerceIn(0, MAX_REPO_DEPTH),
+            imageMaxSize = imageMaxSize.coerceIn(MIN_IMAGE_MAX_SIZE, MAX_IMAGE_MAX_SIZE),
             states = states.mapIndexed { i, s -> s.copy(order = i, isDefault = i == defaultStateIndex) },
             priorities = priorities.mapIndexed { i, p ->
                 p.copy(
@@ -91,6 +107,15 @@ data class TasklaneConfig(
 
         /** Más allá de esto el selector deja de ser un selector. */
         const val MAX_REPO_DEPTH = 5
+
+        /** Cabe de sobra el pantallazo de una ventana. */
+        const val DEFAULT_IMAGE_MAX_SIZE = 1600
+
+        /** Por debajo de esto el reescalado destruye la captura en vez de aligerarla. */
+        const val MIN_IMAGE_MAX_SIZE = 200
+
+        /** Por encima, lo que se guarda pesa más de lo que la vista previa aprovecha. */
+        const val MAX_IMAGE_MAX_SIZE = 4000
 
         val TODO = StateId("s-todo")
         val DOING = StateId("s-doing")

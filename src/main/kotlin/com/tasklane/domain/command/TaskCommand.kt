@@ -7,6 +7,7 @@ import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import java.time.Instant
 
 /**
  * Todas las mutaciones posibles del modelo. `sealed` a propósito: añadir un caso
@@ -27,6 +28,8 @@ sealed interface TaskCommand {
         val body: String,
         val stateId: StateId? = null,
         val priorityId: PriorityId? = null,
+        val tags: List<String> = emptyList(),
+        val dueDate: Instant? = null,
     ) : RepoScoped
 
     data class UpdateBody(override val repo: RepoKey, val id: TaskId, val body: String) : RepoScoped
@@ -35,6 +38,15 @@ sealed interface TaskCommand {
 
     data class ChangePriority(override val repo: RepoKey, val id: TaskId, val priorityId: PriorityId) : RepoScoped
 
+    /** Fija o quita la fecha de vencimiento. `null` la quita. */
+    data class SetDueDate(override val repo: RepoKey, val id: TaskId, val dueDate: Instant?) : RepoScoped
+
+    /** Alterna la marca de la tarea. */
+    data class ToggleBookmark(override val repo: RepoKey, val id: TaskId) : RepoScoped
+
+    /** Sustituye las etiquetas de una tarea por las indicadas. */
+    data class SetTags(override val repo: RepoKey, val id: TaskId, val tags: List<String>) : RepoScoped
+
     /** Alterna entre el estado terminal y el estado por defecto. */
     data class ToggleComplete(override val repo: RepoKey, val id: TaskId) : RepoScoped
 
@@ -42,6 +54,16 @@ sealed interface TaskCommand {
 
     /** Carga inicial desde disco. No es una edición del usuario, no ensucia el repo. */
     data class Loaded(override val repo: RepoKey, val tasks: List<Task>) : RepoScoped
+
+    /**
+     * Saca del modelo un repositorio entero. Lo emite «Exportar y quitar», y sólo
+     * después de que sus tareas estén en el portapapeles.
+     *
+     * No es un `Delete` con todas las tareas: eso dejaría el repositorio en el
+     * snapshot con la lista vacía, lo marcaría como sucio y volvería a escribir un
+     * `tasks.xml` justo detrás de haberlo borrado del disco.
+     */
+    data class ForgetRepo(override val repo: RepoKey) : RepoScoped
 
     // ----------------------------------------------------- alcance de proyecto
 

@@ -43,6 +43,10 @@
             icon="com.tasklane.ui.common.TasklaneIcons.ToolWindow"
             factoryClass="com.tasklane.ui.toolwindow.TasklaneToolWindowFactory"/>
 
+        <!-- Recoleccion de adjuntos sin referencias. Espera a que las tareas esten
+             leidas: sin eso no sabria que esta referenciado. -->
+        <postStartupActivity implementation="com.tasklane.startup.AttachmentGcActivity"/>
+
         <!-- Los servicios de configuracion son light services (@Service + @State),
              asi que no se declaran aqui: la plataforma los descubre al usarlos. -->
         <projectConfigurable
@@ -52,4 +56,108 @@
             bundle="messages.TasklaneBundle"
             instance="com.tasklane.ui.settings.TasklaneConfigurable"/>
     </extensions>
+
+    <!-- Todas las acciones se declaran aqui, no se construyen en el panel: asi
+         aparecen en Settings -> Keymap (reasignables) y en Search Everywhere, y el
+         mismo objeto sirve a la barra, al menu contextual y al atajo. Encuentran su
+         pestana por el DataContext (com.tasklane.ui.actions.TasklaneDataKeys).
+         Texto y descripcion salen de messages.TasklaneBundle por convencion de id. -->
+    <actions>
+        <!-- Global: crear sin abrir la tool window. El atajo choca con Resume Program
+             en el keymap de macOS; es una decision consciente, ver architecture.html
+             §14. El IDE avisa del conflicto y el usuario elige cual gana. -->
+        <action id="Tasklane.QuickAdd"
+                class="com.tasklane.ui.quickadd.QuickAddAction"
+                icon="AllIcons.General.Add">
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt R"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt R" replace-all="true"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt R" replace-all="true"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!-- Acotadas a la tool window. Sin atajo por defecto a proposito: Enter,
+             Delete y ⌘K solo tienen sentido dentro de la pestana, y se instalan alli
+             con registerCustomShortcutSet. Declararlas igualmente es lo que las hace
+             asignables desde el Keymap para quien quiera un atajo global. -->
+        <action id="Tasklane.NewTask"
+                class="com.tasklane.ui.actions.NewTaskAction"
+                icon="AllIcons.General.Add"/>
+        <!-- El boton partido de la barra. Es un grupo porque la flecha abre la lista
+             de estados destino; el cuerpo ejecuta Tasklane.NewTask, que sigue siendo
+             la accion registrada, asignable y con su propio sitio en el menu. -->
+        <group id="Tasklane.NewTaskSplit"
+               class="com.tasklane.ui.actions.NewTaskSplitAction"
+               icon="AllIcons.General.Add"/>
+        <action id="Tasklane.EditTask"
+                class="com.tasklane.ui.actions.EditTaskAction"
+                icon="AllIcons.Actions.Edit"/>
+        <action id="Tasklane.DeleteTask"
+                class="com.tasklane.ui.actions.DeleteTaskAction"
+                icon="AllIcons.General.Remove"/>
+        <action id="Tasklane.ToggleComplete"
+                class="com.tasklane.ui.actions.ToggleCompleteAction"
+                icon="AllIcons.Actions.Checked"/>
+        <action id="Tasklane.ToggleBookmark"
+                class="com.tasklane.ui.actions.ToggleBookmarkAction"
+                icon="AllIcons.Nodes.Bookmark"/>
+        <action id="Tasklane.FocusSearch"
+                class="com.tasklane.ui.actions.FocusSearchAction"
+                icon="AllIcons.Actions.Find"/>
+        <action id="Tasklane.GroupByDate"
+                class="com.tasklane.ui.actions.GroupByDateAction"
+                icon="AllIcons.Actions.GroupByPackage"/>
+        <action id="Tasklane.SearchAllRepos"
+                class="com.tasklane.ui.actions.SearchAllReposAction"
+                icon="AllIcons.Nodes.ModuleGroup"/>
+        <action id="Tasklane.Settings"
+                class="com.tasklane.ui.actions.TasklaneSettingsAction"
+                icon="AllIcons.General.Settings"/>
+
+        <!-- Exportacion. El grupo es popup: en la barra sale como un boton con
+             desplegable, y en el menu contextual como un submenu. -->
+        <action id="Tasklane.ExportState"
+                class="com.tasklane.ui.actions.ExportStateAction"/>
+        <action id="Tasklane.ExportGroup"
+                class="com.tasklane.ui.actions.ExportGroupAction"/>
+        <action id="Tasklane.ExportSelection"
+                class="com.tasklane.ui.actions.ExportSelectionAction"/>
+        <action id="Tasklane.ExportMarkdown"
+                class="com.tasklane.ui.actions.ExportMarkdownAction"/>
+        <action id="Tasklane.ExportAndRemoveRepo"
+                class="com.tasklane.ui.actions.ExportAndRemoveRepoAction"
+                icon="AllIcons.Actions.GC"/>
+
+        <group id="Tasklane.Export" popup="true" icon="AllIcons.ToolbarDecorator.Export">
+            <reference ref="Tasklane.ExportState"/>
+            <reference ref="Tasklane.ExportGroup"/>
+            <reference ref="Tasklane.ExportSelection"/>
+            <separator/>
+            <reference ref="Tasklane.ExportMarkdown"/>
+            <separator/>
+            <reference ref="Tasklane.ExportAndRemoveRepo"/>
+        </group>
+
+        <group id="Tasklane.Toolbar">
+            <reference ref="Tasklane.NewTaskSplit"/>
+            <reference ref="Tasklane.EditTask"/>
+            <reference ref="Tasklane.DeleteTask"/>
+            <separator/>
+            <reference ref="Tasklane.GroupByDate"/>
+            <reference ref="Tasklane.SearchAllRepos"/>
+            <separator/>
+            <reference ref="Tasklane.Export"/>
+            <reference ref="Tasklane.Settings"/>
+        </group>
+
+        <group id="Tasklane.ContextMenu" popup="true">
+            <reference ref="Tasklane.NewTask"/>
+            <reference ref="Tasklane.EditTask"/>
+            <reference ref="Tasklane.ToggleComplete"/>
+            <reference ref="Tasklane.ToggleBookmark"/>
+            <separator/>
+            <reference ref="Tasklane.Export"/>
+            <separator/>
+            <reference ref="Tasklane.DeleteTask"/>
+        </group>
+    </actions>
 </idea-plugin>

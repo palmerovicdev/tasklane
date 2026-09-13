@@ -2,10 +2,12 @@ package com.tasklane.ui.common
 
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.DateGroup
+import com.tasklane.domain.model.GroupKey
+import com.tasklane.domain.model.TasklaneConfig
 import java.time.format.DateTimeFormatter
 
 /**
- * Texto de la cabecera de cada grupo de fecha.
+ * Texto de la cabecera de un grupo.
  *
  * Vive en la UI y no en el dominio porque depende del locale y del bundle. Para los
  * grupos con fecha concreta se usa [DateTimeFormatter.ofLocalizedPattern] en vez de
@@ -16,10 +18,22 @@ import java.time.format.DateTimeFormatter
  *
  * El formateador se construye en cada llamada porque congela el locale al crearse
  * y el del IDE se puede cambiar en caliente; son unas pocas cabeceras por repintado.
+ *
+ * El nombre de la prioridad se resuelve contra la configuración **vigente** y no se
+ * guarda en la clave: renombrar una prioridad en *Settings* tiene que cambiar la
+ * cabecera sin reconstruir nada.
  */
-internal object DateGroupLabels {
+internal object GroupLabels {
 
-    fun of(group: DateGroup): String = when (group) {
+    fun of(key: GroupKey, config: TasklaneConfig): String = when (key) {
+        is GroupKey.OfDate -> ofDate(key.group)
+        is GroupKey.OfPriority -> config.priorities.firstOrNull { it.id == key.id }?.name
+            ?: TasklaneBundle.message("group.noPriority")
+
+        is GroupKey.OfTag -> key.name?.let { "#$it" } ?: TasklaneBundle.message("group.noTag")
+    }
+
+    fun ofDate(group: DateGroup): String = when (group) {
         DateGroup.Today -> TasklaneBundle.message("group.today")
         DateGroup.Yesterday -> TasklaneBundle.message("group.yesterday")
         DateGroup.ThisWeek -> TasklaneBundle.message("group.thisWeek")

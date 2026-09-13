@@ -78,9 +78,11 @@ internal fun buildConfig(
     priorities: List<PriorityRow>,
     triggersEnabled: Boolean,
     repoDepth: Int,
+    imageMaxSize: Int,
 ): TasklaneConfig = TasklaneConfig(
     states = states.mapIndexed { i, row -> row.toDomain(i) },
     priorities = priorities.mapIndexed { i, row -> row.toDomain(i) },
     triggersEnabled = triggersEnabled,
     repoDepth = repoDepth,
+    imageMaxSize = imageMaxSize,
 )

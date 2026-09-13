@@ -30,6 +30,7 @@ object TasksCodec {
 
     private val KNOWN_ATTRS = setOf(
         "id", "state", "priority", "order", "createdAt", "updatedAt", "completedAt", "tags",
+        "dueDate", "bookmarked",
     )
 
     fun encode(repo: RepoKey, tasks: List<Task>): Element {
@@ -47,6 +48,10 @@ object TasksCodec {
             el.setAttribute("updatedAt", task.updatedAt.toEpochMilli().toString())
             task.completedAt?.let { el.setAttribute("completedAt", it.toEpochMilli().toString()) }
             if (task.tags.isNotEmpty()) el.setAttribute("tags", task.tags.joinToString(","))
+            task.dueDate?.let { el.setAttribute("dueDate", it.toEpochMilli().toString()) }
+            // Sólo cuando es cierto: un atributo por tarea que casi siempre vale
+            // `false` engorda el fichero y el diff de cada guardado sin decir nada.
+            if (task.bookmarked) el.setAttribute("bookmarked", "true")
 
             // Lo que escribió una versión futura vuelve a salir intacto.
             for ((k, v) in task.extra) if (k !in KNOWN_ATTRS) el.setAttribute(k, v)
@@ -90,6 +95,8 @@ object TasksCodec {
             order = el.longAttr("order") ?: 0L,
             tags = el.getAttributeValue("tags")
                 ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty(),
+            dueDate = el.longAttr("dueDate")?.let(Instant::ofEpochMilli),
+            bookmarked = el.getAttributeValue("bookmarked").toBoolean(),
             extra = extra,
         )
     }

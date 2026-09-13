@@ -1,0 +1,160 @@
+package com.tasklane.domain
+
+import com.tasklane.domain.export.ExportFormat
+import com.tasklane.domain.export.TaskExporter
+import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.Task
+import com.tasklane.domain.model.TaskId
+import com.tasklane.domain.model.TasklaneConfig
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import java.time.Instant
+
+class TaskExporterTest {
+
+    private val config = TasklaneConfig.DEFAULT
+    private val t0 = Instant.parse("2026-09-13T10:00:00Z")
+
+    private fun task(body: String, state: StateId = TasklaneConfig.DONE, tags: List<String> = emptyList()) =
+        Task(
+            id = TaskId.random(),
+            repo = RepoKey.ROOT,
+            body = body,
+            stateId = state,
+            priorityId = TasklaneConfig.NORMAL,
+            createdAt = t0,
+            updatedAt = t0,
+            tags = tags,
+        )
+
+    @Test
+    fun `el criterio de la Fase 5 - Done a Today es una lista de guiones`() {
+        val text = TaskExporter.export(
+            heading = "Done · Today",
+            tasks = listOf(task("Arreglar el login"), task("Revisar el PR de facturacion")),
+            config = config,
+            format = ExportFormat.MARKDOWN,
+        )
+        assertEquals(
+            """
+            ## Done · Today
+
+            - [x] Arreglar el login
+            - [x] Revisar el PR de facturacion
+            """.trimIndent() + "\n",
+            text,
+        )
+    }
+
+    @Test
+    fun `la casilla distingue terminal de abierto`() {
+        val text = TaskExporter.export(
+            heading = null,
+            tasks = listOf(task("Hecho"), task("Pendiente", state = TasklaneConfig.TODO)),
+            config = config,
+            format = ExportFormat.MARKDOWN,
+        )
+        assertEquals("- [x] Hecho\n- [ ] Pendiente\n", text)
+    }
+
+    @Test
+    fun `el formato plano no pinta casillas`() {
+        val text = TaskExporter.export(
+            heading = "Done",
+            tasks = listOf(task("Hecho")),
+            config = config,
+            format = ExportFormat.PLAIN,
+        )
+        assertEquals("Done\n\n- Hecho\n", text)
+    }
+
+    @Test
+    fun `el detalle se sangra bajo su tarea`() {
+        val text = TaskExporter.export(
+            heading = null,
+            tasks = listOf(task("Migrar el indice\n\nHay que avisar a soporte\ny cerrar el ticket")),
+            config = config,
+            format = ExportFormat.MARKDOWN,
+        )
+        assertEquals(
+            "- [x] Migrar el indice\n  Hay que avisar a soporte\n  y cerrar el ticket\n",
+            text,
+        )
+    }
+
+    @Test
+    fun `las etiquetas van detras del titulo`() {
+        val text = TaskExporter.export(
+            heading = null,
+            tasks = listOf(task("Revisar", tags = listOf("api", "urgente"))),
+            config = config,
+            format = ExportFormat.MARKDOWN,
+        )
+        assertEquals("- [x] Revisar #api #urgente\n", text)
+    }
+
+    @Test
+    fun `varios grupos se separan por una linea en blanco`() {
+        val text = TaskExporter.export(
+            sections = listOf(
+                TaskExporter.Section("Done · Today", listOf(task("Uno"))),
+                TaskExporter.Section("Done · Yesterday", listOf(task("Dos"))),
+            ),
+            config = config,
+            format = ExportFormat.MARKDOWN,
+        )
+        assertEquals(
+            "## Done · Today\n\n- [x] Uno\n\n## Done · Yesterday\n\n- [x] Dos\n",
+            text,
+        )
+    }
+
+    @Test
+    fun `un grupo vacio no deja cabecera huerfana`() {
+        val text = TaskExporter.export(
+            sections = listOf(
+                TaskExporter.Section("Done · Today", emptyList()),
+                TaskExporter.Section("Done · Yesterday", listOf(task("Dos"))),
+            ),
+            config = config,
+            format = ExportFormat.MARKDOWN,
+        )
+        assertEquals("## Done · Yesterday\n\n- [x] Dos\n", text)
+    }
+
+    @Test
+    fun `sin tareas no se exporta nada`() {
+        assertEquals("", TaskExporter.export("Done", emptyList(), config, ExportFormat.MARKDOWN))
+    }
+
+    // ------------------------------------------------------------- imagenes
+
+    private val sha = "a".repeat(64)
+
+    /**
+     * Lo exportado se pega en un ticket o en un correo, donde un `tasklane:<sha>` no
+     * es una imagen ni un enlace: son 64 caracteres que nadie puede resolver.
+     */
+    @Test
+    fun `las referencias a imagenes no salen en la exportacion`() {
+        val text = TaskExporter.export(
+            heading = null,
+            tasks = listOf(task("Error al entrar\n![](tasklane:$sha)\nPasa con Safari")),
+            config = config,
+            format = ExportFormat.PLAIN,
+        )
+        assertEquals("- Error al entrar\n  Pasa con Safari\n", text)
+    }
+
+    @Test
+    fun `una imagen entre parrafos no deja un hueco donde estaba`() {
+        val text = TaskExporter.export(
+            heading = null,
+            tasks = listOf(task("Titulo\nMira la captura: ![](tasklane:$sha)")),
+            config = config,
+            format = ExportFormat.PLAIN,
+        )
+        assertEquals("- Titulo\n  Mira la captura:\n", text)
+    }
+}

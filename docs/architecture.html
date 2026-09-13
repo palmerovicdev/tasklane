@@ -198,7 +198,7 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
     <li><a href="#d6"><span>06</span>Quick Add</a></li>
     <li><a href="#d7"><span>07</span>Repositorios</a></li>
     <li><a href="#d8"><span>08</span>Búsqueda</a></li>
-    <li><a href="#d9"><span>09</span>Enlaces e imágenes</a></li>
+    <li><a href="#d9"><span>09</span>Enlaces, imágenes y exportación</a></li>
     <li><a href="#d10"><span>10</span>Estados y prioridades</a></li>
     <li><a href="#d11"><span>11</span>APIs</a></li>
     <li><a href="#d12"><span>12</span>Edge cases</a></li>
@@ -237,7 +237,8 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
       <tr><td>Cuerpo de la tarea</td><td>Markdown-lite en texto plano</td><td>HTML / RTF / <code>StyledDocument</code></td><td>Búsqueda, export y diff triviales</td></tr>
       <tr><td>Imágenes</td><td>Blobs direccionados por contenido + <code>Inlay</code> de bloque</td><td>Base64 embebido</td><td>Tamaño de fichero, dedupe y GC</td></tr>
       <tr><td>Vista principal</td><td><code>CheckboxTree</code> + <code>DefaultTreeModel</code>, modelo construido fuera del EDT</td><td><code>JBList</code>; <code>AsyncTreeModel</code></td><td>Grupos plegables y hit-testing del checkbox resueltos. <code>AsyncTreeModel</code> <strong>no compone</strong> con <code>CheckboxTree</code></td></tr>
-      <tr><td>Estados en la UI</td><td><code>Content</code> del <code>ContentManager</code> (tabs nativas)</td><td><code>JBTabbedPane</code> interno</td><td>Integra con el header y el keymap de la tool window</td></tr>
+      <tr><td>Fondo de la tarjeta</td><td><code>paintComponent</code> del renderer, con la franja recortada por la misma forma <span class="tag">R4</span></td><td>Un <code>Border</code> que pinte el fondo</td><td>El fondo es de la fila entera y un borde sólo puede pintar en sus insets. Seleccionada no se pinta: el fondo lo pone el árbol</td></tr>
+      <tr><td>Estados en la UI</td><td>Fila propia dentro del panel + <code>CardLayout</code> <span class="tag">revisado en R3.1</span></td><td><code>Content</code> del <code>ContentManager</code> (tabs nativas); <code>JBTabbedPane</code> interno</td><td>Las tabs nativas se pintan en el header, mezcladas con título, selector de repositorio y filtro: el recuento por estado se perdía ahí arriba</td></tr>
       <tr><td>Búsqueda</td><td>Escaneo normalizado + <code>MinusculeMatcher</code>, debounce 120 ms</td><td>Índice invertido</td><td>O(n) con n ≤ 10⁴ cuesta &lt; 5 ms fuera del EDT</td></tr>
       <tr><td>Repositorios</td><td><code>GitRepositoryManager</code> + <code>VCS_REPOSITORY_MAPPING_UPDATED</code></td><td>Escaneo manual de <code>.git</code></td><td>Usa el modelo VCS real del IDE y sus eventos</td></tr>
       <tr><td>Atajos</td><td>Actions en <code>plugin.xml</code> + <code>registerCustomShortcutSet</code> local</td><td>Bindings Swing propios</td><td>Configurable en Keymap y gana en su contexto</td></tr>
@@ -340,7 +341,12 @@ data class Task(
 )
 
 data class TaskLink(val url: String, val display: String, val range: IntRange)
-data class AttachmentRef(val id: AttachmentId, val ext: String, val w: Int, val h: Int)</code></pre>
+data class AttachmentRef(val id: AttachmentId, val range: IntRange)</code></pre>
+  <div class="adr warn">
+    <span class="tag">Corregido durante la Fase 6 · <code>AttachmentRef</code> no lleva tamaño</span>
+    <p>El diseño original era <code>AttachmentRef(id, ext, w, h)</code>. Al implementarlo apareció la contradicción: <code>attachments</code> se <strong>deriva del cuerpo</strong>, y el cuerpo sólo contiene el ID. Ancho, alto y extensión son propiedades del <em>blob</em>, no del texto, así que rellenarlas obligaría a leer el fichero — IO dentro de <code>TaskReducer</code>, que es puro por definición y es justo lo que lo hace testeable sin IDE.</p>
+    <p>Ninguna de las tres hacía falta: quien pinta la vista previa ya tiene la imagen decodificada delante, y la extensión es siempre <code>png</code> porque el normalizador re-codifica todo lo que entra. En su lugar va el <code>range</code> dentro del cuerpo, igual que en <code>TaskLink</code>, que es lo que coloca el inlay y permite plegar la referencia sin volver a buscarla.</p>
+  </div>
 
   <pre><code>data class TaskState(
     val id: StateId,
@@ -423,20 +429,20 @@ data class RepositoryRef(
 │   └── VcsMappingBridge.kt           # solo con Git4Idea: eventos VCS -> refresh()
 ├── service/
 │   ├── TaskService.kt   ConfigService.kt   SearchService.kt
-│   ├── ExportService.kt Notifier.kt
+│   ├── ExportService.kt AttachmentService.kt
 ├── search/            TaskSearchIndex, LinearScanIndex, SearchDocument, Highlighter
 ├── ui/
 │   ├── toolwindow/  TasklaneToolWindowFactory, TasklanePanel, StateTabPanel,
 │   │                TaskTreeStructure, TaskNode, GroupNode, TaskRowRenderer,
 │   │                RepoSelectorAction, TasklaneSearchField
 │   ├── quickadd/    QuickAddPopup, QuickAddModel
-│   ├── editor/      TaskEditorPopup, MarkdownField, ImageInlayRenderer,
-│   │                ImagePasteHandler, AttachmentPreview
+│   ├── editor/      TaskEditDialog, MarkdownField, ImageInlays,
+│   │                ImageInlayRenderer, ImagePasteHandler
 │   └── common/      TasklaneIcons, PriorityStripe, LinkChip, TasklaneDataKeys
 ├── actions/         QuickAddAction, FocusSearchAction, ToggleCompleteAction,
 │                    ChangeStateAction, ChangePriorityAction, DeleteTaskAction,
 │                    ExportStateAction, ExportGroupAction, ExportSelectionAction
-└── startup/         TasklaneStartupActivity (ProjectActivity)</code></pre>
+└── startup/         AttachmentGcActivity (ProjectActivity)</code></pre>
   <div class="adr warn">
     <span class="tag">Corregido durante la Fase 1 · no hay capa de DTOs</span>
     <p>El diseño original tenía un paquete <code>data/dto</code> con clases anotadas para <code>com.intellij.util.xmlb</code>. Al implementarlo apareció un problema que lo invalida: <strong>xmlb descarta los atributos que no reconoce</strong>. Eso destruye justo la garantía que <code>Task.extra</code> existe para dar — que abrir el proyecto con una versión vieja del plugin no borre datos escritos por una nueva.</p>
@@ -526,20 +532,31 @@ data class RepositoryRef(
   <pre><code>┌ Tasklane ─────────────────────────────── ⚙ ⋮ ┐   ← header nativo
 │ [api ▾]   🔍 auth                    ⚲  ⇅  ⧉ │   ← ActionToolbar
 ├──────────────────────────────────────────────┤
-│  ToDo │ Doing │ Done                         │   ← ContentManager (tabs)
+│  ToDo 5   Doing 0   Done 2                   │   ← StateTabRow (dentro del panel)
+│  🔍 auth                                      │   ← SearchTextField
 ├──────────────────────────────────────────────┤
 │ ▾ Today                                      │
-│ ┃ ☐ Fix authentication error           14:32 │
-│ ┃    🔗 2   🖼 1                              │
-│ ┃ ☐ Update docs                       11:02 │
+│ ╭────────────────────────────────────────╮   │
+│ ┃ ☐ Fix authentication error      ★ ⋮    │   │
+│ ┃   🔗 2  🖼 1  #api  Today              │   │
+│ ╰────────────────────────────────────────╯   │
+│ ╭────────────────────────────────────────╮   │
+│ ┃ ☐ Update docs                          │   │
+│ ╰────────────────────────────────────────╯   │
 │ ▾ Yesterday                                  │
 │ ┃ ☑ Implement login                          │
 └──────────────────────────────────────────────┘
-   └─ franja de 3 px con el color de la prioridad</code></pre>
+   └─ franja de 3 px con el color de la prioridad,
+      dentro de la tarjeta y recortada por ella</code></pre>
 
-  <h3>Estados como tabs</h3>
-  <p>Cada estado es un <code>Content</code> del <code>ContentManager</code> de la tool window, no <code>isCloseable</code>. Da la barra de tabs nativa, la navegación con <code>Alt+←/→</code> del keymap y la opción «Show tabs in one row» sin escribir nada. Un <code>JBTabbedPane</code> interno se descartó porque no se integra con el header ni con el keymap.</p>
-  <p>Con más de cinco o seis estados la fila de tabs se aprieta en una tool window lateral. Por eso el ajuste <strong>«Vista: tabs · lista única con secciones»</strong> reutiliza exactamente el mismo componente de árbol y presenta los estados como nodos raíz. Reordenar o renombrar estados reconstruye las tabs preservando la selección <em>por <code>StateId</code></em>, nunca por índice.</p>
+  <h3>Estados como fila propia</h3>
+  <div class="adr warn">
+    <span class="tag">Revisado en R3.1 · las tabs bajan al panel</span>
+    <p>Hasta la <code>0.6.1</code> cada estado era un <code>Content</code> del <code>ContentManager</code>: barra de tabs nativa, <code>Alt+←/→</code> del keymap y «Show tabs in one row» sin escribir una línea. El motivo de darle la vuelta es lo que se vio al usarlo: esa barra se pinta <em>en el header</em>, junto al título de la ventana, el selector de repositorio y el filtro, y ahí el recuento por estado —que es justo lo que se quiere leer de un vistazo— queda enterrado entre controles que no hablan de tareas.</p>
+    <p>Ahora hay <strong>un solo <code>Content</code></strong> con un <code>CardLayout</code>: un <code>TasklanePanel</code> por estado, uno visible. La fila de estados (<code>StateTabRow</code>) va dentro del panel, pegada encima del buscador, con el nombre y el número a secas. <strong>Lo que se pierde</strong> es la navegación <code>Alt+←/→</code>, que la ponía el <code>ContentManager</code>; está anotado como deuda en <code>docs/plan-rediseno.md</code>.</p>
+  </div>
+  <p>Cambiar de estado no reconstruye nada: las tarjetas del <code>CardLayout</code> conservan su árbol, su selección y sus grupos plegados. La identidad sigue siendo el <code>StateId</code> —nunca la posición ni el nombre—, así que renombrar o reordenar estados en <em>Settings</em> tampoco tira nada, y el estado abierto se recuerda en <code>workspace.xml</code>.</p>
+  <p>Con más de cinco o seis estados la fila se aprieta en una tool window lateral. Por eso el ajuste <strong>«Vista: tabs · lista única con secciones»</strong> reutiliza exactamente el mismo componente de árbol y presenta los estados como nodos raíz.</p>
 
   <h3>El árbol</h3>
   <p><code>CheckboxTree</code> con la raíz oculta y dos tipos de nodo: <code>GroupNode</code> (grupo de fecha) y <code>TaskNode</code>.</p>
@@ -556,6 +573,11 @@ data class RepositoryRef(
 
   <h3>La fila</h3>
   <p>Renderer propio de dos líneas — <code>tree.rowHeight = 0</code> habilita altura variable por fila. De izquierda a derecha: franja de prioridad de 3 px pintada con <code>JBColor(colorLight, colorDark)</code>, checkbox, texto (primera línea del cuerpo, con elipsis), y fecha alineada a la derecha vía <code>appendTextPadding</code> de <code>SimpleColoredComponent</code>. Segunda línea, sólo si hay algo que mostrar: tags, indicador de enlaces y de imágenes.</p>
+  <div class="adr">
+    <span class="tag">Fase 5 · la segunda línea reorganiza el panel de la plataforma, no lo sustituye</span>
+    <p>El renderer de <code>CheckboxTree</code> es un <code>JPanel</code> con <code>BorderLayout</code>: checkbox al oeste, texto al centro. En vez de escribir un <code>TreeCellRenderer</code> desde cero —lo que obligaría a reimplementar el checkbox, los colores de selección y el foco—, se saca el texto del centro y se mete en su lugar una pila de dos <code>ColoredTreeCellRenderer</code>. La segunda línea se prepara con el mismo <code>getTreeCellRendererComponent</code> que la primera, así que hereda gratis ese tratamiento en cualquier tema.</p>
+    <p>El precio es depender de una estructura interna de la plataforma. Lo cubre <code>TaskTreeRendererTest</code>, que mide la fila con un <code>JTree</code> normal —sin <code>Application</code>— y comprueba que hay zona clicable para el enlace del título y para el indicador, y que el checkbox no es ninguna de las dos. Si una versión futura del IDE cambia ese panel, falla un test en vez de fallar un clic.</p>
+  </div>
   <p>La prioridad es una <em>propiedad visual de la fila</em>, no un eje de navegación: no hay secciones «HIGH / MEDIUM / LOW». Por debajo de unos 220 px de ancho el renderer retira la columna de fecha y luego la segunda línea, de modo que el título siempre se lee.</p>
 
   <h3>Barra de herramientas</h3>
@@ -585,6 +607,11 @@ data class RepositoryRef(
       <tr><td><code>Esc</code></td><td>Cancelar</td></tr>
     </tbody>
   </table></div>
+
+  <div class="adr">
+    <span class="tag">Precisado durante la Fase 4 · estas teclas no pasan por el keymap</span>
+    <p>La decisión de §2 —acciones en <code>plugin.xml</code> en vez de bindings Swing— es sobre <em>comandos</em>, los que alguien querría reasignar. Las teclas de esta tabla no lo son: <code>Enter</code> para aceptar y <code>⇧Enter</code> para saltar de línea son estructura del control, lo mismo que hace <code>DialogWrapper</code>. Van por <code>InputMap</code>/<code>ActionMap</code> del área de texto, que además es lo único que garantiza ganarle al <code>insert-break</code> que el LAF ya tiene puesto ahí.</p>
+  </div>
 
   <h3>Triggers de prioridad en vivo</h3>
   <p>Un <code>DocumentListener</code> pasa el texto por <code>TriggerParser</code> en cada pulsación. Si el prefijo coincide, el chip de prioridad cambia de color al instante y el trigger <strong>se consume</strong>: lo que se guarda es <code>"Resolver fallo de autenticación en Android"</code>, no <code>"!!! Resolver…"</code>. Si el usuario borra el trigger, la prioridad vuelve a la anterior.</p>
@@ -637,7 +664,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
       <tr><td>Un solo repositorio</td><td>El selector se oculta; el nombre va en el título de la tool window</td></tr>
       <tr><td>Ninguno (proyecto sin VCS)</td><td>Pseudo-repositorio «Project» sobre la raíz</td></tr>
       <tr><td>Se añade uno en caliente</td><td>Aparece en el selector sin reiniciar, vía el evento de mappings</td></tr>
-      <tr><td>Desaparece uno con tareas</td><td>Entrada marcada como ausente pero <strong>seleccionable</strong>; los datos no se tocan. La acción «Exportar y quitar» llega con la exportación, en la Fase 5</td></tr>
+      <tr><td>Desaparece uno con tareas</td><td>Entrada marcada como ausente pero <strong>seleccionable</strong>; los datos no se tocan. Se saca de la lista con «Exportar y quitar», que copia todas sus tareas antes de borrar la carpeta — la única vía por la que un repositorio abandona el catálogo</td></tr>
       <tr><td>Repos detectados sin registrar en VCS</td><td>Lo avisa la propia plataforma (<code>VcsRootProblemNotifier</code>); duplicarlo sería una segunda notificación diciendo lo mismo</td></tr>
     </tbody>
   </table></div>
@@ -672,15 +699,21 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
 // Implementación inicial: LinearScanIndex
 // Si el profiling alguna vez lo pide: InvertedTrigramIndex, sin tocar la UI</code></pre>
   <p>La interfaz existe precisamente para que la decisión de arriba sea reversible sin coste.</p>
+  <div class="adr warn">
+    <span class="tag">Precisado durante la Fase 4 · el corpus entra por la interfaz, y el título manda en el orden</span>
+    <p>La interfaz esbozada aquí no decía de dónde salen las tareas sobre las que buscar. Lleva una tercera operación, <code>setCorpus(snapshot)</code>, porque sin ella el índice tendría que conocer <code>TaskService</code> — justo la dependencia que esta capa evita. Se llama desde el mismo hilo que va a buscar: hacerlo en una corrutina aparte abre una ventana en la que los resultados hablan de un snapshot y el árbol pinta otro.</p>
+    <p>Sobre el orden: <code>matchingDegree()</code> no ordena solo. Ordena <strong>dentro</strong> del número de términos que caen en el <em>título</em>, que es el criterio principal. Puntuando sólo con el matcher, una coincidencia enterrada en el detalle podía adelantar a la que el usuario ve escrita en la fila.</p>
+  </div>
 </section>
 
 <!-- ============ 9 ============ -->
 <section id="d9">
-  <div class="sec-head"><span class="sec-num">09</span><h2>Enlaces e imágenes</h2></div>
+  <div class="sec-head"><span class="sec-num">09</span><h2>Enlaces, imágenes y exportación</h2></div>
 
   <h3>Enlaces</h3>
   <p>La extracción ocurre <strong>al escribir</strong>, no al pintar: <code>LinkExtractor</code> recorre el cuerpo (URLs sueltas, <code>www.</code> y <code>[texto](url)</code>, ignorando bloques de código) y el resultado se cachea en <code>task.links</code>. Pintar una fila nunca implica ejecutar una regex.</p>
-  <p>En el árbol, los fragmentos de enlace se pintan con <code>SimpleTextAttributes.LINK_ATTRIBUTES</code> — el estilo de enlace de la plataforma, correcto en cualquier tema — y el clic se resuelve con <code>SimpleColoredComponent.findFragmentAt(x)</code>. El cursor cambia a mano al pasar por encima.</p>
+  <p>En el árbol, los fragmentos de enlace se pintan con <code>SimpleTextAttributes.LINK_ATTRIBUTES</code> — el estilo de enlace de la plataforma, correcto en cualquier tema — y cada uno se añade <strong>etiquetado con su <code>TaskLink</code></strong>, de modo que el clic se resuelve con <code>getFragmentTagAt(x)</code> sin volver a medir texto. El cursor cambia a mano al pasar por encima. Sólo se trocea el título: los rangos de <code>links</code> son del cuerpo entero y <code>Task.titleRange</code> es lo que los traslada a la fila.</p>
+  <p>El tramo de enlace no pasa por el resaltado de la búsqueda: <code>SpeedSearchUtil</code> no admite etiqueta en el fragmento que añade. Es un intercambio consciente — subrayar una URL importa menos que poder abrirla.</p>
   <p>El acortado antepone el dominio: <code>https://youtrack.jetbrains.com/issue/ABC-123</code> se muestra como <code>youtrack.jetbrains.com/…/ABC-123</code> y, si aún no cabe, como <code>youtrack.jetbrains.com/…</code>. La URL completa vive en el modelo y en el tooltip; lo que se abre es siempre la original.</p>
   <p><strong>Indicador de enlaces en la fila:</strong> un icono de cadena con el número, en la segunda línea. Un clic abre el enlace si sólo hay uno; si hay varios, un <code>ListPopup</code> con las URLs acortadas. Funciona esté donde esté el enlace dentro del texto, y nunca hace falta entrar a editar. Sólo se abren esquemas <code>http</code> y <code>https</code> vía <code>BrowserUtil.browse</code>: un <code>file:</code> o un <code>javascript:</code> pegado en una tarea no debe ser clicable.</p>
 
@@ -695,13 +728,28 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <h4>Editor de tareas</h4>
   <ul>
     <li><strong>Componente:</strong> <code>EditorTextField</code> — un editor real de IntelliJ, con undo, selección múltiple y el keymap del usuario. Con el plugin Markdown presente (dependencia opcional) se obtiene resaltado de sintaxis; sin él, texto plano.</li>
-    <li><strong>Pegar:</strong> un <code>TransferHandler</code> sobre el componente del editor comprueba <code>DataFlavor.imageFlavor</code>, normaliza la imagen en <code>Dispatchers.IO</code> (reescalado si supera el máximo configurado, re-codificación a PNG) e inserta la referencia en la posición del cursor dentro de un <code>WriteCommandAction</code>, para que <code>⌘Z</code> funcione.</li>
-    <li><strong>Previsualización en línea:</strong> <code>InlayModel.addBlockElement</code> con un <code>EditorCustomElementRenderer</code> que pinta la imagen escalada bajo la línea de la referencia. Los inlays se recalculan con debounce al cambiar el documento y la <code>BufferedImage</code> escalada se cachea; <code>JBUIScale</code> mantiene la nitidez en HiDPI.</li>
-    <li><strong>Ampliar:</strong> el clic sobre el inlay abre el fichero adjunto con <code>FileEditorManager</code>, que lo entrega al plugin <em>Images</em> incluido en el IDE — zoom, ajuste y rueda del ratón, gratis. Respaldo: un <code>JBPopup</code> con la imagen escalada.</li>
-    <li><strong>Borrar:</strong> el cursor sobre el inlay y <code>Supr</code>, o la acción de contexto «Quitar imagen».</li>
-    <li><strong>Recolección:</strong> <code>AttachmentGc</code> corre al abrir el proyecto, fuera del EDT, y borra blobs sin referencias con un periodo de gracia — para que deshacer un pegado no deje una referencia rota.</li>
+    <li><strong>Pegar:</strong> una acción registrada con el atajo de <em>pegar</em> del keymap mira el portapapeles; si trae una imagen —o un fichero de imagen— la normaliza fuera del EDT (reescalado al máximo configurado en los ajustes, re-codificación a PNG) e inserta la referencia en la posición del cursor dentro de un <code>WriteCommandAction</code>, para que <code>⌘Z</code> funcione. Si no la trae, delega en el manejador de pegado del editor y el texto se pega como siempre.</li>
+    <li><strong>Referencia plegada:</strong> el rango del <code>![](tasklane:…)</code> se colapsa a <code>[image]</code> con el <code>FoldingModel</code>. Sin eso, el cuerpo de una tarea con dos capturas serían dos líneas de SHA que no significan nada para nadie.</li>
+    <li><strong>Previsualización en línea:</strong> <code>InlayModel.addBlockElement</code> con un <code>EditorCustomElementRenderer</code> que pinta la imagen escalada bajo la línea de la referencia. Los inlays se recalculan con debounce al cambiar el documento y la <code>BufferedImage</code> escalada se cachea por <code>(repo, id, ancho)</code>; <code>JBUIScale</code> mantiene la nitidez en HiDPI. La imagen se decodifica fuera del EDT: mientras tanto el hueco ya está puesto, con su marcador.</li>
+    <li><strong>Ampliar:</strong> el clic sobre el inlay abre la imagen en un <code>JBPopup</code>, escalada a la pantalla.</li>
+    <li><strong>Borrar:</strong> se selecciona el <code>[image]</code> y se pulsa <code>Supr</code>, como cualquier otro texto. Al desaparecer la referencia desaparece la vista previa.</li>
+    <li><strong>Recolección:</strong> <code>AttachmentGc</code> corre al abrir el proyecto, fuera del EDT, y borra blobs sin referencias con un periodo de gracia de 24 h — para que deshacer un pegado no deje una referencia rota. Sólo mira repositorios ya leídos y nunca los abiertos en solo lectura: en los dos casos «no veo referencias» significaría «no lo sé», no «no las hay».</li>
   </ul>
   <p class="cap">Se descartó incrustar el preview JCEF del plugin Markdown: viola la restricción de no usar WebView y añade una dependencia dura a un plugin que no está en todos los IDEs.</p>
+  <div class="adr warn">
+    <span class="tag">Corregido durante la Fase 6 · la ampliación es un popup, no un editor de fichero</span>
+    <p>El diseño decía abrir el adjunto con <code>FileEditorManager</code> para heredar el zoom del plugin <em>Images</em>. La implementación lo descartó por una razón de bulto: el editor de la tarea vive dentro de un <strong>diálogo modal</strong>, así que el fichero se abriría detrás y no se podría tocar hasta cerrar la tarea. Un <code>JBPopup</code> sí se ve encima, y es lo que se pedía de verdad — mirar la captura de cerca.</p>
+    <p>Por lo mismo desaparece la acción de contexto «Quitar imagen»: con la referencia plegada a <code>[image]</code>, quitarla es seleccionar esa palabra y pulsar <code>Supr</code>. Ninguna acción propia iba a ser más descubrible que eso, y la que borra es la que ya tiene el usuario en los dedos.</p>
+  </div>
+
+  <h3>Exportación</h3>
+  <p>Sale aquí y no en una fase propia porque no depende de nada del IDE: <code>TaskExporter</code> es una función de <code>(secciones, configuración, formato)</code> a <code>String</code>, vive en <code>domain/export/</code> y se fija con tests en vez de comprobándolo a ojo tras copiar. <code>ExportService</code> sólo pone el portapapeles, los diálogos y el aviso.</p>
+  <p><strong>Se exporta lo que se ve.</strong> Las secciones las construye la pestaña a partir de lo que acaba de pintar —mismo orden, mismos grupos, búsqueda incluida— y no recalculándolas al copiar. Exportar algo que no está en pantalla sería imposible de revisar antes de pegarlo. Tres alcances: el estado entero, el grupo de fecha de la selección, y la selección.</p>
+  <div class="adr">
+    <span class="tag">El formato va en el menú de exportar, no en los ajustes</span>
+    <p><code>ExportFormat</code> tiene dos valores: Markdown con casilla (<code>- [x] tarea</code>) y guiones pelados. La elección no es una decisión del equipo que merezca <code>.idea/tasklane.xml</code>, sino de dónde se va a pegar <em>esta vez</em> —un ticket entiende la casilla, un correo la lee como ruido—, así que el interruptor está junto a la acción y se recuerda en <code>workspace.xml</code>.</p>
+  </div>
+  <p><strong>Exportar y quitar.</strong> Un repositorio ausente es el único que puede salir del catálogo, y sólo por aquí: se copian todas sus tareas —un bloque por estado—, se confirma, y sólo entonces <code>TaskService.forgetRepo</code> lo saca del modelo y borra su directorio. El comando es <code>ForgetRepo</code> y no un <code>Delete</code> con todas las tareas: eso dejaría el repositorio en el snapshot con la lista vacía, lo marcaría como sucio y reescribiría un <code>tasks.xml</code> justo detrás de haberlo borrado.</p>
 </section>
 
 <!-- ============ 10 ============ -->
@@ -760,7 +808,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
       <tr><td>Persistencia</td><td><code>PersistentStateComponent</code>, <code>@State</code>, <code>@Storage</code>, <code>StoragePathMacros</code>, <code>SettingsCategory</code>, <code>RoamingType</code>, <code>com.intellij.util.xmlb.XmlSerializer</code>, <code>JDOMUtil</code></td></tr>
       <tr><td>Servicios y concurrencia</td><td><code>@Service</code>, <code>Service.Level</code>, inyección de <code>CoroutineScope</code>, <code>Dispatchers.EDT</code>, <code>ModalityState</code>, <code>ProjectActivity</code>, <code>Disposer</code>, <code>ProjectCloseListener</code>, <code>ReadAction</code></td></tr>
       <tr><td>VCS y Git</td><td><code>GitRepositoryManager</code>, <code>GitRepository</code>, <code>VcsRepositoryManager.VCS_REPOSITORY_MAPPING_UPDATED</code>, <code>ProjectLevelVcsManager</code>, <code>VcsRootDetector</code>, <code>ProjectRootManager</code></td></tr>
-      <tr><td>Editor e imágenes</td><td><code>EditorTextField</code>, <code>EditorFactory</code>, <code>InlayModel.addBlockElement</code>, <code>EditorCustomElementRenderer</code>, <code>WriteCommandAction</code>, <code>CommandProcessor</code>, <code>FileEditorManager</code>, <code>ImageLoader</code>, <code>ImageUtil</code>, <code>JBImageIcon</code>, <code>JBUIScale</code></td></tr>
+      <tr><td>Editor e imágenes</td><td><code>EditorTextField</code>, <code>EditorFactory</code>, <code>InlayModel.addBlockElement</code>, <code>EditorCustomElementRenderer</code>, <code>FoldingModel</code>, <code>WriteCommandAction</code>, <code>EditorActionManager</code>, <code>JBPopup</code>, <code>JBUIScale</code>, <code>ImageIO</code></td></tr>
       <tr><td>Enlaces y texto</td><td><code>BrowserUtil.browse</code>, <code>SimpleTextAttributes.LINK_ATTRIBUTES</code>, <code>JBHtmlPane</code>, <code>org.jetbrains:markdown</code>, <code>StringUtil</code>, <code>DateFormatUtil</code></td></tr>
       <tr><td>Clipboard</td><td><code>CopyPasteManager</code>, <code>TextTransferable</code>, <code>DataFlavor.imageFlavor</code></td></tr>
       <tr><td>Ajustes</td><td>EP <code>projectConfigurable</code>, <code>BoundSearchableConfigurable</code>, Kotlin UI DSL v2 (<code>panel { }</code>), <code>ColorPanel</code>, <code>TableView</code>, <code>ListTableModel</code>, <code>ShowSettingsUtil</code></td></tr>
@@ -861,21 +909,21 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <div class="gate"><b>Criterio</b>Con tres repos en una ventana, cada uno muestra sólo sus tareas; añadir uno en caliente lo hace aparecer.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 4<small>2–3 d · v0.4.0</small></div><div>
+  <div class="phase"><div class="pn">FASE 4<small>✅ hecha · v0.4.0</small></div><div>
     <h3>Teclado y búsqueda</h3>
     <p>Quick Add popup, acciones registradas con sus atajos, <code>⌘K</code> al campo de búsqueda, búsqueda con debounce y resaltado, triggers de prioridad en vivo.</p>
     <div class="gate"><b>Criterio</b>Crear una tarea con prioridad y proyecto sin tocar el ratón; buscar sobre 5.000 tareas sin lag perceptible.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 5<small>1–2 d · v0.5.0</small></div><div>
+  <div class="phase"><div class="pn">FASE 5<small>✅ hecha · v0.5.0</small></div><div>
     <h3>Enlaces y exportación</h3>
-    <p><code>LinkExtractor</code>, acortado con dominio primero, fragmentos clicables, indicador de enlaces por fila, exportación al portapapeles por estado, por grupo y por selección.</p>
+    <p><code>LinkExtractor</code> y <code>UrlShortener</code> con acortado de dominio primero, fragmentos clicables en el título, renderer de dos líneas con indicador de enlaces por fila, <code>TaskExporter</code> al portapapeles por estado, por grupo y por selección, y «exportar y quitar» para los repositorios ausentes.</p>
     <div class="gate"><b>Criterio</b>Abrir un enlace desde la fila sin entrar a editar; exportar «Done → Today» produce la lista de guiones esperada.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 6<small>3–4 d · v0.6.0</small></div><div>
+  <div class="phase"><div class="pn">FASE 6<small>✅ hecha · v0.6.0</small></div><div>
     <h3>Imágenes</h3>
-    <p><code>AttachmentStore</code> direccionado por contenido, pegado desde el portapapeles, inlays de bloque, apertura ampliada, borrado y recolección de basura.</p>
+    <p><code>AttachmentStore</code> direccionado por contenido, <code>ImageNormalizer</code> a PNG con reescalado configurable, pegado desde el portapapeles con el atajo del keymap, editor real con <code>EditorTextField</code>, referencia plegada e inlay de bloque con la vista previa, ampliación en popup, y <code>AttachmentGc</code> con periodo de gracia al abrir el proyecto.</p>
     <div class="gate"><b>Criterio</b>Pegar una captura, verla en el editor, ampliarla, deshacer, y que el blob no quede para siempre.</div>
   </div></div>
 
@@ -893,7 +941,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <h3>Riesgos técnicos</h3>
   <div class="adr warn">
     <span class="tag">Conflicto de atajos en macOS</span>
-    <p>Los dos atajos propuestos ya están ocupados en el keymap de macOS: <code>⌘⌥R</code> es <em>Resume Program</em> y <code>⌘K</code> es <em>Commit</em>. La mitigación es doble: registrar ambas acciones en <code>plugin.xml</code> (para que sean configurables en Keymap) y además instalarlas sobre el panel con <code>registerCustomShortcutSet</code>, leyendo el atajo <em>desde el keymap</em>. Así ganan dentro de la tool window sin pelear con el binding global. <code>⌘K</code> queda resuelto así. <code>⌘⌥R</code> es global y sí compite de verdad con <em>Resume Program</em>; la decisión tomada es <strong>mantenerlo</strong> como default — el IDE avisa del conflicto en <em>Settings → Keymap</em> y el usuario elige cuál gana. Se documenta en el README y en la descripción del plugin.</p>
+    <p>Los dos atajos propuestos ya están ocupados en el keymap de macOS: <code>⌘⌥R</code> es <em>Resume Program</em> y <code>⌘K</code> es <em>Commit</em>. La mitigación es doble: registrar ambas acciones en <code>plugin.xml</code> (para que sean configurables en Keymap) y además instalarlas sobre el panel con <code>registerCustomShortcutSet</code>, leyendo el atajo <em>desde el keymap</em>. Así ganan dentro de la tool window sin pelear con el binding global. <code>⌘K</code> queda resuelto así — y sin declararle atajo por defecto en <code>plugin.xml</code>: la acción se registra sin asignación, el panel la instala con <code>⌘K</code> como valor local y lee el keymap primero, de modo que fuera de la tool window <code>⌘K</code> sigue siendo <em>Commit</em> y quien quiera un atajo global lo asigna y este código lo recoge solo. <code>⌘⌥R</code> es global y sí compite de verdad con <em>Resume Program</em>; la decisión tomada es <strong>mantenerlo</strong> como default — el IDE avisa del conflicto en <em>Settings → Keymap</em> y el usuario elige cuál gana. Se documenta en el README y en la descripción del plugin.</p>
   </div>
   <div class="adr alt">
     <span class="tag">Resuelto en la Fase 1 · serialización</span>

@@ -114,4 +114,22 @@ class TasklaneConfigStateTest {
         )
         assertEquals(0, TasklaneConfig.DEFAULT.copy(repoDepth = -1).normalized().repoDepth)
     }
+
+    @Test
+    fun `el tamano maximo de imagen viaja con la configuracion del proyecto`() {
+        val config = TasklaneConfig.DEFAULT.copy(imageMaxSize = 900)
+        assertEquals(900, config.toState().toDomain()!!.imageMaxSize)
+    }
+
+    @Test
+    fun `un tamano absurdo se recorta en vez de producir una imagen absurda`() {
+        assertEquals(
+            TasklaneConfig.MAX_IMAGE_MAX_SIZE,
+            TasklaneConfig.DEFAULT.copy(imageMaxSize = 100_000).normalized().imageMaxSize,
+        )
+        assertEquals(
+            TasklaneConfig.MIN_IMAGE_MAX_SIZE,
+            TasklaneConfig.DEFAULT.copy(imageMaxSize = 0).normalized().imageMaxSize,
+        )
+    }
 }

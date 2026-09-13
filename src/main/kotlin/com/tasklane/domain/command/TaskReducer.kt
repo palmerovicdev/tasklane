@@ -6,6 +6,8 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.domain.text.ImageRefParser
+import com.tasklane.domain.text.LinkExtractor
 import java.time.Clock
 import java.time.Instant
 
@@ -101,9 +103,25 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
 
         val next: List<Task> = when (command) {
             is TaskCommand.Loaded -> return snapshot.copy(
-                tasksByRepo = snapshot.tasksByRepo + (repo to command.tasks.map { normalize(it, config) }),
+                tasksByRepo = snapshot.tasksByRepo + (repo to command.tasks.map { withDerived(normalize(it, config)) }),
                 loading = snapshot.loading - repo,
             )
+
+            is TaskCommand.ForgetRepo -> {
+                if (repo !in snapshot.tasksByRepo && snapshot.repositories.none { it.key == repo }) {
+                    return snapshot
+                }
+                val remaining = snapshot.repositories.filterNot { it.key == repo }
+                return snapshot.copy(
+                    tasksByRepo = snapshot.tasksByRepo - repo,
+                    repositories = remaining,
+                    // Igual que en RepositoriesChanged: el activo tiene que seguir
+                    // existiendo, o el árbol quedaría pintando una clave fantasma.
+                    activeRepo = if (snapshot.activeRepo != repo) snapshot.activeRepo
+                    else remaining.firstOrNull()?.key ?: snapshot.activeRepo,
+                    loading = snapshot.loading - repo,
+                )
+            }
 
             is TaskCommand.Create -> {
                 val body = command.body.trim()
@@ -115,19 +133,23 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                     id = TaskId.random(),
                     repo = repo,
                     body = body,
+                    links = LinkExtractor.extract(body),
+                    attachments = ImageRefParser.parse(body),
                     stateId = state.id,
                     priorityId = priority.id,
                     createdAt = now,
                     updatedAt = now,
                     completedAt = if (state.terminal) now else null,
                     order = snapshot.nextOrder(repo),
+                    tags = command.tags.map(String::trim).filter(String::isNotEmpty).distinct(),
+                    dueDate = command.dueDate,
                 )
             }
 
             is TaskCommand.UpdateBody -> current.mapTask(command.id) { task ->
                 val body = command.body.trim()
                 if (body.isEmpty() || body == task.body) task
-                else task.copy(body = body, updatedAt = now)
+                else withDerived(task.copy(body = body, updatedAt = now))
             }
 
             is TaskCommand.ChangeState -> current.mapTask(command.id) { task ->
@@ -143,6 +165,23 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                     updatedAt = now,
                     extra = task.extra - ORIG_PRIORITY,
                 )
+            }
+
+            is TaskCommand.SetDueDate -> current.mapTask(command.id) { task ->
+                if (task.dueDate == command.dueDate) task
+                else task.copy(dueDate = command.dueDate, updatedAt = now)
+            }
+
+            is TaskCommand.ToggleBookmark -> current.mapTask(command.id) { task ->
+                // Marcar no es editar: no toca `updatedAt`. Si lo tocara, marcar una
+                // tarea vieja para no perderla de vista la movería al grupo de hoy,
+                // que es justo lo contrario de lo que el usuario pidió.
+                task.copy(bookmarked = !task.bookmarked)
+            }
+
+            is TaskCommand.SetTags -> current.mapTask(command.id) { task ->
+                val tags = command.tags.map(String::trim).filter(String::isNotEmpty).distinct()
+                if (tags == task.tags) task else task.copy(tags = tags, updatedAt = now)
             }
 
             is TaskCommand.ToggleComplete -> current.mapTask(command.id) { task ->
@@ -163,6 +202,24 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
 
         if (next === current) return snapshot
         return snapshot.copy(tasksByRepo = snapshot.tasksByRepo + (repo to next))
+    }
+
+    /**
+     * Recalcula lo que se deriva del cuerpo: enlaces e imágenes.
+     *
+     * Se invoca **sólo donde el cuerpo entra o cambia** —crear, editar y cargar— y
+     * no en los comandos que mueven estado o prioridad: ninguno de ellos puede
+     * tocar el texto, y extraer ahí sería recorrer el cuerpo de todas las tareas
+     * para llegar siempre a la misma lista. Ver `docs/architecture.html` §9.
+     *
+     * Devuelve la MISMA instancia si nada cambió: es lo que deja que el servicio
+     * decida por identidad qué repositorios hay que reescribir.
+     */
+    private fun withDerived(task: Task): Task {
+        val links = LinkExtractor.extract(task.body)
+        val attachments = ImageRefParser.parse(task.body)
+        return if (links == task.links && attachments == task.attachments) task
+        else task.copy(links = links, attachments = attachments)
     }
 
     private fun applyState(

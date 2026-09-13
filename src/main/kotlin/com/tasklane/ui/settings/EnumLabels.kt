@@ -11,6 +11,8 @@ import com.tasklane.domain.model.Grouping
 internal fun Grouping.label(): String = when (this) {
     Grouping.NONE -> TasklaneBundle.message("settings.grouping.none")
     Grouping.BY_DATE -> TasklaneBundle.message("settings.grouping.byDate")
+    Grouping.BY_PRIORITY -> TasklaneBundle.message("settings.grouping.byPriority")
+    Grouping.BY_TAG -> TasklaneBundle.message("settings.grouping.byTag")
 }
 
 internal fun DateAnchor.label(): String = when (this) {

@@ -70,6 +70,21 @@ dependencies {
 }
 
 intellijPlatform {
+    // Indexa las etiquetas del Configurable para que aparezcan en la busqueda de
+    // Settings. Para hacerlo arranca un IDE headless, y contra el IDE local eso
+    // comparte el sandbox con la instancia de `runIde`: el segundo proceso muere
+    // con "Only one instance of IDEA can be run at a time".
+    //
+    // Se desactiva solo en el dev loop. En CI y en release (localIdePath vacio ->
+    // plataforma descargada, sandbox propio) si se ejecuta, que es donde importa:
+    // es el zip que se publica.
+    //
+    // Va aqui y no como `tasks.buildSearchableOptions { enabled = false }`: apagar
+    // la tarea deja a `prepareJarSearchableOptions` esperando un directorio que ya
+    // nadie crea, y `clean buildPlugin` falla. El interruptor de la extension si
+    // salta la cadena entera.
+    buildSearchableOptions = localIde == null
+
     pluginConfiguration {
         id = providers.gradleProperty("pluginId")
         name = providers.gradleProperty("pluginName")
@@ -95,17 +110,5 @@ intellijPlatform {
 tasks {
     wrapper {
         gradleVersion = providers.gradleProperty("gradleVersion").get()
-    }
-
-    // Indexa las etiquetas del Configurable para que aparezcan en la busqueda de
-    // Settings. Para hacerlo arranca un IDE headless, y contra el IDE local eso
-    // comparte el sandbox con la instancia de `runIde`: el segundo proceso muere
-    // con "Only one instance of IDEA can be run at a time".
-    //
-    // Se desactiva solo en el dev loop. En CI y en release (localIdePath vacio ->
-    // plataforma descargada, sandbox propio) si se ejecuta, que es donde importa:
-    // es el zip que se publica.
-    buildSearchableOptions {
-        enabled = localIde == null
     }
 }

@@ -112,6 +112,30 @@ class TaskFileStore(private val layout: StorageLayout) {
         }
     }
 
+    // ---------------------------------------------------------------- borrado
+
+    /**
+     * Borra el directorio entero de un repositorio: tareas, copia de seguridad,
+     * ficheros en cuarentena y adjuntos.
+     *
+     * Sólo lo invoca «Exportar y quitar», y sólo después de que el texto esté en el
+     * portapapeles. Toma el mismo cerrojo que la escritura para no borrar por debajo
+     * de un volcado en curso.
+     *
+     * Se recorre el árbol en vez de usar `deleteRecursively` de la VFS por la misma
+     * razón que el resto de la clase: esto no son fuentes del proyecto.
+     */
+    suspend fun delete(repo: RepoKey) = lockFor(repo).withLock {
+        val dir = layout.repoDir(repo)
+        if (!Files.exists(dir)) return@withLock
+        Files.walk(dir).use { paths ->
+            paths.sorted(Comparator.reverseOrder()).forEach { path ->
+                runCatching { Files.deleteIfExists(path) }
+                    .onFailure { thisLogger().warn("Tasklane: no se pudo borrar $path", it) }
+            }
+        }
+    }
+
     sealed interface ReadResult {
         val tasks: List<Task>
 

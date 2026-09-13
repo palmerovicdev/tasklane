@@ -2,6 +2,7 @@ package com.tasklane.domain
 
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
+import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
@@ -11,6 +12,7 @@ import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.model.TasklaneSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -38,6 +40,61 @@ class TaskReducerTest {
         assertEquals(TasklaneConfig.NORMAL, task.priorityId)
         assertEquals(t0, task.createdAt)
         assertNull("una tarea nueva no esta completada", task.completedAt)
+    }
+
+    @Test
+    fun `crear con etiquetas y vencimiento los conserva`() {
+        // Es el camino del diálogo: sin esto, poner etiquetas y fecha al dar de alta
+        // se perdía y sólo se podían añadir volviendo a editar.
+        val vence = Instant.parse("2026-09-20T21:59:59Z")
+        val task = reducer.reduce(
+            empty,
+            TaskCommand.Create(repo, "Preparar demo", tags = listOf("demo", " demo ", "qa"), dueDate = vence),
+        ).activeTasks.single()
+
+        assertEquals(listOf("demo", "qa"), task.tags)
+        assertEquals(vence, task.dueDate)
+    }
+
+    @Test
+    fun `fijar y quitar la fecha de vencimiento`() {
+        val vence = Instant.parse("2026-09-20T10:00:00Z")
+        val creada = create("Entregar informe")
+        val id = creada.activeTasks.single().id
+
+        val conFecha = reducer.reduce(creada, TaskCommand.SetDueDate(repo, id, vence))
+        assertEquals(vence, conFecha.activeTasks.single().dueDate)
+
+        val sinFecha = reducer.reduce(conFecha, TaskCommand.SetDueDate(repo, id, null))
+        assertNull("null quita el vencimiento", sinFecha.activeTasks.single().dueDate)
+    }
+
+    @Test
+    fun `marcar no cuenta como editar`() {
+        // Si `updatedAt` cambiase, marcar una tarea vieja para no perderla de vista
+        // la movería al grupo de hoy: justo lo contrario de lo que se pidió.
+        val creada = create("Revisar contrato")
+        val antes = creada.activeTasks.single()
+        val marcada = reducer.reduce(creada, TaskCommand.ToggleBookmark(repo, antes.id)).activeTasks.single()
+
+        assertTrue(marcada.bookmarked)
+        assertEquals("marcar no toca la fecha de modificacion", antes.updatedAt, marcada.updatedAt)
+
+        val desmarcada = reducer
+            .reduce(reducer.reduce(creada, TaskCommand.ToggleBookmark(repo, antes.id)), TaskCommand.ToggleBookmark(repo, antes.id))
+            .activeTasks.single()
+        assertFalse(desmarcada.bookmarked)
+    }
+
+    @Test
+    fun `las etiquetas se normalizan al fijarlas`() {
+        val creada = create("Migrar el indice")
+        val id = creada.activeTasks.single().id
+        val conTags = reducer
+            .reduce(creada, TaskCommand.SetTags(repo, id, listOf(" api ", "", "api", "docs")))
+            .activeTasks.single()
+
+        assertEquals(listOf("api", "docs"), conTags.tags)
     }
 
     @Test
@@ -346,5 +403,135 @@ class TaskReducerTest {
 
         assertEquals(TasklaneConfig.TODO, after.tasksOf(api).single().stateId)
         assertEquals(TasklaneConfig.TODO, after.tasksOf(web).single().stateId)
+    }
+
+    @Test
+    fun `olvidar un repositorio se lleva sus tareas y mueve el activo`() {
+        var s = withRepos(listOf(api, web))
+        s = reducer.reduce(s, TaskCommand.Create(api, "de api"))
+        s = reducer.reduce(s, TaskCommand.Create(web, "de web"))
+
+        val after = reducer.reduce(s, TaskCommand.ForgetRepo(api))
+
+        assertTrue("la clave desaparece, no se queda con lista vacia", api !in after.tasksByRepo)
+        assertEquals(listOf(web), after.repositories.map { it.key })
+        assertEquals("el activo tiene que seguir existiendo", web, after.activeRepo)
+        assertEquals(listOf("de web"), after.tasksOf(web).map { it.body })
+    }
+
+    @Test
+    fun `olvidar algo que no esta no cambia nada`() {
+        val s = withRepos(listOf(api))
+        assertSame(s, reducer.reduce(s, TaskCommand.ForgetRepo(web)))
+    }
+
+    // ------------------------------------------------------------- enlaces
+
+    @Test
+    fun `crear extrae los enlaces del cuerpo`() {
+        val task = create("Revisar https://ejemplo.com/a").activeTasks.single()
+        assertEquals(listOf("https://ejemplo.com/a"), task.links.map { it.url })
+    }
+
+    @Test
+    fun `editar el cuerpo recalcula los enlaces`() {
+        val created = create("Revisar https://ejemplo.com/a")
+        val id = created.activeTasks.single().id
+
+        val edited = reducer.reduce(created, TaskCommand.UpdateBody(repo, id, "Revisar sin enlace"))
+        assertTrue(edited.activeTasks.single().links.isEmpty())
+    }
+
+    @Test
+    fun `cargar de disco deriva los enlaces`() {
+        // El codec NO persiste `links`: son derivados, y lo que se guarda es el
+        // cuerpo. Si la carga no los recalculara, `has:link` no encontraria nada
+        // hasta volver a editar la tarea.
+        val stored = Task(
+            id = TaskId("t1"),
+            repo = repo,
+            body = "Ver https://ejemplo.com/a",
+            stateId = TasklaneConfig.TODO,
+            priorityId = TasklaneConfig.NORMAL,
+            createdAt = t0,
+            updatedAt = t0,
+        )
+        val loaded = reducer.reduce(empty, TaskCommand.Loaded(repo, listOf(stored)))
+        assertEquals(listOf("https://ejemplo.com/a"), loaded.activeTasks.single().links.map { it.url })
+    }
+
+    @Test
+    fun `cambiar de estado no toca los enlaces`() {
+        val created = create("Ver https://ejemplo.com/a")
+        val before = created.activeTasks.single()
+        val after = reducer
+            .reduce(created, TaskCommand.ChangeState(repo, before.id, TasklaneConfig.DONE))
+            .activeTasks.single()
+        assertEquals(before.links, after.links)
+    }
+
+    // ------------------------------------------------------------- imagenes
+
+    private val sha = "a".repeat(64)
+
+    @Test
+    fun `crear deriva las imagenes del cuerpo`() {
+        val task = create("Error al entrar\n![](tasklane:$sha)").activeTasks.single()
+        assertEquals(listOf(AttachmentId(sha)), task.attachments.map { it.id })
+    }
+
+    @Test
+    fun `editar el cuerpo recalcula las imagenes`() {
+        val created = create("Error al entrar\n![](tasklane:$sha)")
+        val id = created.activeTasks.single().id
+
+        val edited = reducer.reduce(created, TaskCommand.UpdateBody(repo, id, "Error al entrar"))
+        assertTrue("quitar la referencia quita el adjunto", edited.activeTasks.single().attachments.isEmpty())
+    }
+
+    /**
+     * El códec no persiste los adjuntos: son derivados del cuerpo, igual que los
+     * enlaces. Sin recalcularlos al cargar, `has:image` no encontraría nada hasta
+     * volver a editar la tarea, y el recolector creería que no hay nada referenciado
+     * — que es como se borra una imagen que sí se estaba usando.
+     */
+    @Test
+    fun `cargar de disco deriva las imagenes`() {
+        val stored = Task(
+            id = TaskId("t1"),
+            repo = repo,
+            body = "Con captura\n![](tasklane:$sha)",
+            stateId = TasklaneConfig.TODO,
+            priorityId = TasklaneConfig.NORMAL,
+            createdAt = t0,
+            updatedAt = t0,
+        )
+        val loaded = reducer.reduce(empty, TaskCommand.Loaded(repo, listOf(stored)))
+        assertEquals(listOf(AttachmentId(sha)), loaded.activeTasks.single().attachments.map { it.id })
+    }
+
+    @Test
+    fun `una linea que solo es una imagen no se convierte en titulo`() {
+        val task = create("![](tasklane:$sha)\nArreglar el login").activeTasks.single()
+        assertEquals("Arreglar el login", task.title)
+    }
+
+    @Test
+    fun `una tarea que es solo una imagen sigue teniendo cuerpo`() {
+        val task = create("![](tasklane:$sha)").activeTasks.single()
+        assertEquals("![](tasklane:$sha)", task.title)
+        assertFalse("la imagen no es detalle: ya la anuncia el indicador", task.hasDetail)
+    }
+
+    @Test
+    fun `una imagen bajo el titulo no cuenta como detalle`() {
+        val task = create("Arreglar el login\n![](tasklane:$sha)").activeTasks.single()
+        assertFalse(task.hasDetail)
+    }
+
+    @Test
+    fun `el texto bajo la imagen si cuenta como detalle`() {
+        val task = create("Arreglar el login\n![](tasklane:$sha)\nPasa con Safari").activeTasks.single()
+        assertTrue(task.hasDetail)
     }
 }

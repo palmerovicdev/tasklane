@@ -63,6 +63,18 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         TasklaneConfig.MAX_REPO_DEPTH,
     )
 
+    /**
+     * Lado mayor al que se reescala una imagen pegada. Es un ajuste del proyecto y no
+     * de la máquina porque lo que decide es **qué se escribe en disco**, y eso lo
+     * comparten todos los que abran el proyecto.
+     */
+    private val imageSizeSpinner = JBIntSpinner(
+        TasklaneConfig.DEFAULT_IMAGE_MAX_SIZE,
+        TasklaneConfig.MIN_IMAGE_MAX_SIZE,
+        TasklaneConfig.MAX_IMAGE_MAX_SIZE,
+        IMAGE_SIZE_STEP,
+    )
+
     /** Aviso de validación bajo las tablas; la fila exacta la marca la tabla. */
     private val problemLabel = JBLabel("", AllIcons.General.Error, SwingConstants.LEADING).apply {
         isVisible = false
@@ -97,6 +109,11 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.repos.comment")) }
         }
 
+        group(TasklaneBundle.message("settings.images.title")) {
+            row(TasklaneBundle.message("settings.images.maxSize")) { cell(imageSizeSpinner) }
+            row { comment(TasklaneBundle.message("settings.images.comment")) }
+        }
+
         row { cell(problemLabel) }
 
         row {
@@ -114,6 +131,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         prioritiesTable.rows = priorities
         triggersCheckBox.isSelected = config.triggersEnabled
         depthSpinner.number = config.repoDepth
+        imageSizeSpinner.number = config.imageMaxSize
         stateReassign.clear()
         priorityReassign.clear()
         updateProblems()
@@ -155,8 +173,13 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     }
 
     private fun currentConfig(): TasklaneConfig =
-        buildConfig(statesTable.rows, prioritiesTable.rows, triggersCheckBox.isSelected, depthSpinner.number)
-            .normalized()
+        buildConfig(
+            statesTable.rows,
+            prioritiesTable.rows,
+            triggersCheckBox.isSelected,
+            depthSpinner.number,
+            imageSizeSpinner.number,
+        ).normalized()
 
     // ----------------------------------------------------------- validación
 
@@ -326,5 +349,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         const val ID = "com.tasklane.settings"
         private const val HELP_TOPIC = "com.tasklane.settings"
         private const val KEYMAP_ID = "preferences.keymap"
+
+        /** Saltos de 100 px: el ajuste es un orden de magnitud, no una medida fina. */
+        private const val IMAGE_SIZE_STEP = 100
     }
 }

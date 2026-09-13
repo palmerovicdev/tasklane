@@ -146,6 +146,38 @@ class TaskService(
     }
 
     /**
+     * Saca un repositorio del modelo y borra sus datos del disco. Es la mitad
+     * destructiva de «Exportar y quitar», y quien llama ya ha confirmado con el
+     * usuario y ha dejado el texto en el portapapeles.
+     *
+     * El orden importa: primero se limpia el estado que decide qué se escribe
+     * —`dirty` sobre todo— y sólo después se borra. Al revés, un volcado pendiente
+     * recrearía el `tasks.xml` justo detrás del borrado.
+     */
+    fun forgetRepo(repo: RepoKey) {
+        dirty -= repo
+        requested -= repo
+        readOnly -= repo
+        apply(TaskCommand.ForgetRepo(repo))
+        if (workspace.selectedRepo == repo.value) {
+            workspace.selectedRepo = _snapshot.value.activeRepo.value
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching { store?.delete(repo) }.onFailure { e ->
+                thisLogger().warn("Tasklane: no se pudo borrar el directorio de $repo", e)
+                notify(
+                    "Tasklane: el repositorio se quito de la lista",
+                    "Sus tareas ya estan en el portapapeles, pero no se pudo borrar la carpeta de " +
+                        "datos: ${e.message.orEmpty()}",
+                    NotificationType.WARNING,
+                )
+            }
+            // Sin tareas en disco, el catalogo deja de conservar la entrada huerfana.
+            registry.refresh()
+        }
+    }
+
+    /**
      * Qué repositorios hay que reescribir. Se deduce comparando el antes y el después
      * en vez de leerlo del comando: desde la Fase 2 hay comandos —cambio de
      * configuración, reasignación— que tocan varios repos a la vez, y un comando

@@ -59,6 +59,9 @@ class TasklaneConfigState {
 
     @Attribute
     var repoDepth: Int = TasklaneConfig.DEFAULT_REPO_DEPTH
+
+    @Attribute
+    var imageMaxSize: Int = TasklaneConfig.DEFAULT_IMAGE_MAX_SIZE
 }
 
 // ------------------------------------------------------------------ mapeo
@@ -73,7 +76,7 @@ fun TasklaneConfigState.toDomain(): TasklaneConfig? {
     val states = states.mapIndexedNotNull { i, bean -> bean.toDomain(i) }
     val priorities = priorities.mapIndexedNotNull { i, bean -> bean.toDomain(i) }
     if (states.isEmpty() || priorities.isEmpty()) return null
-    return TasklaneConfig(states, priorities, triggersEnabled, repoDepth).normalized()
+    return TasklaneConfig(states, priorities, triggersEnabled, repoDepth, imageMaxSize).normalized()
 }
 
 private fun StateBean.toDomain(index: Int): TaskState? {
@@ -125,6 +128,7 @@ fun TasklaneConfig.toState(): TasklaneConfigState = TasklaneConfigState().also {
     }
     state.triggersEnabled = triggersEnabled
     state.repoDepth = repoDepth
+    state.imageMaxSize = imageMaxSize
 }
 
 /** Un enum desconocido —fichero de otra versión— cae al valor seguro, no revienta. */

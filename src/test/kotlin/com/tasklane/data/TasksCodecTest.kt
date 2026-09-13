@@ -29,6 +29,28 @@ class TasksCodecTest {
     )
 
     @Test
+    fun `el vencimiento y la marca sobreviven al ciclo`() {
+        val vence = Instant.parse("2026-09-20T09:00:00Z")
+        val original = task().copy(dueDate = vence, bookmarked = true)
+        val decoded = TasksCodec.decode(TasksCodec.encode(repo, listOf(original)), repo).tasks.single()
+
+        assertEquals(vence, decoded.dueDate)
+        assertEquals(true, decoded.bookmarked)
+    }
+
+    @Test
+    fun `sin marca no se escribe el atributo`() {
+        // Un `bookmarked="false"` por tarea engorda el fichero y el diff de cada
+        // guardado sin decir nada que la ausencia no diga ya.
+        val encoded = TasksCodec.encode(repo, listOf(task()))
+        val el = encoded.getChildren("task").single()
+
+        assertEquals(null, el.getAttributeValue("bookmarked"))
+        assertEquals(null, el.getAttributeValue("dueDate"))
+        assertEquals(false, TasksCodec.decode(encoded, repo).tasks.single().bookmarked)
+    }
+
+    @Test
     fun `ida y vuelta conserva los campos`() {
         val original = task()
         val decoded = TasksCodec.decode(TasksCodec.encode(repo, listOf(original)), repo).tasks.single()
