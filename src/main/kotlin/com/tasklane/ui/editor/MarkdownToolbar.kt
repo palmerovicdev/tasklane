@@ -1,6 +1,5 @@
 package com.tasklane.ui.editor
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -9,6 +8,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.project.DumbAwareAction
 import com.tasklane.TasklaneBundle
+import com.tasklane.ui.common.TasklaneIcons
 import javax.swing.Icon
 import javax.swing.JComponent
 
@@ -28,40 +28,42 @@ import javax.swing.JComponent
 internal object MarkdownToolbar {
 
     fun create(field: MarkdownField, target: JComponent): JComponent {
-        // Negrita, cursiva y código van como glifo y no como icono porque la
-        // plataforma no trae ninguno para ellos, y «B» en negrita se entiende en
-        // cualquier editor del mundo mejor que un icono inventado aquí.
         val group = DefaultActionGroup(
-            button("bold", glyph = "B") { field.wrapSelection("**") },
-            button("italic", glyph = "I") { field.wrapSelection("*") },
-            button("code", glyph = "</>") { field.wrapSelection("`") },
+            button("bold", TasklaneIcons.FormatBold) { field.wrapSelection("**") },
+            button("italic", TasklaneIcons.FormatItalic) { field.wrapSelection("*") },
+            button("code", TasklaneIcons.FormatCode) { field.wrapSelection("`") },
             Separator.getInstance(),
             // El cursor queda entre los corchetes, que es donde se escribe el texto
             // del enlace; la URL va detrás, ya seleccionable de un doble clic.
-            button("link", icon = AllIcons.ToolbarDecorator.AddLink) { field.wrapSelection("[", "](url)") },
+            button("link", TasklaneIcons.FormatLink) { field.wrapSelection("[", "](url)") },
             // La imagen no se inserta como marca: se elige el fichero, se guarda y lo
             // que entra en el texto es la referencia al blob. Por eso vive aquí y no
             // en un `wrapSelection` como el resto.
-            button("image", icon = AllIcons.FileTypes.Image) { field.chooseImage() },
+            button("image", TasklaneIcons.FormatImage) { field.chooseImage() },
             Separator.getInstance(),
-            button("bullet", icon = AllIcons.Actions.ListFiles) { field.prefixLines("- ") },
-            button("numbered", glyph = "1.") { field.prefixLines("", numbered = true) },
-            button("checklist", icon = AllIcons.Actions.Checked) { field.prefixLines("- [ ] ") },
+            button("bullet", TasklaneIcons.FormatBullet) { field.prefixLines("- ") },
+            button("numbered", TasklaneIcons.FormatNumbered) { field.prefixLines("", numbered = true) },
+            button("checklist", TasklaneIcons.FormatChecklist) { field.prefixLines("- [ ] ") },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.EDITOR_TOOLBAR, group, true)
         toolbar.targetComponent = target
         return toolbar.component
     }
 
+    /**
+     * Los ocho llevan icono, y **tienen que llevarlo**: negrita, cursiva, código y
+     * lista numerada se declararon en su día con el glifo puesto en el texto de la
+     * acción —«B», «I», «</>», «1.»— dando por hecho que la barra lo pintaría. No lo
+     * pinta: un `ActionToolbar` dibuja iconos, y a la acción que no trae ninguno le
+     * pone `AllIcons.Toolbar.Unknown`, el círculo con tres puntos. Cuatro de los ocho
+     * botones salían así hasta la `0.6.8`. Ver [TasklaneIcons].
+     */
     private fun button(
         key: String,
-        icon: Icon? = null,
-        glyph: String? = null,
+        icon: Icon,
         run: () -> Unit,
     ) = object : DumbAwareAction(
-        // El texto es el glifo cuando lo hay; la descripción —que es lo que sale en
-        // el tooltip— siempre es el nombre completo y traducible de la acción.
-        glyph ?: TasklaneBundle.message("dialog.task.format.$key"),
+        TasklaneBundle.message("dialog.task.format.$key"),
         TasklaneBundle.message("dialog.task.format.$key"),
         icon,
     ) {

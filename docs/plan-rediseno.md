@@ -226,6 +226,54 @@ segundo—. Los tres acaban en el mismo sitio: el diálogo de la tarea.
   desplegable está a un clic, y un cuerpo que empiece por `!!! ` no tiene por qué
   perderlo sólo por haberlo abierto y aceptado.
 
+## Iconos de la barra de formato · `0.7.0`
+
+Cuatro de los ocho botones salían como un círculo con tres puntos. Negrita, cursiva,
+código y lista numerada se declararon con el glifo puesto en el *texto* de la acción
+—«B», «I», `</>`, «1.»— dando por hecho que la barra lo pintaría. No lo pinta: un
+`ActionToolbar` dibuja iconos, y a la acción que no trae ninguno le planta
+`AllIcons.Toolbar.Unknown`.
+
+Se dibujan **los ocho** y no sólo los cuatro que faltaban. Los otros cuatro venían de
+`AllIcons` y no casaban entre sí —`FileTypes.Image` es azul, `Actions.ListFiles` es un
+documento y `Actions.Checked` un visto suelto que no dice «lista»—, y media fila con
+iconos ajenos junto a media con propios se nota a la primera: una barra de formato
+tiene que leerse como un solo conjunto.
+
+Rejilla de 16, trazo de 1 salvo en las letras —que a 1 quedan enclenques al lado de
+los pictogramas— y los mismos dos grises que `calendar.svg` y `tasklane.svg`. Se
+generan con `docs/tools/gen_format_icons.py`, que escribe la variante clara y la
+oscura desde un solo cuerpo: mantenerlas a mano es la forma segura de que acaben
+dibujando cosas distintas.
+
+Dos hubo que rehacerlos después de mirarlos ampliados, y los dos por el mismo tipo de
+error —geometría que parece correcta escrita y no lo es dibujada—:
+
+- **El enlace se leía como una ese.** La barra central y las patas de los dos ganchos
+  estaban sobre la misma recta, así que las tres se fundían en un trazo continuo. La
+  barra va sobre el eje y las patas a lado y lado.
+- **El «3» del icono numerado salía deforme.** La versión con dos arcos daba una ese
+  que se salía de su fila y chocaba con las líneas; se rehízo con cúbicas.
+
+## `Escape` cierra el diálogo · `0.7.0`
+
+Con el foco dentro del cuerpo —que es donde arranca— `Escape` no cerraba el diálogo de
+la tarea. `DialogWrapper` registra la tecla en su `JRootPane`, pero por la vía de Swing
+y con `WHEN_IN_FOCUSED_WINDOW`: es la última de la cola y sólo llega si nadie se ha
+quedado la pulsación antes, y el editor de la plataforma la mira antes que Swing. Se
+registra como **acción** sobre el campo del cuerpo, que es el camino que sí se recorre.
+
+Dos decisiones dentro del arreglo:
+
+- **Acotada al cuerpo**, no al diálogo entero. Registrada más arriba se adelantaría
+  también a los desplegables, y `Escape` con la lista de prioridad desplegada tiene
+  que cerrar la lista.
+- **Apagada mientras el editor tenga algo suyo que hacer** con la tecla —deshacer una
+  selección o volver de varios cursores a uno—. Son dos acciones sobre el mismo atajo
+  y sólo puede estar viva una; la condición es exactamente la que enciende la del
+  editor, negada. El efecto es el orden de siempre: con texto seleccionado la primera
+  pulsación suelta la selección y la segunda cierra.
+
 ## Cerrado
 
 El plan está completo en la `0.6.6`. Lo que queda anotado y **no** es de aquí: los

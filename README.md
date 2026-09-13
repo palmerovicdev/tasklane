@@ -3,7 +3,7 @@
 Plugin de IntelliJ Platform para gestionar TODOs por repositorio sin salir del IDE.
 
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
-- **Estado:** v0.6.8 — Fase 6 cerrada (imágenes) y **rediseño a tarjetas completo**:
+- **Estado:** v0.7.0 — Fase 6 cerrada (imágenes) y **rediseño a tarjetas completo**:
   filas como tarjeta, estados en una fila con su recuento, filtro de vista, adjuntos
   por arrastre, etiquetas como fichas y calendario para el vencimiento. Siguiente, la
   Fase 7: robustez y pulido.
@@ -284,7 +284,7 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # 265 tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-0.6.8.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-0.7.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -310,7 +310,8 @@ Window leen el keymap primero y sólo caen al valor local si no tienen asignaci�
 `pluginVersion` dice por sí solo hasta dónde llega el plugin instalado. La versión baja
 (*patch*) es para lo que no mueve el plan de ocho fases: correcciones, compatibilidad,
 textos y **cada iteración del rediseño a tarjetas**, que así deja siempre un plugin
-instalable en vez de esperar a que el plan entero esté cerrado.
+instalable en vez de esperar a que el plan entero esté cerrado. La `0.7.0` es la única
+excepción a la regla y está anotada debajo: salió con parte de su fase hecha.
 
 | | | | |
 |---|---|---|---|
@@ -321,7 +322,16 @@ instalable en vez de esperar a que el plan entero esté cerrado.
 | 4 | Teclado y búsqueda | `0.4.0` | ✅ |
 | 5 | Enlaces y exportación | `0.5.0` | ✅ |
 | 6 | Imágenes | `0.6.0` | ✅ |
-| 7 | Robustez y pulido | `0.7.0` | pendiente |
+| 7 | Robustez y pulido | `0.7.0` | 🔄 **en curso** — entregado el pulido de uso; el criterio sigue sin pasar |
+
+La `0.7.0` **abre** la Fase 7, no la cierra: sale con el pulido de uso —los iconos
+de la barra de formato y `Escape` en el diálogo, detallados en el plan del rediseño—
+porque son cosas que se notan a diario y no tenía sentido guardarlas. Lo que queda de
+la fase es lo de fondo: migraciones y modo solo lectura por versión, recuperación de
+ficheros corruptos, accesibilidad, tests de integración y `verifyPlugin` contra
+2025.2 → 2026.2. La fase se dará por cerrada cuando pase su criterio —corromper
+`tasks.xml` a mano y ver que el plugin recupera del `.bak` y avisa—, y es la única
+versión media que sale antes de tiempo: las seis anteriores sí cerraron su fase.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está

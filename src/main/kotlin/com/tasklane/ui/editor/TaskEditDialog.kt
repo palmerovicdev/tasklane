@@ -1,7 +1,11 @@
 package com.tasklane.ui.editor
 
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
@@ -110,6 +114,44 @@ internal class TaskEditDialog(
         title = TasklaneBundle.message(if (isNew) "dialog.task.new.title" else "dialog.task.edit.title")
         setOKButtonText(TasklaneBundle.message(if (isNew) "dialog.task.create" else "dialog.task.save"))
         init()
+        installEscape()
+    }
+
+    /**
+     * `Escape` cierra el diálogo **también con el cursor dentro del cuerpo**, que es
+     * donde arranca el foco y donde no lo hacía.
+     *
+     * `DialogWrapper` ya registra la tecla en su `JRootPane`, pero por la vía de Swing
+     * y con `WHEN_IN_FOCUSED_WINDOW`: esa vía es la última de la cola y sólo llega si
+     * nadie se ha quedado la pulsación antes. Con el foco dentro de un editor de la
+     * plataforma la tecla pasa primero por el despachador de acciones del IDE, así que
+     * el camino que sí se recorre es registrar una acción, no un binding de Swing.
+     *
+     * Va **acotada al cuerpo** y no al diálogo entero a propósito. Registrada más
+     * arriba se adelantaría también a los desplegables, y `Escape` con la lista de
+     * prioridad desplegada tiene que cerrar la lista, no el diálogo.
+     */
+    private fun installEscape() {
+        val cancel = object : DumbAwareAction() {
+            override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+            /**
+             * Apagada cuando el editor tiene algo suyo que hacer con la tecla —deshacer
+             * una selección o volver de varios cursores a uno—. Son dos acciones sobre
+             * el mismo atajo y sólo puede estar viva una: ésta es exactamente la
+             * condición que enciende la del editor, negada. De paso sale el orden que
+             * espera quien viene de escribir código: primero se suelta la selección y
+             * en la siguiente pulsación se cierra.
+             */
+            override fun update(e: AnActionEvent) {
+                val editor = bodyField.component.editor
+                e.presentation.isEnabled = editor == null ||
+                    (!editor.selectionModel.hasSelection() && editor.caretModel.caretCount == 1)
+            }
+
+            override fun actionPerformed(e: AnActionEvent) = doCancelAction()
+        }
+        cancel.registerCustomShortcutSet(CommonShortcuts.ESCAPE, bodyField.component, disposable)
     }
 
     override fun createCenterPanel(): JComponent = JPanel(BorderLayout(0, JBUI.scale(GAP))).apply {
