@@ -243,6 +243,7 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
       <tr><td>Atajos</td><td>Actions en <code>plugin.xml</code> + <code>registerCustomShortcutSet</code> local</td><td>Bindings Swing propios</td><td>Configurable en Keymap y gana en su contexto</td></tr>
       <tr><td>Ajustes</td><td><code>BoundSearchableConfigurable</code> + Kotlin UI DSL v2</td><td>Swing a mano</td><td>Buscable desde Settings y correcto en ambos temas</td></tr>
       <tr><td>UI web</td><td>Ninguna (sin JCEF)</td><td>Preview JCEF del plugin Markdown</td><td>Restricción del proyecto; Swing cubre el caso</td></tr>
+      <tr><td>Versionado</td><td>Una fase cerrada = una versión media (<code>0.N.0</code>)</td><td>SemVer por tipo de cambio</td><td>Nada se publica fuera de una fase; versión y fase son el mismo número</td></tr>
     </tbody>
   </table></div>
 </section>
@@ -819,49 +820,55 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <div class="sec-head"><span class="sec-num">13</span><h2>Plan de implementación</h2></div>
   <p>Ocho fases, cada una entregable y probable a mano. El orden se desvía del propuesto en dos puntos, por dependencias reales: <strong>multi-repo va antes que Quick Add</strong>, porque el popup necesita el selector de proyecto; y <strong>la exportación sube a la fase de enlaces</strong>, porque sólo depende del dominio y sale casi gratis ahí.</p>
 
+  <div class="adr">
+    <span class="tag">Versionado · una fase, una versión media</span>
+    <p>Cerrar una fase sube la <strong>versión media</strong>: la fase N deja el plugin en <code>0.N.0</code>, y la <code>1.0.0</code> queda reservada para cuando estén las ocho. El número de versión y el de fase son el mismo número, así que <code>pluginVersion</code> en <code>gradle.properties</code> dice por sí solo hasta dónde llega el plugin instalado.</p>
+    <p>La versión baja (<em>patch</em>) queda para lo que no mueve el plan: correcciones, compatibilidad con una plataforma nueva, retoques de texto. La <code>0.1.0</code> es la única excepción retroactiva — cubrió a la vez el andamiaje de la Fase 0 y el núcleo de la Fase 1, que no llegaron a publicarse por separado.</p>
+  </div>
+
   <div class="phase"><div class="pn">FASE 0<small>✅ hecha</small></div><div>
     <h3>Andamiaje</h3>
     <p>Gradle con IntelliJ Platform Gradle Plugin 2.x, <code>plugin.xml</code>, <code>TasklaneBundle</code>, tool window vacía, iconos, CI con <code>verifyPlugin</code>.</p>
     <div class="gate"><b>Criterio</b>El plugin se instala en un IDE de desarrollo y la tool window aparece.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 1<small>✅ hecha</small></div><div>
+  <div class="phase"><div class="pn">FASE 1<small>✅ hecha · v0.1.0</small></div><div>
     <h3>Núcleo: dominio, persistencia, CRUD</h3>
     <p>Modelo, <code>TaskReducer</code>, <code>TaskFileStore</code> con escritura atómica, <code>TaskService</code> con <code>StateFlow</code>, árbol con renderer básico y un pseudo-repositorio único. Tests JUnit del dominio y del store.</p>
     <div class="gate"><b>Criterio</b>Crear, editar, completar y borrar tareas; cerrar y reabrir el proyecto las recupera intactas.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 2<small>2–3 d</small></div><div>
+  <div class="phase"><div class="pn">FASE 2<small>✅ hecha · v0.2.0</small></div><div>
     <h3>Estados y prioridades</h3>
     <p><code>TasklaneConfig</code> de proyecto más la plantilla de defaults a nivel aplicación, <code>projectConfigurable</code> con las dos tablas, tabs por estado, franja de prioridad, agrupación por fecha configurable, diálogo de reasignación al borrar.</p>
     <div class="gate"><b>Criterio</b>Un proyecto nuevo arranca sembrado desde la plantilla; crear un estado, reordenarlo y borrar uno con tareas reasignándolas no hace desaparecer ninguna.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 3<small>2 d</small></div><div>
+  <div class="phase"><div class="pn">FASE 3<small>2 d · v0.3.0</small></div><div>
     <h3>Multi-repositorio</h3>
     <p><code>RepositoryRegistry</code>, proveedores Git y de content roots, selector en la barra, aislamiento de datos por <code>RepoKey</code>, reacción a eventos VCS.</p>
     <div class="gate"><b>Criterio</b>Con tres repos en una ventana, cada uno muestra sólo sus tareas; añadir uno en caliente lo hace aparecer.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 4<small>2–3 d</small></div><div>
+  <div class="phase"><div class="pn">FASE 4<small>2–3 d · v0.4.0</small></div><div>
     <h3>Teclado y búsqueda</h3>
     <p>Quick Add popup, acciones registradas con sus atajos, <code>⌘K</code> al campo de búsqueda, búsqueda con debounce y resaltado, triggers de prioridad en vivo.</p>
     <div class="gate"><b>Criterio</b>Crear una tarea con prioridad y proyecto sin tocar el ratón; buscar sobre 5.000 tareas sin lag perceptible.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 5<small>1–2 d</small></div><div>
+  <div class="phase"><div class="pn">FASE 5<small>1–2 d · v0.5.0</small></div><div>
     <h3>Enlaces y exportación</h3>
     <p><code>LinkExtractor</code>, acortado con dominio primero, fragmentos clicables, indicador de enlaces por fila, exportación al portapapeles por estado, por grupo y por selección.</p>
     <div class="gate"><b>Criterio</b>Abrir un enlace desde la fila sin entrar a editar; exportar «Done → Today» produce la lista de guiones esperada.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 6<small>3–4 d</small></div><div>
+  <div class="phase"><div class="pn">FASE 6<small>3–4 d · v0.6.0</small></div><div>
     <h3>Imágenes</h3>
     <p><code>AttachmentStore</code> direccionado por contenido, pegado desde el portapapeles, inlays de bloque, apertura ampliada, borrado y recolección de basura.</p>
     <div class="gate"><b>Criterio</b>Pegar una captura, verla en el editor, ampliarla, deshacer, y que el blob no quede para siempre.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 7<small>2–3 d</small></div><div>
+  <div class="phase"><div class="pn">FASE 7<small>2–3 d · v0.7.0</small></div><div>
     <h3>Robustez y pulido</h3>
     <p>Migraciones y modo solo lectura por versión, recuperación de ficheros corruptos, notificaciones, accesibilidad y navegación por teclado completa, tests de integración, <code>verifyPlugin</code> contra 2025.2 → 2026.2, documentación.</p>
     <div class="gate"><b>Criterio</b>Corromper <code>tasks.xml</code> a mano y comprobar que el plugin recupera desde <code>.bak</code> y avisa.</div>

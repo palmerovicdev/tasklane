@@ -3,8 +3,8 @@
 Plugin de IntelliJ Platform para gestionar TODOs por repositorio sin salir del IDE.
 
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
-- **Estado:** Fase 2 — estados y prioridades configurables por proyecto, tabs por estado
-  y agrupación por fecha.
+- **Estado:** v0.2.0 — Fase 2: estados y prioridades configurables por proyecto, tabs por
+  estado y agrupación por fecha.
 
 ## Arquitectura en una frase
 
@@ -64,7 +64,7 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # 51 tests de dominio, config y almacén, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-0.1.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-0.2.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -77,15 +77,20 @@ cualquier uso accidental de una API posterior.
 | `⌘⌥R` | Crear tarea rápida | Choca con *Resume Program* en el keymap de macOS — decisión consciente, reasignable en *Settings → Keymap* |
 | `⌘K` | Foco en la búsqueda | Solo dentro de la Tool Window, así que no compite con *Commit* |
 
-## Fases
+## Fases y versiones
 
-| | | |
-|---|---|---|
-| 0 | Andamiaje | ✅ build verde, `tasklane-0.1.0.zip` generado |
-| 1 | Dominio, persistencia, CRUD | ✅ |
-| 2 | Estados y prioridades | ✅ 51 tests verdes |
-| 3 | Multi-repositorio | pendiente |
-| 4 | Teclado y búsqueda | pendiente |
-| 5 | Enlaces y exportación | pendiente |
-| 6 | Imágenes | pendiente |
-| 7 | Robustez y pulido | pendiente |
+**Una fase cerrada sube la versión media:** la fase N deja el plugin en `0.N.0`, y la
+`1.0.0` queda para cuando estén las ocho. Versión y fase son el mismo número, así que
+`pluginVersion` dice por sí solo hasta dónde llega el plugin instalado. La versión baja
+(*patch*) es para lo que no mueve el plan: correcciones, compatibilidad, textos.
+
+| | | | |
+|---|---|---|---|
+| 0 | Andamiaje | — | ✅ salió junto con la Fase 1 |
+| 1 | Dominio, persistencia, CRUD | `0.1.0` | ✅ |
+| 2 | Estados y prioridades | `0.2.0` | ✅ 51 tests verdes |
+| 3 | Multi-repositorio | `0.3.0` | pendiente |
+| 4 | Teclado y búsqueda | `0.4.0` | pendiente |
+| 5 | Enlaces y exportación | `0.5.0` | pendiente |
+| 6 | Imágenes | `0.6.0` | pendiente |
+| 7 | Robustez y pulido | `0.7.0` | pendiente |
