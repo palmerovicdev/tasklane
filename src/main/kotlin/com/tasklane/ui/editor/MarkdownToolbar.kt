@@ -21,9 +21,9 @@ import javax.swing.JComponent
  * diálogo no significan nada, así que ni deben salir en *Search Everywhere* ni
  * ocupar un identificador global.
  *
- * Lo que insertan es Markdown-lite, el mismo que entiende el resto del plugin: las
- * casillas de la lista de comprobación que aparecen aquí son exactamente las que
- * luego cuenta la tarjeta de la fila.
+ * Lo que insertan es Markdown-lite, el mismo que entiende el resto del plugin: el
+ * énfasis que se pone aquí es exactamente el que luego pinta la tarjeta de la fila.
+ * Ver `InlineMarkdown`.
  */
 internal object MarkdownToolbar {
 
@@ -43,7 +43,6 @@ internal object MarkdownToolbar {
             Separator.getInstance(),
             button("bullet", TasklaneIcons.FormatBullet) { field.prefixLines("- ") },
             button("numbered", TasklaneIcons.FormatNumbered) { field.prefixLines("", numbered = true) },
-            button("checklist", TasklaneIcons.FormatChecklist) { field.prefixLines("- [ ] ") },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.EDITOR_TOOLBAR, group, true)
         toolbar.targetComponent = target
@@ -51,7 +50,7 @@ internal object MarkdownToolbar {
     }
 
     /**
-     * Los ocho llevan icono, y **tienen que llevarlo**: negrita, cursiva, código y
+     * Los siete llevan icono, y **tienen que llevarlo**: negrita, cursiva, código y
      * lista numerada se declararon en su día con el glifo puesto en el texto de la
      * acción —«B», «I», «</>», «1.»— dando por hecho que la barra lo pintaría. No lo
      * pinta: un `ActionToolbar` dibuja iconos, y a la acción que no trae ninguno le

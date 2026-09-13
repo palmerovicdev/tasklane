@@ -3,13 +3,52 @@
          (bloque intellijPlatform.pluginConfiguration en build.gradle.kts). -->
     <vendor>Victor Palmero</vendor>
 
+    <!-- La ficha del Marketplace. Va en ingles como el resto de la interfaz, y sin
+         <img>: el Marketplace no resuelve rutas relativas, y las capturas se suben
+         aparte desde su panel de administracion. Ver README, «Publicar». -->
     <description><![CDATA[
-        <p>Gestión rápida de TODOs por repositorio, sin salir del IDE.</p>
+        <p>
+            <b>Tasklane</b> keeps a to-do list inside your project, one per repository,
+            stored as plain XML next to the code. No account, no server, no network call:
+            the tasks live in <code>.idea/tasklane/</code> and are yours to commit or ignore.
+        </p>
+
+        <p>It is built for the notes you take <i>while</i> you code — the ones that never
+            survive the trip to an external tracker.</p>
+
+        <h3>What it does</h3>
         <ul>
-          <li>Tool Window nativa con estados y prioridades configurables.</li>
-          <li>Un conjunto de tareas independiente por repositorio Git de la ventana.</li>
-          <li>Creación por teclado, búsqueda instantánea y exportación al portapapeles.</li>
+            <li><b>A card per task.</b> Priority stripe, checkbox, due date, tags, and a
+                bookmark to pin what must not get lost. The body renders Markdown right in
+                the list: bold, italics, inline code and strikethrough.</li>
+            <li><b>States as tabs</b>, each with its live count. Both the states and the
+                priorities are configurable per project — name, order, colour and the
+                typing shortcut that selects them.</li>
+            <li><b>Group by</b> date, priority or tag, and collapse the groups you are not
+                looking at. The choice is remembered per state.</li>
+            <li><b>Search that understands operators</b> and looks inside the body, not just
+                the title, plus filters for open, overdue and bookmarked tasks.</li>
+            <li><b>Write in Markdown.</b> A formatting toolbar, and images you can paste,
+                drag or pick — stored beside the tasks and previewed inline as you type.</li>
+            <li><b>One list per repository.</b> Open several Git repositories in the same
+                window and each keeps its own tasks, with a selector to switch between them.</li>
+            <li><b>Quick add from anywhere</b> in the IDE with <code>⌘⌥R</code> /
+                <code>Ctrl+Alt+R</code>, without opening the tool window.</li>
+            <li><b>Copy to clipboard</b> as Markdown or plain text — one state, one group or
+                just the selection.</li>
         </ul>
+
+        <h3>Where your tasks live</h3>
+        <p>
+            Tasks go to <code>.idea/tasklane/</code>, which the plugin auto-ignores, so
+            nothing lands in your diff unless you ask for it. States and priorities go to
+            <code>.idea/tasklane.xml</code>, which <i>is</i> meant to be committed: that is
+            how a team shares the same workflow. Every write is atomic and keeps a backup,
+            and a file it cannot read is quarantined instead of overwritten.
+        </p>
+
+        <p>Requires IntelliJ IDEA 2025.2 or newer (any IntelliJ-based IDE). Git is optional:
+            without it, the project root works as a single repository.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -128,9 +167,13 @@
                 icon="AllIcons.Actions.GC"/>
 
         <!-- Las cuatro agrupaciones. Tasklane.GroupByDate sigue declarada arriba
-             porque es asignable en el keymap, aunque ya no este en la barra. -->
+             porque es asignable en el keymap, aunque ya no este en la barra.
+
+             Icono propio y no AllIcons.Actions.GroupBy: en la interfaz nueva ese se
+             dibuja como un OJO, que en una barra se lee como «vista previa». El boton
+             estaba, pero nadie lo reconocia. Ver TasklaneIcons.GroupBy. -->
         <group id="Tasklane.Grouping" popup="true" class="com.tasklane.ui.actions.GroupingActionGroup"
-               icon="AllIcons.Actions.GroupBy"/>
+               icon="/icons/group_by.svg"/>
 
         <group id="Tasklane.Export" popup="true" icon="AllIcons.ToolbarDecorator.Export">
             <reference ref="Tasklane.ExportState"/>

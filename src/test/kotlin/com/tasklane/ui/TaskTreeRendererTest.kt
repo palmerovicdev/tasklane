@@ -8,11 +8,13 @@ import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.LinkExtractor
 import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
+import com.tasklane.ui.toolwindow.paintedRowBounds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
 import java.awt.Point
+import java.awt.Rectangle
 import java.time.Instant
 import javax.swing.JTree
 import javax.swing.tree.DefaultTreeModel
@@ -66,7 +68,7 @@ class TaskTreeRendererTest {
 
     /** Los enlaces que devuelve el renderer barriendo una fila de izquierda a derecha. */
     private fun sweep(tree: JTree, row: Int): Map<Int, List<String>> {
-        val bounds = tree.getRowBounds(row)
+        val bounds = painted(tree, row)
         val y = bounds.y + bounds.height / 2
         return (0 until bounds.width).associateWith { x ->
             renderer.linksAt(tree, Point(bounds.x + x, y)).map { it.url }
@@ -76,7 +78,7 @@ class TaskTreeRendererTest {
     @Test
     fun `el enlace del titulo es clicable y el checkbox no`() {
         val tree = treeWith(task("Revisar https://ejemplo.com/a antes del viernes"))
-        val bounds = tree.getRowBounds(0)
+        val bounds = painted(tree, 0)
 
         val hits = sweep(tree, 0)
         assertTrue("el enlace del titulo tiene que tener zona clicable", hits.isNotEmpty())
@@ -94,7 +96,7 @@ class TaskTreeRendererTest {
         // El caso que justifica la segunda línea: el enlace no está en el título, así
         // que sin indicador habría que entrar a editar para abrirlo.
         val tree = treeWith(task("Migrar el indice\nla guia esta en https://ejemplo.com/guia"))
-        val bounds = tree.getRowBounds(0)
+        val bounds = painted(tree, 0)
 
         // Dos líneas: la fila es más alta que una sola.
         assertTrue("la segunda linea tiene que ocupar sitio", bounds.height > 0)
@@ -111,7 +113,7 @@ class TaskTreeRendererTest {
     fun `el marcador y el menu se pueden pulsar en la fila del raton`() {
         val tree = treeWith(task("Comprar pan"))
         renderer.hoveredRow = 0
-        val bounds = tree.getRowBounds(0)
+        val bounds = painted(tree, 0)
 
         val targets = scanAll(tree, bounds) { point -> renderer.targetAt(tree, point) }
 
@@ -119,11 +121,40 @@ class TaskTreeRendererTest {
         assertTrue("el menu tiene que tener zona clicable", TaskTreeRenderer.RowTarget.MENU in targets)
     }
 
+    /**
+     * El hueco de la tarjeta es tarjeta. Es la regresión que dejaba el marcador y el
+     * menú fuera del alcance del ratón salvo justo encima de las letras: el árbol
+     * pinta la fila hasta el borde pero la daba por acabada donde acaba el texto.
+     */
+    @Test
+    fun `los controles responden mas alla de donde acaba el texto`() {
+        val tree = treeWith(task("Comprar pan"))
+        renderer.hoveredRow = 0
+        val text = tree.getRowBounds(0)
+        val card = painted(tree, 0)
+        assertTrue("la tarjeta se pinta mas ancha que su texto", card.width > text.width)
+
+        val blank = Rectangle(text.x + text.width, card.y, card.width - text.width, card.height)
+        val targets = scanAll(tree, blank) { point -> renderer.targetAt(tree, point) }
+
+        assertTrue("el marcador vive a la derecha del texto", TaskTreeRenderer.RowTarget.BOOKMARK in targets)
+        assertTrue("el menu vive a la derecha del texto", TaskTreeRenderer.RowTarget.MENU in targets)
+    }
+
+    /** Las marcas de Markdown se cocinan en el renderer: a la fila llegan ya como estilo. */
+    @Test
+    fun `el titulo se pinta sin las marcas de Markdown`() {
+        val tree = treeWith(task("**Bold text** y `codigo`"))
+        renderer.getTreeCellRendererComponent(tree, tree.getPathForRow(0).lastPathComponent, false, false, true, 0, false)
+
+        assertEquals("Bold text y codigo", renderer.textRenderer.getCharSequence(false).toString())
+    }
+
     @Test
     fun `sin el raton encima no hay controles que pulsar`() {
         val tree = treeWith(task("Comprar pan"))
         renderer.hoveredRow = -1
-        val bounds = tree.getRowBounds(0)
+        val bounds = painted(tree, 0)
 
         assertTrue(scanAll(tree, bounds) { point -> renderer.targetAt(tree, point) }.isEmpty())
     }
@@ -136,7 +167,7 @@ class TaskTreeRendererTest {
     @Test
     fun `la casilla ocupa el borde izquierdo y nada mas`() {
         val tree = treeWith(task("Comprar pan"))
-        val bounds = tree.getRowBounds(0)
+        val bounds = painted(tree, 0)
         val y = bounds.y + bounds.height / 2
 
         assertTrue(
@@ -155,11 +186,19 @@ class TaskTreeRendererTest {
         assertTrue(sweep(tree, 0).isEmpty())
     }
 
+    /**
+     * El rectángulo en el que se **pinta** la fila, que es más ancho que el que
+     * `JTree` calcula para ella: el árbol estira el renderer hasta el borde visible.
+     * Barrer el estrecho era barrer sólo la parte con letras, y por eso estos tests
+     * pasaban mientras la mitad derecha de la tarjeta no respondía a nada.
+     */
+    private fun painted(tree: JTree, row: Int) = paintedRowBounds(tree, row)!!
+
     /** El primer punto de la fila donde [probe] contesta algo. Rejilla de 2 px. */
-    private fun <T : Any> scan(tree: JTree, bounds: java.awt.Rectangle, probe: (Point) -> T?): T? =
+    private fun <T : Any> scan(tree: JTree, bounds: Rectangle, probe: (Point) -> T?): T? =
         scanAll(tree, bounds, probe).firstOrNull()
 
-    private fun <T : Any> scanAll(tree: JTree, bounds: java.awt.Rectangle, probe: (Point) -> T?): List<T> =
+    private fun <T : Any> scanAll(tree: JTree, bounds: Rectangle, probe: (Point) -> T?): List<T> =
         (0 until bounds.height step 2).flatMap { y ->
             (0 until bounds.width step 2).mapNotNull { x -> probe(Point(bounds.x + x, bounds.y + y)) }
         }

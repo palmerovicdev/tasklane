@@ -4,11 +4,16 @@ import com.intellij.ui.SimpleColoredComponent
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
+import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskState
 import java.awt.Cursor
 import java.awt.FlowLayout
 import java.awt.Graphics
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JPanel
@@ -76,6 +81,24 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
             isOpaque = false
             ipad = JBUI.insets(PADDING_V, PADDING_H)
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            // Focusable: al bajar las pestañas del `ContentManager` al panel se perdió
+            // el recorrido de teclado que daba la plataforma, y una fila de estados a
+            // la que sólo se llega con el ratón deja la ventana inservible sin él.
+            // `Tab` sale ahora en el recorrido del tabulador y se activa con Espacio
+            // o Intro, que es lo que espera cualquiera que use un botón.
+            isFocusable = true
+            addKeyListener(object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_SPACE || e.keyCode == KeyEvent.VK_ENTER) {
+                        e.consume()
+                        onSelect(id)
+                    }
+                }
+            })
+            addFocusListener(object : FocusAdapter() {
+                override fun focusGained(e: FocusEvent) = repaint()
+                override fun focusLost(e: FocusEvent) = repaint()
+            })
             addMouseListener(object : MouseAdapter() {
                 override fun mouseEntered(e: MouseEvent) {
                     hovered = true
@@ -103,6 +126,9 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
             }
             append(name, style)
             append("  $count", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+            // El nombre accesible se dice entero: un lector de pantalla leería
+            // «ToDo 5» como dos cosas sueltas sin saber qué es el número.
+            accessibleContext.accessibleName = TasklaneBundle.message("a11y.tab", name, count)
             repaint()
         }
 
@@ -112,11 +138,19 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
                 hovered -> JBUI.CurrentTheme.ActionButton.hoverBackground()
                 else -> null
             }
+            val arc = JBUI.scale(ARC)
             if (background != null) {
                 val config = GraphicsUtil.setupAAPainting(g)
                 g.color = background
-                val arc = JBUI.scale(ARC)
                 g.fillRoundRect(0, 0, width, height, arc, arc)
+                config.restore()
+            }
+            // Sin este contorno, tabular por la fila no se ve: el fondo de la activa
+            // ya está puesto y el foco no cambiaría nada en pantalla.
+            if (hasFocus()) {
+                val config = GraphicsUtil.setupAAPainting(g)
+                g.color = JBUI.CurrentTheme.Focus.focusColor()
+                g.drawRoundRect(0, 0, width - 1, height - 1, arc, arc)
                 config.restore()
             }
             super.paintComponent(g)

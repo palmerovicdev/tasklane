@@ -10,7 +10,7 @@ import java.awt.LayoutManager
  * Coloca de izquierda a derecha los distintivos de la línea de metadatos.
  *
  * Existe porque un [com.intellij.ui.SimpleColoredComponent] sólo tiene **un** icono,
- * y la línea necesita varios: el de la lista de comprobación, el del vencimiento, el
+ * y la línea necesita varios: el del vencimiento, el
  * de cada etiqueta. Cada distintivo es entonces un componente propio, y esto los
  * alinea.
  *

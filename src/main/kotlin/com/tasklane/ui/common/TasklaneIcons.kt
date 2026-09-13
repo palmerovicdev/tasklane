@@ -23,7 +23,7 @@ internal object TasklaneIcons {
     /**
      * La barra de formato del diálogo, entera. Ver [com.tasklane.ui.editor.MarkdownToolbar].
      *
-     * Son ocho y **van juntos**: media fila con iconos de la plataforma y media con
+     * Son siete y **van juntos**: media fila con iconos de la plataforma y media con
      * los propios se notaba a la primera —`FileTypes.Image` es azul, `Actions.Checked`
      * es un visto suelto sin lista— y una barra de formato tiene que leerse como un
      * único conjunto. Mismo trazo, misma rejilla de 16 y los mismos dos grises que el
@@ -51,8 +51,16 @@ internal object TasklaneIcons {
     @JvmField
     val FormatNumbered: Icon = format("numbered")
 
+    /**
+     * El desplegable de «agrupar por» de la barra.
+     *
+     * Propio y no `AllIcons.Actions.GroupBy` porque ese, en la interfaz nueva de la
+     * plataforma, se dibuja como un **ojo**: en una barra de herramientas eso se lee
+     * como «vista previa», así que el botón estaba ahí y nadie lo reconocía. Se
+     * genera con el mismo script y la misma rejilla que la barra de formato.
+     */
     @JvmField
-    val FormatChecklist: Icon = format("checklist")
+    val GroupBy: Icon = IconLoader.getIcon("/icons/group_by.svg", TasklaneIcons::class.java)
 
     private fun format(name: String): Icon =
         IconLoader.getIcon("/icons/format_$name.svg", TasklaneIcons::class.java)

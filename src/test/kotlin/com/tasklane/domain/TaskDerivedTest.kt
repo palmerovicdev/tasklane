@@ -44,23 +44,6 @@ class TaskDerivedTest {
     }
 
     @Test
-    fun `la lista de comprobacion se cuenta marcada y sin marcar`() {
-        val task = task("Publicar\n- [x] escribir notas\n- [ ] subir el zip\n- [X] avisar")
-        assertEquals(3, task.checklist.size)
-        assertEquals(2, task.checklist.count { it.done })
-        assertEquals("subir el zip", task.checklist.first { !it.done }.text)
-    }
-
-    @Test
-    fun `la descripcion no se come la primera subtarea`() {
-        // Sin esta regla, la descripción de casi cualquier tarea con lista sería su
-        // primer elemento, que es información que el contador ya da.
-        val task = task("Publicar\n- [ ] escribir notas\n- [ ] subir el zip")
-        assertEquals("", task.description)
-        assertTrue("la lista sigue siendo detalle", task.hasDetail)
-    }
-
-    @Test
     fun `una linea que solo es una imagen no es descripcion`() {
         val sha = "a".repeat(64)
         val task = task("Bug del boton\n![](tasklane:$sha)\nPasa en dark mode")

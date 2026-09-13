@@ -30,7 +30,7 @@ internal object TaskRowActions {
         val mouse = object : MouseAdapter() {
 
             override fun mouseMoved(e: MouseEvent) {
-                hover(tree.getRowForLocation(e.x, e.y))
+                hover(rowAtHeight(tree, e.y))
                 // Mano sobre los controles. Se pregunta sólo cerca del borde derecho:
                 // resolver el control exige preparar y medir la fila, y esto corre en
                 // cada píxel que recorre el ratón.
@@ -72,14 +72,14 @@ internal object TaskRowActions {
 
     /** Si el ratón está en la banda derecha de la fila, que es donde viven los controles. */
     private fun nearActions(tree: JTree, e: MouseEvent): Boolean {
-        val row = tree.getRowForLocation(e.x, e.y)
+        val row = rowAtHeight(tree, e.y)
         if (row < 0) return false
-        val bounds = tree.getRowBounds(row) ?: return false
+        val bounds = paintedRowBounds(tree, row) ?: return false
         return e.x > bounds.x + bounds.width - JBUI.scale(BAND)
     }
 
     private fun taskAt(tree: JTree, point: Point): Task? {
-        val row = tree.getRowForLocation(point.x, point.y)
+        val row = rowAtHeight(tree, point.y)
         if (row < 0) return null
         return (tree.getPathForRow(row)?.lastPathComponent as? TaskNode)?.task
     }
@@ -90,7 +90,7 @@ internal object TaskRowActions {
      * una de varias filas seleccionadas no debe reducirlas a una.
      */
     private fun showMenu(tree: JTree, point: Point) {
-        val row = tree.getRowForLocation(point.x, point.y)
+        val row = rowAtHeight(tree, point.y)
         if (row < 0) return
         if (!tree.isRowSelected(row)) tree.selectionRows = intArrayOf(row)
 

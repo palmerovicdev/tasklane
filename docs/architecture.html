@@ -347,8 +347,9 @@ data class Task(
 //   description          primera linea del detalle que no sea de la lista
 //   checklist            "- [ ] algo" / "- [x] algo"</code></pre>
   <div class="adr">
-    <span class="tag">Rediseño a tarjetas · la lista de comprobación se deriva, no se guarda</span>
-    <p><code>dueDate</code> y <code>bookmarked</code> son campos del modelo porque no se pueden escribir: no hay forma de teclear «esto vence el viernes» dentro del cuerpo sin inventar una sintaxis. La <strong>lista de comprobación, en cambio, sí es Markdown</strong> —<code>- [ ] algo</code>— y por eso se deriva del cuerpo y se cachea, igual que los enlaces. Guardarla aparte daría dos fuentes de verdad que pueden discrepar: quien edite el texto a mano vería un contador que no cuadra con lo que está leyendo.</p>
+    <span class="tag">Rediseño a tarjetas · qué es campo del modelo y qué es cuerpo</span>
+    <p><code>dueDate</code>, <code>tags</code> y <code>bookmarked</code> son campos del modelo porque no se pueden escribir: no hay forma de teclear «esto vence el viernes» dentro del cuerpo sin inventar una sintaxis. Lo que sí es Markdown se <strong>deriva</strong> del cuerpo y se cachea —los enlaces, las imágenes, la línea de descripción—, nunca se duplica: guardarlo aparte daría dos fuentes de verdad que pueden discrepar, y quien editara el texto a mano vería una fila que no cuadra con lo que está leyendo.</p>
+    <p>La <strong>lista de comprobación</strong> (<code>- [ ] algo</code>) se derivaba igual y contaba en la fila hasta la <code>1.0.0</code>. Se quitó: el contador funcionaba, pero una tarea cuyo cuerpo <em>era</em> la lista enseñaba los corchetes en crudo en el título, porque el título es la primera línea y ahí no hay nada que derivar. Arreglarlo pedía convertir la fila en un renderizador de Markdown de bloque, que es mucho más de lo que vale la función. El cuerpo sigue admitiendo el texto; simplemente ya no se cuenta.</p>
   </div>
   <pre><code>
 
@@ -404,6 +405,7 @@ data class RepositoryRef(
       <tr><td><code>TriggerParser</code></td><td>Resolver el prefijo de prioridad por coincidencia más larga y devolver el texto ya limpio</td></tr>
       <tr><td><code>DateGrouper</code></td><td><code>Instant</code> + <code>ZoneId</code> → <code>Today</code> / <code>Yesterday</code> / <code>This week</code> / <code>Sep 10</code> / <code>Sep 2025</code></td></tr>
       <tr><td><code>LinkExtractor</code></td><td>URLs sueltas y <code>[texto](url)</code>, ignorando bloques de código; acortado con dominio primero</td></tr>
+      <tr><td><code>InlineMarkdown</code></td><td>Énfasis en línea (<code>**</code>, <code>*</code>, <code>`</code>, <code>~~</code>) como rangos del original, para que la fila lo pinte sin las marcas</td></tr>
       <tr><td><code>TaskExporter</code></td><td>Colección de tareas → texto de clipboard según <code>ExportFormat</code></td></tr>
       <tr><td><code>TaskReducer</code></td><td><code>(Snapshot, Command) → Snapshot</code>; aquí viven las invariantes</td></tr>
     </tbody>
@@ -418,7 +420,7 @@ data class RepositoryRef(
 ├── domain/
 │   ├── model/      Task, TaskState, TaskPriority, RepositoryRef, ids, Snapshot
 │   ├── command/    TaskCommand (sealed), TaskReducer
-│   ├── text/       TriggerParser, LinkExtractor, PlainTextRenderer, UrlShortener
+│   ├── text/       TriggerParser, LinkExtractor, InlineMarkdown, PlainTextRenderer, UrlShortener
 │   ├── grouping/   DateGrouper, DateGroup
 │   ├── query/      TaskQuery, QueryParser, TaskFilter, TaskSorter
 │   └── export/     TaskExporter, ExportFormat, ExportScope
@@ -589,11 +591,21 @@ data class RepositoryRef(
   </ul>
 
   <h3>La fila</h3>
-  <p>Renderer propio de altura variable — <code>tree.rowHeight = 0</code>. La fila es una <strong>tarjeta</strong>: fondo redondeado con la franja de prioridad de 3 px dentro, recortada por la misma forma, checkbox a la izquierda y a la derecha el marcador y el menú <code>⋮</code>. En medio, una pila de líneas que crece con lo que la tarea tenga que decir: título envuelto en hasta <strong>tres</strong> líneas, una de descripción si hay cuerpo debajo, y la de distintivos —prioridad, vencimiento, lista de comprobación, etiquetas, enlaces e imágenes, fecha—. Cada línea que sobra se oculta, así que una tarea de una frase sigue midiendo una línea.</p>
+  <p>Renderer propio de altura variable — <code>tree.rowHeight = 0</code>. La fila es una <strong>tarjeta</strong>: fondo redondeado con la franja de prioridad de 3 px dentro, recortada por la misma forma, checkbox a la izquierda y a la derecha el marcador y el menú <code>⋮</code>. En medio, una pila de líneas que crece con lo que la tarea tenga que decir: título envuelto en hasta <strong>tres</strong> líneas, una de descripción si hay cuerpo debajo, y la de distintivos —prioridad, vencimiento, etiquetas, enlaces e imágenes, fecha—. Cada línea que sobra se oculta, así que una tarea de una frase sigue midiendo una línea.</p>
   <div class="adr">
     <span class="tag">Rediseño a tarjetas · <code>TitleWrap</code>, envolver a mano</span>
     <p>El título se trocea en líneas con una clase propia y no metiéndolo en un <code>JTextArea</code>, que es lo que haría cualquiera. El motivo es que envolver a mano <strong>conserva tres cosas que un área de texto pierde</strong>: los fragmentos etiquetados con su <code>TaskLink</code> —que es como se resuelve el clic sin volver a medir texto—, el resaltado de la búsqueda de la plataforma (<code>SpeedSearchUtil</code>), y el tachado de las tareas cerradas.</p>
     <p><code>TitleWrap</code> recibe la función de medida como parámetro en vez de llamar a <code>FontMetrics</code>: así el troceado —que es aritmética de posiciones, donde se falla— se prueba sin fuentes ni IDE. Quien mide de verdad repite la derivación de fuente de <code>SimpleColoredComponent</code>, porque medir con la fuente base cortaría las líneas donde no toca en cuanto la fila mezcla tamaños.</p>
+  </div>
+  <div class="adr">
+    <span class="tag">0.7.x · <code>InlineMarkdown</code>, la fila pinta el énfasis y no las marcas</span>
+    <p>El cuerpo admite marcas de Markdown y el diálogo trae botones que las escriben, pero la fila las enseñaba en crudo: quien pulsaba <em>negrita</em> veía luego <code>**algo**</code> en la lista. <code>InlineMarkdown</code> resuelve negrita, cursiva, código y tachado y devuelve <strong>rangos del original</strong>, no texto ya cortado: eso es lo que permite cruzarlos en el renderer con los enlaces del título —que también vienen en coordenadas del original— sin recalcular un solo desplazamiento. Los índices que no cubre ningún tramo son las marcas, y por eso desaparecen.</p>
+    <p>Fuera quedan los guiones bajos a propósito: <code>un_nombre_asi</code> es identificador mucho más a menudo que cursiva, y una tarea es justo donde se pegan identificadores. Se respetan además las dos reglas de flanqueo de CommonMark —no abre con espacio detrás, no cierra con espacio delante— para que <code>2 * 3 * 4</code> siga siendo una multiplicación. El código no puede cambiar de familia de fuente (<code>SimpleColoredComponent</code> deriva la fuente del estilo, y ahí no hay nombre que poner), así que se distingue por el fondo.</p>
+  </div>
+  <div class="adr">
+    <span class="tag">0.7.x · La fila se resuelve por altura, no por el rectángulo del árbol</span>
+    <p><code>JTree.getRowForLocation</code> exige que el punto caiga dentro del rectángulo que el árbol calcula para la fila, y ese rectángulo mide lo que mide el renderer con su tamaño preferido: el texto y poco más. La tarjeta, en cambio, se pinta hasta el borde visible. El hueco a la derecha del título era tarjeta pintada sin fila que devolver, así que el marcador y el menú <code>⋮</code> sólo aparecían pasando el ratón <strong>por encima de las letras</strong>.</p>
+    <p><code>RowHit</code> resuelve la fila por la <strong>altura</strong> y ensancha su rectángulo hasta donde se pinta. Con eso, resolver un control o un enlace vuelve a medir sobre el mismo ancho con el que se pintó, que es la única forma de que el sitio donde se ve una cosa y el sitio donde responde sean el mismo.</p>
   </div>
   <div class="adr">
     <span class="tag">Rediseño a tarjetas · <code>GroupKey</code> como identidad de grupo</span>
@@ -949,11 +961,16 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <div class="gate"><b>Criterio</b>Pegar una captura, verla en el editor, ampliarla, deshacer, y que el blob no quede para siempre.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 7<small>🔄 en curso · v0.7.0</small></div><div>
+  <div class="phase"><div class="pn">FASE 7<small>✅ cerrada · v1.0.0</small></div><div>
     <h3>Robustez y pulido</h3>
     <p>Migraciones y modo solo lectura por versión, recuperación de ficheros corruptos, notificaciones, accesibilidad y navegación por teclado completa, tests de integración, <code>verifyPlugin</code> contra 2025.2 → 2026.2, documentación.</p>
-    <p><strong>Entregado en la <code>0.7.0</code>:</strong> el pulido de uso —los ocho iconos de la barra de formato, dibujados aquí en vez de tomados prestados de <code>AllIcons</code>, y <code>Escape</code> cerrando el diálogo también con el cursor dentro del cuerpo—. Es la única versión media que sale <em>antes</em> de cerrar su fase, y se dice aquí para que <code>0.N.0</code> no se lea como «fase N terminada» sin más: lo de fondo —migraciones, recuperación, accesibilidad, integración— sigue por hacer.</p>
-    <div class="gate"><b>Criterio</b>Corromper <code>tasks.xml</code> a mano y comprobar que el plugin recupera desde <code>.bak</code> y avisa. <em>Sin pasar.</em></div>
+    <p>La fase salió en tres tandas. La <code>0.7.0</code> adelantó el pulido de uso —los iconos propios de la barra de formato y <code>Escape</code> cerrando el diálogo con el cursor dentro del cuerpo—; la <code>0.7.1</code>, el Markdown de la fila (<code>InlineMarkdown</code>) y el ratón sobre la tarjeta entera (<code>RowHit</code>), las dos detalladas en §11. La <code>1.0.0</code> cierra lo de fondo.</p>
+    <p><strong>Entregado en la <code>1.0.0</code>:</strong> los avisos de lectura salen del <code>TasklaneBundle</code> como el resto de la interfaz —eran las últimas cadenas escritas a mano, y encima en otro idioma—; la decisión de qué avisar se saca a <code>LoadAlert</code>, que es puro y por fin permite probarla; la fila de estados entra en el recorrido del tabulador y se activa con Espacio o Intro, y el árbol, el buscador y los campos del diálogo dicen su nombre a un lector de pantalla; las cabeceras de grupo llevan chevrón y se pliegan con un clic; y <code>verifyPlugin</code> fija los dos extremos declarados —2025.2 y 2026.2— en vez de conformarse con lo que recomiende el verificador.</p>
+    <div class="adr">
+      <span class="tag">1.0.0 · <code>LoadAlert</code>, el criterio de la fase se pudo probar al separarlo</span>
+      <p>El criterio era «corromper <code>tasks.xml</code> y comprobar que el plugin recupera desde <code>.bak</code> <strong>y avisa</strong>». Recuperar ya se probaba; avisar no se probaba en ninguna parte, porque la decisión vivía dentro de <code>TaskService</code> y esa clase necesita un <code>Project</code>. Sacada a <code>LoadAlert</code> —una función pura sobre <code>ReadResult</code> que dice qué pasó y con qué números, sin textos— las dos mitades del criterio se prueban sin arrancar un IDE. Los textos se quedan donde les toca, en el bundle, que es además lo que permite traducirlos.</p>
+    </div>
+    <div class="gate"><b>Criterio</b>Corromper <code>tasks.xml</code> a mano y comprobar que el plugin recupera desde <code>.bak</code> y avisa. <em>Pasa:</em> <code>TaskFileStoreTest</code> lo escribe, lo corrompe, comprueba lo recuperado, que el original queda en cuarentena y que el aviso resultante es <code>LoadAlert.Recovered</code>.</div>
   </div></div>
 </section>
 

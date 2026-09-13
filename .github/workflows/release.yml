@@ -1,0 +1,73 @@
+name: Release
+
+# Se dispara con una etiqueta `vX.Y.Z`, no con cada push a main: publicar es un acto
+# deliberado. `workflow_dispatch` deja repetirlo a mano si el Marketplace rechaza el
+# zip por algo que no sea el codigo.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Verify, sign & publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # La etiqueta y pluginVersion tienen que decir lo mismo. Sin esta comprobacion
+      # se publica en el Marketplace una version que no coincide con lo etiquetado en
+      # el repositorio, y eso no hay forma de arreglarlo luego.
+      - name: Tag must match pluginVersion
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(grep '^pluginVersion' gradle.properties | cut -d= -f2 | tr -d ' ')
+          test "$tag" = "$declared" || {
+            echo "::error::la etiqueta v$tag no coincide con pluginVersion=$declared"
+            exit 1
+          }
+
+      # -PlocalIdePath= vacio -> ignora cualquier IDE local y descarga platformVersion,
+      # que es la version MINIMA soportada. Es lo que valida el suelo de sinceBuild.
+      - name: Verify project configuration
+        run: ./gradlew verifyPluginProjectConfiguration -PlocalIdePath=
+
+      - name: Test
+        run: ./gradlew test -PlocalIdePath=
+
+      - name: Verify plugin against 2025.2 and 2026.2
+        run: ./gradlew verifyPlugin -PlocalIdePath=
+
+      - name: Sign plugin
+        env:
+          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
+        run: ./gradlew signPlugin -PlocalIdePath=
+
+      - name: Publish to JetBrains Marketplace
+        env:
+          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+        run: ./gradlew publishPlugin -PlocalIdePath=
+
+      # El mismo zip firmado que fue al Marketplace, colgado de la release: es lo que
+      # permite instalar «desde disco» una version concreta sin esperar al indexado.
+      - name: Attach the signed zip to the GitHub release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: build/distributions/*-signed.zip
+          generate_release_notes: true

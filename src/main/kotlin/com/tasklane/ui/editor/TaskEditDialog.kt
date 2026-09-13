@@ -56,11 +56,9 @@ import javax.swing.SwingUtilities
  *
  * **Los atributos se editan aquí y sólo aquí.** Estado, prioridad, vencimiento y
  * etiquetas son campos del modelo, no texto del cuerpo, así que no se pueden escribir
- * dentro del editor; este diálogo es su única entrada. La excepción deliberada es la
- * lista de comprobación, que sí es Markdown del cuerpo y por eso vive en la barra de
- * formato y no en un control propio.
+ * dentro del editor; este diálogo es su única entrada.
  *
- * La otra excepción son los **triggers de prioridad** —`!!! Resolver el fallo`—, que
+ * La excepción son los **triggers de prioridad** —`!!! Resolver el fallo`—, que
  * antes sólo existían en el popup de Quick Add y desde la `0.6.8` viven aquí, que es
  * el único sitio donde se crea una tarea. Ver [installTriggers].
  */
@@ -183,19 +181,26 @@ internal class TaskEditDialog(
             insets = Insets(if (y == 0) 0 else gap / 2, if (x == 0) 0 else gap, 0, 0)
         }
 
-        add(label("dialog.task.status"), at(0, 0, 1.0))
-        add(label("dialog.task.priority"), at(1, 0, 1.0))
-        add(label("dialog.task.due"), at(2, 0, 1.0))
+        add(label("dialog.task.status", stateCombo), at(0, 0, 1.0))
+        add(label("dialog.task.priority", priorityCombo), at(1, 0, 1.0))
+        add(label("dialog.task.due", dueCombo), at(2, 0, 1.0))
         add(stateCombo, at(0, 1, 1.0))
         add(priorityCombo, at(1, 1, 1.0))
         add(dueCombo, at(2, 1, 1.0))
-        add(label("dialog.task.tags"), at(0, 2, 1.0, width = 3))
+        add(label("dialog.task.tags", tagsField), at(0, 2, 1.0, width = 3))
         add(tagsField, at(0, 3, 1.0, width = 3))
     }
 
-    private fun label(key: String) = JBLabel(TasklaneBundle.message(key)).apply {
+    /**
+     * La etiqueta va **asociada** a su control con `labelFor`. Es lo que hace que un
+     * lector de pantalla diga «Priority, combo» al llegar al desplegable en vez de
+     * «combo» a secas: las tres etiquetas de la fila están encima de sus controles,
+     * no al lado, y esa relación no se deduce de la posición.
+     */
+    private fun label(key: String, forComponent: JComponent) = JBLabel(TasklaneBundle.message(key)).apply {
         font = UIUtil.getFont(UIUtil.FontSize.SMALL, font)
         foreground = UIUtil.getContextHelpForeground()
+        labelFor = forComponent
     }
 
     override fun getPreferredFocusedComponent(): JComponent = bodyField.component

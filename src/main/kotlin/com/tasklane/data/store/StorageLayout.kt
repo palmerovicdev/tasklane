@@ -47,7 +47,7 @@ class StorageLayout(val root: Path) {
         val marker = root.resolve(".gitignore")
         if (Files.exists(marker)) return
         Files.createDirectories(root)
-        Files.writeString(marker, "# Datos locales de Tasklane. Bórralo si quieres versionarlos.\n*\n")
+        Files.writeString(marker, "# Tasklane local data. Delete this file if you want to commit it.\n*\n")
     }
 
     companion object {

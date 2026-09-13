@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import kotlin.text.isNotBlank
 
@@ -96,12 +97,56 @@ intellijPlatform {
             // compilacion y el plugin dejaria de instalarse en versiones nuevas.
             untilBuild = provider { null }
         }
+
+        // Las notas de la version, tal y como salen en la ficha del Marketplace y en
+        // el dialogo de actualizacion del IDE. Se actualizan A MANO en cada release,
+        // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
+        changeNotes = provider {
+            """
+            <h3>1.0.0 &mdash; the eight phases are done</h3>
+            <ul>
+              <li>Task cards now render the Markdown of the body instead of showing the
+                  markers: bold, italics, inline code and strikethrough.</li>
+              <li>The whole card reacts to the mouse, not only the part with text.</li>
+              <li>Group headers show a chevron and fold with a click; the "Group by"
+                  drop-down now keeps its tick on the grouping actually in use.</li>
+              <li>Keyboard navigation reaches the state tabs, and the tree, the search
+                  field and the dialog fields report proper names to screen readers.</li>
+              <li>An unreadable task file is quarantined, recovered from its backup and
+                  reported; a file written by a newer version opens read-only.</li>
+            </ul>
+            """.trimIndent()
+        }
+    }
+
+    // Firma y publicacion. Todo por variables de entorno: aqui no entra ni un secreto.
+    // CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD los da el generador de
+    // JetBrains; PUBLISH_TOKEN sale del perfil del Marketplace.
+    signing {
+        certificateChain = providers.environmentVariable("CERTIFICATE_CHAIN")
+        privateKey = providers.environmentVariable("PRIVATE_KEY")
+        password = providers.environmentVariable("PRIVATE_KEY_PASSWORD")
+    }
+
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+        // Una version con sufijo (1.0.0-beta.1) sale al canal con ese nombre en vez
+        // de al estable, que es como el Marketplace distingue las preliminares.
+        channels = providers.gradleProperty("pluginVersion").map { version ->
+            listOf(version.substringAfter('-', "").substringBefore('.').ifEmpty { "default" })
+        }
     }
 
     // Solo se resuelve al ejecutar `verifyPlugin`, que descarga IDEs completos.
     // Reservado para CI; en local no se invoca.
+    //
+    // Los dos extremos van EXPLICITOS y no solo `recommended()`: lo que se promete es
+    // «2025.2 en adelante», y `recommended()` comprueba la ultima de cada rama viva,
+    // que no tiene por que incluir el suelo declarado en sinceBuild.
     pluginVerification {
         ides {
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.2")
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2026.2")
             recommended()
         }
     }

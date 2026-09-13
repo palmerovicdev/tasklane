@@ -1,0 +1,17 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g>
+    <rect x="3" y="7" width="34" height="12" rx="3.5" fill="#EBECF0" stroke="#C9CCD6"/>
+    <path d="M3 10.5A3.5 3.5 0 0 1 6.5 7H7v12h-.5A3.5 3.5 0 0 1 3 15.5z" fill="#B3392C"/>
+    <rect x="10.5" y="10.5" width="5" height="5" rx="1.3" stroke="#6C707E" fill="none"/>
+    <path d="M19 11.5H32" stroke="#6C707E" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M19 15H27" stroke="#6C707E" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
+  </g>
+  <g>
+    <rect x="3" y="21" width="34" height="12" rx="3.5" fill="#EBECF0" stroke="#C9CCD6"/>
+    <path d="M3 24.5A3.5 3.5 0 0 1 6.5 21H7v12h-.5A3.5 3.5 0 0 1 3 29.5z" fill="#B0700F"/>
+    <rect x="10.5" y="24.5" width="5" height="5" rx="1.3" stroke="#6C707E" fill="none"/>
+    <path d="M11.6 27L12.8 28.2L15 25.8" stroke="#6C707E" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M19 25.5H29" stroke="#6C707E" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M19 29H24" stroke="#6C707E" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
+  </g>
+</svg>

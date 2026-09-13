@@ -11,8 +11,10 @@ import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneWorkspaceService
+import com.tasklane.data.store.LoadAlert
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
+import com.tasklane.data.store.alert
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.RepoKey
@@ -225,39 +227,42 @@ class TaskService(
         }
 
         val result = store.read(repo)
-
-        when (result) {
-            is TaskFileStore.ReadResult.Empty, is TaskFileStore.ReadResult.Ok -> Unit
-
-            is TaskFileStore.ReadResult.FutureVersion -> {
-                readOnly += repo
-                notify(
-                    "Tasklane: datos de solo lectura",
-                    "El fichero de tareas usa el formato v${result.version}, mas nuevo que el que " +
-                        "entiende esta version del plugin. Se muestran sin permitir cambios para no " +
-                        "degradarlos. Actualiza el plugin para volver a editarlos.",
-                    NotificationType.WARNING,
-                )
-            }
-
-            is TaskFileStore.ReadResult.Corrupt -> notify(
-                "Tasklane: no se pudo leer el fichero de tareas",
-                buildString {
-                    if (result.recoveredFromBackup) {
-                        append("Se recuperaron ${result.recovered.size} tareas desde la copia de seguridad. ")
-                    } else {
-                        append("No habia copia de seguridad utilizable, se ha empezado en blanco. ")
-                    }
-                    result.quarantinedAt?.let { append("El fichero original se conservo en $it") }
-                },
-                NotificationType.ERROR,
-            )
-        }
+        val alert = result.alert()
+        if (alert?.readOnly == true) readOnly += repo
+        alert?.let(::report)
 
         // `tasks` esta definido en las cuatro ramas de ReadResult, asi que la carga
         // es uniforme: un fichero corrupto del que se recupero algo no pierde nada.
         apply(TaskCommand.Loaded(repo, result.tasks))
     }
+
+    /**
+     * El aviso de [LoadAlert] escrito y lanzado. La decision de **que** avisar vive en
+     * [alert], que es pura y se prueba sin IDE; aqui solo queda ponerle palabras.
+     */
+    private fun report(alert: LoadAlert) = when (alert) {
+        is LoadAlert.FutureFormat -> notify(
+            TasklaneBundle.message("notification.readOnly.title"),
+            TasklaneBundle.message("notification.readOnly.content", alert.version),
+            NotificationType.WARNING,
+        )
+
+        is LoadAlert.Recovered -> notify(
+            TasklaneBundle.message("notification.corrupt.title"),
+            corruptContent(TasklaneBundle.message("notification.corrupt.recovered", alert.tasks), alert.quarantinedAt),
+            NotificationType.ERROR,
+        )
+
+        is LoadAlert.Lost -> notify(
+            TasklaneBundle.message("notification.corrupt.title"),
+            corruptContent(TasklaneBundle.message("notification.corrupt.lost"), alert.quarantinedAt),
+            NotificationType.ERROR,
+        )
+    }
+
+    /** Donde quedo el fichero ilegible, si se pudo apartar: es por donde se empieza a mirar. */
+    private fun corruptContent(head: String, quarantinedAt: java.nio.file.Path?): String =
+        quarantinedAt?.let { "$head ${TasklaneBundle.message("notification.corrupt.quarantined", it)}" } ?: head
 
     // ----------------------------------------------- configuracion desincronizada
 
@@ -301,8 +306,8 @@ class TaskService(
                 .onFailure { e ->
                     thisLogger().error("Tasklane: fallo al guardar $repo", e)
                     notify(
-                        "Tasklane: no se pudieron guardar las tareas",
-                        "${e.message.orEmpty()} El fichero anterior no se ha modificado.",
+                        TasklaneBundle.message("notification.save.title"),
+                        TasklaneBundle.message("notification.save.content", e.message.orEmpty()),
                         NotificationType.ERROR,
                     )
                 }

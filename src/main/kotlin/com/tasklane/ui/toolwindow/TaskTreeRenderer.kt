@@ -23,6 +23,7 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskLink
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.ImageRefParser
+import com.tasklane.domain.text.InlineMarkdown
 import com.tasklane.ui.common.GroupLabels
 import com.tasklane.ui.common.TasklaneIcons
 import java.awt.BorderLayout
@@ -60,7 +61,7 @@ import javax.swing.plaf.basic.BasicTreeUI
  * **La tarjeta.** Franja de prioridad y casilla a la izquierda, y a la derecha una
  * pila de líneas que crece con lo que la tarea tenga que decir: el título envuelto
  * en hasta [MAX_TITLE_LINES] líneas, una de descripción si hay cuerpo debajo, y la
- * de distintivos —vencimiento, lista de comprobación, etiquetas, enlaces—. Cada
+ * de distintivos —vencimiento, etiquetas, enlaces—. Cada
  * línea que sobra se oculta, así que una tarea de una frase sigue midiendo una
  * línea. El árbol necesita para esto `rowHeight = 0`: la altura la fija cada fila.
  *
@@ -127,7 +128,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * porque cada línea se limpia al pedirle su componente.
      */
     private var pendingTitle: List<List<Run>> = emptyList()
-    private var pendingDescription: String = ""
+    private var pendingDescription: List<Run> = emptyList()
     private var pendingTask: Task? = null
 
     /** Lo que hace falta en el momento de pintar, cuando ya no hay nodo a mano. */
@@ -136,14 +137,17 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private var cardColor: Color? = null
     private var stripeColor: Color? = null
 
+    /** Fondo de los tramos de código del cuerpo. Nulo = sin recuadro. Ver [emphasize]. */
+    private var codeColor: Color? = null
+
     /** Líneas 2 y 3 del título. La primera es el `textRenderer` de la plataforma. */
     private val titleOverflow = List(MAX_TITLE_LINES - 1) { index ->
         line { tree, selected -> appendRuns(tree, this, pendingTitle.getOrNull(index).orEmpty(), selected) }
     }
 
     /** Resumen de lo que hay bajo el título. Oculta cuando la tarea es sólo el título. */
-    private val description = line { _, _ ->
-        append(pendingDescription, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+    private val description = line { tree, selected ->
+        appendRuns(tree, this, pendingDescription, selected)
     }
 
     /** Enlaces e imágenes. Es el único distintivo con contador clicable. */
@@ -198,7 +202,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         when (value) {
             is GroupNode -> {
                 hideExtras()
-                renderGroup(value)
+                renderGroup(value, expanded)
             }
 
             is EmptyGroupNode -> {
@@ -228,6 +232,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         pendingTask = null
         cardColor = null
         stripeColor = null
+        codeColor = null
         pendingHovered = false
         bookmarkActive = false
         menuActive = false
@@ -239,10 +244,18 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         actions.isVisible = false
     }
 
-    private fun renderGroup(node: GroupNode) {
+    /**
+     * La cabecera lleva **chevrón**, y no es decoración: es la única señal de que el
+     * grupo se pliega. El árbol va con `showsRootHandles = false` —las manecillas de
+     * la plataforma se pintan fuera de la tarjeta y desalinearían todas las filas—,
+     * así que sin esto el grupo se podía plegar y nada lo decía. El clic lo atiende
+     * [TasklanePanel.installGroupToggle].
+     */
+    private fun renderGroup(node: GroupNode, expanded: Boolean) {
         // Sin tarjeta ni franja: la prioridad es una propiedad de la tarea, no del
         // grupo. El borde sólo alinea la cabecera con el texto de las tarjetas.
         border = groupBorder
+        textRenderer.icon = if (expanded) AllIcons.General.ArrowDown else AllIcons.General.ArrowRight
         textRenderer.append(GroupLabels.of(node.key, config), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
         textRenderer.append("  ${node.size}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
     }
@@ -263,6 +276,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // JBColor resuelve claro/oscuro solo; por eso el modelo guarda ambos valores.
         stripeColor = JBColor(priority.colorLight, priority.colorDark)
         cardColor = cardColorFor(tree)
+        // Sobre una fila seleccionada el fondo lo pone el árbol: un recuadro propio
+        // encima sería una mancha con otro color dentro de la selección.
+        codeColor = if (selected) null else codeColorFor(tree)
         pendingHovered = row >= 0 && row == hoveredRow
         renderActions(task, hovered = pendingHovered)
 
@@ -280,12 +296,16 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         pendingTitle = wrapped.drop(1)
         titleOverflow.forEachIndexed { index, extra -> extra.isVisible = index < pendingTitle.size }
 
-        pendingDescription = ellipsize(task.description, SimpleTextAttributes.GRAYED_ATTRIBUTES, available)
+        pendingDescription = ellipsize(
+            markdownRuns(task.description, SimpleTextAttributes.GRAYED_ATTRIBUTES),
+            available,
+        )
         description.isVisible = pendingDescription.isNotEmpty()
     }
 
     /**
-     * El título, troceado en los enlaces que caigan dentro.
+     * El título, troceado por el énfasis Markdown que lleve y por los enlaces que
+     * caigan dentro.
      *
      * Cada tramo de enlace sale como **un** [Run] con su [TaskLink]: es lo que
      * permite resolver el clic con `getFragmentTagAt` sin volver a medir texto ni
@@ -303,19 +323,94 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             )
         }
         val links = task.titleLinks
-        if (links.isEmpty()) return listOf(Run(title, style, matched = true))
+        return markdownRuns(title, style, matched = true) { index ->
+            links.firstOrNull { it.range.first == index }
+        }
+    }
+
+    /**
+     * [text] repartido en tramos con el estilo con el que se pinta cada uno.
+     *
+     * **Las marcas de Markdown no llegan a la fila.** Hasta la `0.7.0` sí: quien
+     * escribía una tarea con el botón de negrita del diálogo la veía luego en la
+     * lista como `**algo**`, con los asteriscos puestos. El troceado lo hace
+     * [InlineMarkdown], que devuelve rangos del original y no texto ya cortado, y
+     * eso es justo lo que permite cruzarlo aquí con los enlaces —que también vienen
+     * en coordenadas del original— sin recalcular ni un desplazamiento.
+     *
+     * Los índices que ninguna [InlineMarkdown.Span] cubre son las marcas: se saltan,
+     * y por eso desaparecen. Los tramos seguidos con el mismo énfasis se juntan en un
+     * [Run], que es lo que le devuelve al resaltado de la búsqueda frases enteras
+     * que casar en vez de letras sueltas.
+     */
+    private fun markdownRuns(
+        text: String,
+        base: SimpleTextAttributes,
+        matched: Boolean = false,
+        linkAt: (Int) -> TaskLink? = { null },
+    ): List<Run> {
+        if (text.isEmpty()) return emptyList()
+
+        val emphasis = arrayOfNulls<InlineMarkdown.Emphasis>(text.length)
+        for (span in InlineMarkdown.parse(text)) {
+            for (index in span.range) emphasis[index] = span.emphasis
+        }
 
         val runs = mutableListOf<Run>()
-        var cursor = 0
-        for (link in links) {
-            val from = link.range.first.coerceIn(cursor, title.length)
-            val to = (link.range.last + 1).coerceIn(from, title.length)
-            if (from > cursor) runs += Run(title.substring(cursor, from), style, matched = true)
-            runs += Run(link.display, linkStyle(style), link)
-            cursor = to
+        val pending = StringBuilder()
+        var current: InlineMarkdown.Emphasis? = null
+
+        fun flush() {
+            if (pending.isEmpty()) return
+            runs += Run(pending.toString(), emphasize(base, current), matched = matched)
+            pending.setLength(0)
         }
-        if (cursor < title.length) runs += Run(title.substring(cursor), style, matched = true)
+
+        var index = 0
+        while (index < text.length) {
+            val link = linkAt(index)
+            if (link != null) {
+                flush()
+                current = null
+                runs += Run(link.display, linkStyle(base), link)
+                index = link.range.last + 1
+                continue
+            }
+            val at = emphasis[index]
+            if (at == null) {
+                // Una marca: cuenta para el estilo de lo que viene, no para lo que se pinta.
+                index++
+                continue
+            }
+            if (at != current) {
+                flush()
+                current = at
+            }
+            pending.append(text[index])
+            index++
+        }
+        flush()
         return runs
+    }
+
+    /**
+     * El estilo de la fila con el énfasis encima. Se suma y no se sustituye: una
+     * tarea cerrada con una palabra en negrita tiene que salir tachada **y** en
+     * negrita, no una cosa o la otra.
+     */
+    private fun emphasize(base: SimpleTextAttributes, emphasis: InlineMarkdown.Emphasis?): SimpleTextAttributes {
+        if (emphasis == null || emphasis == InlineMarkdown.Emphasis.NONE) return base
+        var style = base.style
+        if (emphasis.bold) style = style or SimpleTextAttributes.STYLE_BOLD
+        if (emphasis.italic) style = style or SimpleTextAttributes.STYLE_ITALIC
+        if (emphasis.strike) style = style or SimpleTextAttributes.STYLE_STRIKEOUT
+
+        // El código no puede cambiar de familia: `SimpleColoredComponent` deriva la
+        // fuente del estilo del atributo, y ahí no hay nombre que poner. Se distingue
+        // por el fondo, que además es como se ve en cualquier visor de Markdown.
+        val background = codeColor.takeIf { emphasis.code }
+            ?: return if (style == base.style) base else SimpleTextAttributes(style, base.fgColor)
+        return SimpleTextAttributes(background, base.fgColor, null, style or SimpleTextAttributes.STYLE_OPAQUE)
     }
 
     private fun appendRuns(tree: JTree, target: SimpleColoredComponent, runs: List<Run>, selected: Boolean) {
@@ -353,7 +448,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     // ------------------------------------------------------- línea de distintivos
 
     /**
-     * Vencimiento, lista de comprobación, etiquetas, repositorio y estado.
+     * Vencimiento, etiquetas, repositorio y estado.
      *
      * El indicador de enlaces e imágenes va aparte, en [detail], y es el único con
      * icono de la plataforma **y** contador clicable: el icono es uno solo porque un
@@ -391,11 +486,6 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES
             }
             chip(formatDate(due), TasklaneIcons.Calendar, style)
-        }
-
-        task.checklist.takeIf { it.isNotEmpty() }?.let { items ->
-            val done = items.count { it.done }
-            chip("$done/${items.size}", AllIcons.Actions.Checked, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
 
         for (tag in task.tags) {
@@ -524,6 +614,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         return if (ColorUtil.isDark(background)) ColorUtil.brighter(background, 1) else ColorUtil.darker(background, 1)
     }
 
+    /** Lo mismo un paso más allá: el recuadro del código tiene que verse sobre la tarjeta. */
+    private fun codeColorFor(tree: JTree): Color {
+        val background = RenderingUtil.getBackground(tree)
+        return if (ColorUtil.isDark(background)) ColorUtil.brighter(background, 3) else ColorUtil.darker(background, 3)
+    }
+
     // ------------------------------------------------------------------- medida
 
     /**
@@ -568,13 +664,34 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         return textRenderer.getFontMetrics(font).stringWidth(text)
     }
 
-    /** Recorta con puntos suspensivos lo que no quepa en una línea. */
-    private fun ellipsize(text: String, style: SimpleTextAttributes, available: Int): String {
-        if (text.isEmpty() || available <= 0 || measure(text, style) <= available) return text
-        val dots = measure(TitleWrap.ELLIPSIS, style)
-        var end = text.length
-        while (end > 0 && measure(text.substring(0, end), style) + dots > available) end--
-        return text.substring(0, end).trimEnd() + TitleWrap.ELLIPSIS
+    /**
+     * Recorta con puntos suspensivos lo que no quepa en una línea.
+     *
+     * Trabaja sobre tramos y no sobre una cadena porque desde que la fila entiende
+     * Markdown una línea puede mezclar estilos, y cada uno mide distinto: recortar
+     * midiéndolo todo con la fuente base cortaría donde no toca en cuanto hubiera
+     * una palabra en negrita.
+     */
+    private fun ellipsize(runs: List<Run>, available: Int): List<Run> {
+        if (runs.isEmpty() || available <= 0) return runs
+
+        var used = 0
+        val out = mutableListOf<Run>()
+        for (run in runs) {
+            val width = measure(run.text, run.style)
+            if (used + width <= available) {
+                out += run
+                used += width
+                continue
+            }
+            // Aquí es donde se sale: se recorta este tramo y se tiran los siguientes.
+            val dots = measure(TitleWrap.ELLIPSIS, run.style)
+            var end = run.text.length
+            while (end > 0 && used + measure(run.text.substring(0, end), run.style) + dots > available) end--
+            out += run.withText(run.text.substring(0, end).trimEnd() + TitleWrap.ELLIPSIS)
+            return out
+        }
+        return out
     }
 
     // ------------------------------------------------------------ hit testing
@@ -590,12 +707,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * medirse—, que es lo que permite llamar a esto en cada movimiento del ratón.
      */
     fun linksAt(tree: JTree, point: Point): List<TaskLink> {
-        val row = tree.getRowForLocation(point.x, point.y)
+        val row = rowAtHeight(tree, point.y)
         if (row < 0) return emptyList()
         val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
         if (node.task.links.isEmpty()) return emptyList()
 
-        val bounds = tree.getRowBounds(row) ?: return emptyList()
+        val bounds = paintedRowBounds(tree, row) ?: return emptyList()
         getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
         setBounds(0, 0, bounds.width, bounds.height)
         doLayout()
@@ -638,10 +755,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * nadie está viendo.
      */
     fun targetAt(tree: JTree, point: Point): RowTarget? {
-        val row = tree.getRowForLocation(point.x, point.y)
+        val row = rowAtHeight(tree, point.y)
         if (row < 0) return null
         val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return null
-        val bounds = tree.getRowBounds(row) ?: return null
+        val bounds = paintedRowBounds(tree, row) ?: return null
 
         getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
         setBounds(0, 0, bounds.width, bounds.height)
@@ -669,10 +786,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * donde el primer clic marca la tarea y el segundo abre además el diálogo.
      */
     fun isOnCheckbox(tree: JTree, point: Point): Boolean {
-        val row = tree.getRowForLocation(point.x, point.y)
+        val row = rowAtHeight(tree, point.y)
         if (row < 0) return false
         val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return false
-        val bounds = tree.getRowBounds(row) ?: return false
+        val bounds = paintedRowBounds(tree, row) ?: return false
 
         getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
         setBounds(0, 0, bounds.width, bounds.height)

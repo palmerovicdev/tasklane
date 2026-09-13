@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Genera los 8 iconos de la barra de formato del dialogo, claro y oscuro.
+"""Genera los iconos propios del plugin —la barra de formato y el «agrupar por»—,
+claro y oscuro.
 
     python3 docs/tools/gen_format_icons.py
 
@@ -78,15 +79,14 @@ ICONS = {
   <path d="M7 8H13.5" stroke="{C}" stroke-linecap="round"/>
   <path d="M7 12.5H13.5" stroke="{C}" stroke-linecap="round"/>
 """,
-    # Dos casillas —una marcada, otra no— y su linea. Es literalmente lo que inserta:
-    # `- [x]` encima de `- [ ]`. Un visto suelto, que es lo que habia antes, no dice
-    # que la marca vaya dentro de una lista.
-    "format_checklist": """
-  <rect x="1.75" y="2.5" width="4.5" height="4.5" rx="1" stroke="{C}"/>
-  <path d="M2.9 4.75L3.85 5.7L5.5 3.9" stroke="{C}" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="1.75" y="9" width="4.5" height="4.5" rx="1" stroke="{C}"/>
-  <path d="M8.25 4.75H14" stroke="{C}" stroke-linecap="round"/>
-  <path d="M8.25 11.25H14" stroke="{C}" stroke-linecap="round"/>
+    # Dos grupos: cada uno una cabecera larga y una fila sangrada debajo. Es propio
+    # porque `AllIcons.Actions.GroupBy` se dibuja como un ojo en la interfaz nueva, y
+    # un ojo en la barra se lee como «vista previa», no como «agrupar por».
+    "group_by": """
+  <path d="M2.5 3H13.5" stroke="{C}" stroke-width="1.3" stroke-linecap="round"/>
+  <path d="M5.5 5.75H13.5" stroke="{C}" stroke-linecap="round"/>
+  <path d="M2.5 10.25H13.5" stroke="{C}" stroke-width="1.3" stroke-linecap="round"/>
+  <path d="M5.5 13H13.5" stroke="{C}" stroke-linecap="round"/>
 """,
 }
 

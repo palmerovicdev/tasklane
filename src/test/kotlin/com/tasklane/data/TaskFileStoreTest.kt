@@ -1,7 +1,10 @@
 package com.tasklane.data
 
+import com.tasklane.data.store.LoadAlert
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
+import com.tasklane.data.store.TasksCodec
+import com.tasklane.data.store.alert
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
@@ -11,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -24,6 +28,10 @@ class TaskFileStoreTest {
     val tmp = TemporaryFolder()
 
     private val repo = RepoKey.ROOT
+
+    /** El atributo `version` tal y como lo escribe el codec, y el de un plugin posterior. */
+    private val current = """version="${TasksCodec.CURRENT_VERSION}""""
+    private val future = """version="99""""
 
     private fun store() = TaskFileStore(StorageLayout(tmp.root.toPath().resolve("tasklane")))
     private fun layout() = StorageLayout(tmp.root.toPath().resolve("tasklane"))
@@ -79,6 +87,11 @@ class TaskFileStoreTest {
         assertEquals(listOf("buena"), result.tasks.map { it.body })
         assertNotNull("el fichero malo se conserva para poder inspeccionarlo", result.quarantinedAt)
         assertTrue(Files.exists(result.quarantinedAt!!))
+
+        // La otra mitad del criterio de la Fase 7: recuperar **y avisar**.
+        val alert = result.alert()
+        assertEquals(LoadAlert.Recovered(tasks = 1, quarantinedAt = result.quarantinedAt), alert)
+        assertFalse("de un fichero recuperado si se puede seguir escribiendo", alert!!.readOnly)
     }
 
     @Test
@@ -91,6 +104,32 @@ class TaskFileStoreTest {
         assertTrue(result is TaskFileStore.ReadResult.Corrupt)
         assertFalse((result as TaskFileStore.ReadResult.Corrupt).recoveredFromBackup)
         assertTrue(result.tasks.isEmpty())
+        assertEquals(LoadAlert.Lost(quarantinedAt = result.quarantinedAt), result.alert())
+    }
+
+    @Test
+    fun `una lectura normal no avisa de nada`() = runBlocking {
+        val s = store()
+        s.write(repo, listOf(task("a", "buena")))
+        assertNull(s.read(repo).alert())
+        assertNull(TaskFileStore.ReadResult.Empty.alert())
+    }
+
+    @Test
+    fun `un fichero de una version futura se abre sin escritura`() = runBlocking {
+        // Se escribe uno de verdad y se le sube el numero de version: es exactamente
+        // lo que dejaria en disco una version posterior del plugin.
+        val s = store()
+        s.write(repo, listOf(task("a", "escrita por el futuro")))
+        val file = layout().tasksFile(repo)
+        Files.writeString(file, Files.readString(file).replaceFirst(current, future))
+
+        val result = s.read(repo)
+        assertEquals(listOf("escrita por el futuro"), result.tasks.map { it.body })
+
+        val alert = result.alert()
+        assertEquals(LoadAlert.FutureFormat(version = 99), alert)
+        assertTrue("no se puede reescribir con el esquema viejo sin degradarlo", alert!!.readOnly)
     }
 
     @Test

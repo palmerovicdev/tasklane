@@ -94,7 +94,7 @@ data class Task(
      * Las líneas del cuerpo que no son el título y dicen algo: ni vacías, ni
      * compuestas sólo por referencias a imágenes.
      *
-     * Es la base de [hasDetail], de [description] y de [checklist], y se calcula una
+     * Es la base de [hasDetail] y de [description], y se calcula una
      * sola vez por tarea. Antes cada uno barría el cuerpo por su cuenta y pintar una
      * fila lo recorría cuatro veces; con la tarjeta de tres líneas —que pide título,
      * descripción y recuento de la lista para **cada** fila visible— eso dejaba de
@@ -120,30 +120,9 @@ data class Task(
         }
     }
 
-    /**
-     * La lista de comprobación del cuerpo: `- [ ] algo` / `- [x] algo`.
-     *
-     * Se **deriva** del Markdown y no es un campo propio, que es lo que permite
-     * escribirla a mano en el editor y verla contada en la fila sin que haya dos
-     * fuentes de verdad que puedan discrepar.
-     */
-    val checklist: List<ChecklistItem> by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        detailLines.mapNotNull { line ->
-            CHECKLIST.matchEntire(line)?.let {
-                ChecklistItem(text = it.groupValues[2].trim(), done = !it.groupValues[1].isBlank())
-            }
-        }
-    }
-
-    /**
-     * Una línea de resumen de lo que hay debajo del título, para la tarjeta.
-     *
-     * Las líneas de la lista de comprobación quedan fuera a propósito: de ésas ya
-     * informa el contador, y dejarlas entrar haría que la descripción de casi
-     * cualquier tarea con subtareas fuese su primera subtarea.
-     */
+    /** Una línea de resumen de lo que hay debajo del título, para la tarjeta. */
     val description: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        detailLines.firstOrNull { CHECKLIST.matchEntire(it) == null }.orEmpty()
+        detailLines.firstOrNull().orEmpty()
     }
 
     /**
@@ -164,15 +143,7 @@ data class Task(
 
     /** Vencida: tiene fecha, ya pasó y la tarea sigue abierta. */
     fun isOverdue(now: Instant): Boolean = completedAt == null && dueDate?.isBefore(now) == true
-
-    private companion object {
-        /** `- [ ] algo` / `- [x] algo`. La línea llega ya recortada por [detailLines]. */
-        val CHECKLIST = Regex("[-*]\\s+\\[([ xX])]\\s*(.*)")
-    }
 }
-
-/** Un elemento de la lista de comprobación del cuerpo. */
-data class ChecklistItem(val text: String, val done: Boolean)
 
 /**
  * Un enlace ya extraído del cuerpo.

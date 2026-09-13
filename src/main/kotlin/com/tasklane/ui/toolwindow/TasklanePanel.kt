@@ -155,6 +155,10 @@ internal class TasklanePanel(
     init {
         tree.isRootVisible = false
         tree.showsRootHandles = false
+        // Ni el árbol ni el buscador llevan etiqueta visible —el sitio manda—, así que
+        // sin esto un lector de pantalla anuncia «árbol» y «campo de texto» a secas.
+        tree.accessibleContext.accessibleName = TasklaneBundle.message("a11y.tree")
+        searchField.textEditor.accessibleContext.accessibleName = TasklaneBundle.message("a11y.search")
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         // Altura variable por fila: desde la Fase 5 el renderer tiene una segunda
         // línea que sólo aparece cuando hay enlaces o etiquetas que enseñar.
@@ -313,6 +317,7 @@ internal class TasklanePanel(
         localShortcut(ACTION_FOCUS_SEARCH, searchShortcut(), this) { focusSearch() }
 
         installDoubleClick()
+        installGroupToggle()
     }
 
     /**
@@ -326,6 +331,31 @@ internal class TasklanePanel(
      * así que no llegaba a enterarse y el gesto no hacía nada. `MOUSE_CLICKED` es
      * otro evento distinto y sí llega.
      */
+    /**
+     * Un clic en la cabecera despliega o pliega su grupo.
+     *
+     * Es el **único** gesto que lo hace con el ratón: el árbol va sin manecillas
+     * —`showsRootHandles = false`, porque la plataforma las pinta fuera de la tarjeta
+     * y desalinearían todas las filas—, así que el grupo se podía plegar sólo con
+     * `←`/`→` del teclado y nada lo anunciaba. El chevrón de la cabecera lo pinta
+     * [TaskTreeRenderer.renderGroup].
+     *
+     * Toda la fila responde, no sólo el chevrón: una cabecera es un objetivo ancho y
+     * cómodo, y encima no tiene ninguna otra cosa que pulsar.
+     */
+    private fun installGroupToggle() {
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(event: MouseEvent) {
+                if (event.button != MouseEvent.BUTTON1 || event.isPopupTrigger) return
+                val row = rowAtHeight(tree, event.y)
+                if (row < 0) return
+                if (tree.getPathForRow(row)?.lastPathComponent !is GroupNode) return
+                event.consume()
+                if (tree.isExpanded(row)) tree.collapseRow(row) else tree.expandRow(row)
+            }
+        })
+    }
+
     private fun installDoubleClick() {
         tree.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(event: MouseEvent) {

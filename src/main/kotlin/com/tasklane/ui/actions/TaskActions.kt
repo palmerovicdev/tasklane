@@ -133,6 +133,18 @@ internal class GroupByDateAction : DumbAwareToggleAction() {
  */
 internal class GroupingActionGroup : ActionGroup(), DumbAware {
 
+    /**
+     * Los cuatro hijos se crean **una vez** y se reutilizan.
+     *
+     * Devolver instancias nuevas en cada `getChildren` —que es lo que se hacía— dejaba
+     * el visto pegado a la opción que estuviera marcada la primera vez: el sistema de
+     * acciones cachea la `Presentation` por instancia de acción, y una instancia recién
+     * creada en cada apertura del desplegable no tiene de dónde heredar la suya. La
+     * lista sí se reagrupaba; el visto seguía en la agrupación anterior.
+     */
+    private val children: Array<AnAction> =
+        Grouping.entries.map<Grouping, AnAction>(::SelectGroupingAction).toTypedArray()
+
     init {
         isPopup = true
     }
@@ -143,8 +155,7 @@ internal class GroupingActionGroup : ActionGroup(), DumbAware {
         e.presentation.isEnabledAndVisible = TasklaneDataKeys.PANEL.getData(e.dataContext) != null
     }
 
-    override fun getChildren(e: AnActionEvent?): Array<AnAction> =
-        Grouping.entries.map(::SelectGroupingAction).toTypedArray()
+    override fun getChildren(e: AnActionEvent?): Array<AnAction> = children
 }
 
 /**

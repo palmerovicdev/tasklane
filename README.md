@@ -1,19 +1,56 @@
+<div align="center">
+
+<img src="src/main/resources/META-INF/pluginIcon.svg" width="96" alt="">
+
 # Tasklane
 
-Plugin de IntelliJ Platform para gestionar TODOs por repositorio sin salir del IDE.
+**Los TODOs viven donde vive el código.** Un plugin de IntelliJ Platform que guarda una
+lista de tareas por repositorio dentro del propio proyecto: sin cuenta, sin servidor y
+sin una sola llamada de red.
+
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/tool-window.png" width="330" alt="La tool window de Tasklane: estados como pestañas con su recuento, buscador y una tarjeta por tarea con su franja de prioridad">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/new-task.png" width="440" alt="El diálogo de tarea nueva: cuerpo en Markdown con barra de formato, zona para soltar imágenes, y estado, prioridad, vencimiento y etiquetas">
+</div>
+
+---
+
+Está hecho para las notas que se toman **mientras** se programa: las que nunca
+sobreviven al viaje hasta un gestor externo. Se abre una Tool Window, se escribe, y se
+queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
+
+| | |
+|---|---|
+| **Una tarjeta por tarea** | Franja de prioridad, casilla, vencimiento, etiquetas y marcador. El cuerpo se pinta en Markdown: negrita, cursiva, `código` y tachado |
+| **Estados como pestañas** | Con su recuento en vivo. Estados y prioridades se configuran por proyecto: nombre, orden, color y el prefijo que los selecciona al escribir |
+| **Agrupar y plegar** | Por fecha, prioridad o etiqueta; los grupos se pliegan con un clic y se recuerda por estado |
+| **Buscar con operadores** | En el cuerpo entero, no sólo en el título, más filtros de abiertas, vencidas y marcadas |
+| **Escribir en Markdown** | Barra de formato, e imágenes que se pegan, se arrastran o se eligen, con vista previa en el propio editor |
+| **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas y un selector para cambiar |
+| **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
+| **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo o sólo la selección |
 
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
-- **Estado:** v0.7.0 — Fase 6 cerrada (imágenes) y **rediseño a tarjetas completo**:
-  filas como tarjeta, estados en una fila con su recuento, filtro de vista, adjuntos
-  por arrastre, etiquetas como fichas y calendario para el vencimiento. Siguiente, la
-  Fase 7: robustez y pulido.
+- **Historial de versiones:** [`CHANGELOG.md`](CHANGELOG.md)
+- **Licencia:** [MIT](LICENSE)
 
-## Arquitectura en una frase
+## Instalación
 
-La UI observa un `StateFlow<TasklaneSnapshot>` inmutable y envía `TaskCommand`s;
-`TaskReducer` concentra las invariantes y es Kotlin puro, testeable sin arrancar un IDE;
-`TaskFileStore` escribe de forma atómica un XML por repositorio en `.idea/tasklane/`.
-La UI nunca toca el almacén.
+Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
+
+O con el zip, que es lo que produce este repositorio:
+
+```bash
+./gradlew buildPlugin          # -> build/distributions/tasklane-1.0.0.zip
+```
+
+*Settings → Plugins → ⚙ → Install Plugin from Disk…*
+
+Necesita IntelliJ IDEA 2025.2 o posterior —cualquier IDE de la plataforma— y Java 21.
+Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 
 ## Qué se versiona y qué no
 
@@ -82,12 +119,16 @@ tarea de una frase sigue midiendo una línea.
 | Franja de color a la izquierda | Siempre — es la prioridad, dentro de la tarjeta y recortada por ella |
 | Título | Hasta **tres** líneas; lo que no cabe se recorta. Doble clic abre la tarea entera |
 | Descripción | Si hay cuerpo bajo el título. Una línea, recortada |
-| Distintivos | Prioridad (si no es la de por defecto), vencimiento, `2/5` de la lista de comprobación, etiquetas, enlaces, imágenes y fecha |
+| Distintivos | Prioridad (si no es la de por defecto), vencimiento, etiquetas, enlaces, imágenes y fecha |
+
+El título y la descripción se pintan **en Markdown**: `**negrita**`, `*cursiva*`,
+`` `código` `` y `~~tachado~~` salen con su estilo y sin las marcas. Los guiones bajos
+no son cursiva a propósito —`un_nombre_asi` es identificador mucho más a menudo—, y
+`2 * 3 * 4` sigue siendo una multiplicación.
 
 Los enlaces del título se abren con **un clic** desde la fila, sin entrar a editar; el
-doble clic sigue siendo «abrir la tarea» en todo lo demás. La lista de comprobación
-sale del propio cuerpo (`- [ ]` / `- [x]`), así que escribirla a mano en el editor la
-cuenta igual: no hay dos sitios donde pueda decir cosas distintas.
+doble clic sigue siendo «abrir la tarea» en todo lo demás. Toda la tarjeta responde al
+ratón, no sólo la parte con letras.
 
 ### Agrupar
 
@@ -100,6 +141,10 @@ Cuatro formas, elegidas en el desplegable de la barra y recordadas **por estado*
 | Por fecha | *Hoy · Ayer · Esta semana · días · meses · Sin fecha*, contra la fecha que el estado ancle (creación, modificación o cierre) |
 | Por prioridad | De la más alta a la más baja, y sólo las que tengan algo |
 | Por etiqueta | Una tarea con dos etiquetas sale bajo las dos; las que no tienen ninguna, en un grupo al final |
+
+Cada cabecera lleva un chevrón y **se pliega con un clic** —o con `←`/`→` desde el
+teclado—. Lo plegado se recuerda por grupo, no por posición, así que repintar la lista
+no lo pierde.
 
 Agrupando por fecha, **«hoy» se enseña aunque esté vacío**: que no haya nada hoy es
 justo lo que se viene a mirar. Sólo ése, y sólo si la lista tiene algo más y no hay
@@ -283,8 +328,8 @@ cualquier uso accidental de una API posterior.
 ## Comandos
 
 ```bash
-./gradlew test                             # 265 tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-0.7.0.zip
+./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
+./gradlew buildPlugin                      # -> build/distributions/tasklane-1.0.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -303,15 +348,18 @@ Todas las acciones están declaradas en `plugin.xml`, así que aparecen en *Sett
 Keymap* y en *Search Everywhere* aunque no traigan atajo por defecto. Las de la Tool
 Window leen el keymap primero y sólo caen al valor local si no tienen asignación.
 
+La ventana se maneja **entera con el teclado**: el tabulador recorre la fila de
+estados —que se activan con Espacio o Intro—, el buscador y la lista, y `←`/`→`
+pliegan y despliegan los grupos. El árbol, el buscador y los campos del diálogo dicen
+su nombre a un lector de pantalla.
+
 ## Fases y versiones
 
-**Una fase cerrada sube la versión media:** la fase N deja el plugin en `0.N.0`, y la
-`1.0.0` queda para cuando estén las ocho. Versión y fase son el mismo número, así que
-`pluginVersion` dice por sí solo hasta dónde llega el plugin instalado. La versión baja
-(*patch*) es para lo que no mueve el plan de ocho fases: correcciones, compatibilidad,
-textos y **cada iteración del rediseño a tarjetas**, que así deja siempre un plugin
-instalable en vez de esperar a que el plan entero esté cerrado. La `0.7.0` es la única
-excepción a la regla y está anotada debajo: salió con parte de su fase hecha.
+**Una fase cerrada subía la versión media:** la fase N dejaba el plugin en `0.N.0`, y
+la `1.0.0` quedaba para cuando estuvieran las ocho. Ya están: la `1.0.0` cierra la
+Fase 7 y con ella el plan. De aquí en adelante manda **semver** sobre lo publicado —
+*patch* para correcciones, *minor* para funcionalidad nueva compatible, *major* para lo
+que rompa el formato de fichero o el mínimo de plataforma—.
 
 | | | | |
 |---|---|---|---|
@@ -322,16 +370,14 @@ excepción a la regla y está anotada debajo: salió con parte de su fase hecha.
 | 4 | Teclado y búsqueda | `0.4.0` | ✅ |
 | 5 | Enlaces y exportación | `0.5.0` | ✅ |
 | 6 | Imágenes | `0.6.0` | ✅ |
-| 7 | Robustez y pulido | `0.7.0` | 🔄 **en curso** — entregado el pulido de uso; el criterio sigue sin pasar |
+| 7 | Robustez y pulido | `0.7.0` · `0.7.1` · `1.0.0` | ✅ |
 
-La `0.7.0` **abre** la Fase 7, no la cierra: sale con el pulido de uso —los iconos
-de la barra de formato y `Escape` en el diálogo, detallados en el plan del rediseño—
-porque son cosas que se notan a diario y no tenía sentido guardarlas. Lo que queda de
-la fase es lo de fondo: migraciones y modo solo lectura por versión, recuperación de
-ficheros corruptos, accesibilidad, tests de integración y `verifyPlugin` contra
-2025.2 → 2026.2. La fase se dará por cerrada cuando pase su criterio —corromper
-`tasks.xml` a mano y ver que el plugin recupera del `.bak` y avisa—, y es la única
-versión media que sale antes de tiempo: las seis anteriores sí cerraron su fase.
+La Fase 7 salió en tres tandas, y es la única que no cupo en una versión. La `0.7.0`
+adelantó el pulido de uso; la `0.7.1`, el Markdown de la fila y el ratón sobre la
+tarjeta entera; la `1.0.0` cerró lo de fondo —idioma de los avisos, accesibilidad y
+navegación por teclado, y el criterio de la fase, que es corromper `tasks.xml` a mano y
+comprobar que el plugin recupera del `.bak` **y avisa**—. Lo detalla
+[`CHANGELOG.md`](CHANGELOG.md).
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -354,3 +400,43 @@ instalable.
 El **formato de fichero no sube de versión** con el rediseño: `tags`, `dueDate` y
 `bookmarked` son atributos nuevos, se omiten cuando están vacíos y el códec conserva
 los desconocidos, así que una versión vieja del plugin abre el fichero sin perder nada.
+
+## Publicar
+
+Publicar es un acto deliberado: lo dispara **una etiqueta**, no un push a `main`. El
+workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiqueta y
+`pluginVersion` dicen lo mismo, pasa los tests y el Plugin Verifier contra 2025.2 y
+2026.2, firma el zip y lo sube al Marketplace.
+
+**Antes de etiquetar**, tres sitios y en este orden:
+
+1. `pluginVersion` en `gradle.properties`
+2. `changeNotes` en `build.gradle.kts` — es lo que sale en la ficha del Marketplace y
+   en el diálogo de actualización del IDE
+3. [`CHANGELOG.md`](CHANGELOG.md)
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+**Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no
+tocan el repositorio:
+
+| | |
+|---|---|
+| `CERTIFICATE_CHAIN`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSWORD` | Firma del plugin. Se generan una vez siguiendo [*Plugin Signing*](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) |
+| `PUBLISH_TOKEN` | Token del perfil del Marketplace |
+
+**Una versión con sufijo va a su propio canal:** `1.1.0-beta.1` se publica en `beta`,
+no en el estable, y sólo la ve quien haya añadido ese canal en el IDE. El canal sale
+del propio número de versión, así que no hay un segundo sitio que pueda discrepar.
+
+**Lo que no está en el repositorio.** Las **capturas** de la ficha se suben desde el
+panel del Marketplace, no desde `plugin.xml`: la descripción no resuelve rutas
+relativas y un `<img>` con URL absoluta se rompe el día que se mueva el repositorio.
+Las de este README, en [`docs/screenshots/`](docs/screenshots), son las mismas y
+sirven de origen.
+
+## Licencia
+
+[MIT](LICENSE) © Victor Palmero
