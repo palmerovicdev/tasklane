@@ -16,6 +16,8 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.accessibility.AccessibleContext
+import javax.accessibility.AccessibleRole
 import javax.swing.JPanel
 
 /**
@@ -128,8 +130,31 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
             append("  $count", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
             // El nombre accesible se dice entero: un lector de pantalla leería
             // «ToDo 5» como dos cosas sueltas sin saber qué es el número.
-            accessibleContext.accessibleName = TasklaneBundle.message("a11y.tab", name, count)
+            // `getAccessibleContext()` y no `accessibleContext`: en Kotlin ese nombre
+            // resuelve al **campo** protegido que hereda de `JComponent` —nulo hasta
+            // que alguien lo llena— y no al método de abajo, que es el que lo crea.
+            getAccessibleContext().accessibleName = TasklaneBundle.message("a11y.tab", name, count)
             repaint()
+        }
+
+        /**
+         * `SimpleColoredComponent` **no crea** su `AccessibleContext`: hereda el
+         * `getAccessibleContext` de `JComponent`, que devuelve el campo tal cual y
+         * es nulo hasta que alguien lo llena. Ponerle el nombre accesible sin esto
+         * lanzaba un `NullPointerException` dentro de `update`, y como la fila se
+         * actualiza **antes** de reconstruir el árbol, la ventana se quedaba con los
+         * recuentos puestos y la lista vacía. Lo cubre `StateTabRowTest`.
+         *
+         * De paso el rol correcto: `PAGE_TAB` y no el `SWING_COMPONENT` genérico, que
+         * es lo que hace que un lector de pantalla diga «pestaña» al llegar.
+         */
+        override fun getAccessibleContext(): AccessibleContext {
+            if (accessibleContext == null) {
+                accessibleContext = object : AccessibleJComponent() {
+                    override fun getAccessibleRole(): AccessibleRole = AccessibleRole.PAGE_TAB
+                }
+            }
+            return accessibleContext
         }
 
         override fun paintComponent(g: Graphics) {
