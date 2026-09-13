@@ -24,5 +24,14 @@
             anchor="right"
             icon="com.tasklane.ui.common.TasklaneIcons.ToolWindow"
             factoryClass="com.tasklane.ui.toolwindow.TasklaneToolWindowFactory"/>
+
+        <!-- Los servicios de configuracion son light services (@Service + @State),
+             asi que no se declaran aqui: la plataforma los descubre al usarlos. -->
+        <projectConfigurable
+            id="com.tasklane.settings"
+            parentId="tools"
+            key="settings.title"
+            bundle="messages.TasklaneBundle"
+            instance="com.tasklane.ui.settings.TasklaneConfigurable"/>
     </extensions>
 </idea-plugin>

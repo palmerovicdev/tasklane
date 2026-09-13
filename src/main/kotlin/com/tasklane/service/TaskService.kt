@@ -1,23 +1,30 @@
 package com.tasklane.service
 
+import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
+import com.tasklane.TasklaneBundle
+import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
@@ -42,9 +49,23 @@ class TaskService(
     private val layout = StorageLayout.forProject(project)
     private val store = layout?.let(::TaskFileStore)
     private val reducer = TaskReducer()
+    private val configService = TasklaneConfigService.getInstance(project)
 
-    private val _snapshot = MutableStateFlow(TasklaneSnapshot.EMPTY.copy(loading = setOf(RepoKey.ROOT)))
+    private val _snapshot = MutableStateFlow(
+        TasklaneSnapshot.EMPTY.copy(
+            config = configService.config.value,
+            loading = setOf(RepoKey.ROOT),
+        ),
+    )
     val snapshot: StateFlow<TasklaneSnapshot> = _snapshot.asStateFlow()
+
+    /**
+     * Petición de «enséñame estas tareas». La emite la acción de una notificación y
+     * la atiende la pestaña que las contenga. Va por flow y no por llamada directa
+     * porque el servicio no conoce la UI ni debe conocerla.
+     */
+    private val _reveal = MutableSharedFlow<Set<TaskId>>(extraBufferCapacity = 8)
+    val reveal: SharedFlow<Set<TaskId>> = _reveal.asSharedFlow()
 
     /** Repos con cambios sin volcar. Se acumulan aquí y el debounce solo da la señal. */
     private val dirty: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
@@ -62,26 +83,52 @@ class TaskService(
 
     init {
         startSaveLoop()
+        // La configuración entra en el modelo como un comando más. El primer valor
+        // que emite el StateFlow es el que ya se sembró arriba, así que es inocuo.
+        scope.launch { configService.config.collect { apply(TaskCommand.ConfigChanged(it)) } }
         scope.launch(Dispatchers.IO) { load(RepoKey.ROOT) }
     }
 
     // ------------------------------------------------------------------ API
 
     fun apply(command: TaskCommand) {
-        val before = _snapshot.value
-        val after = reducer.reduce(before, command)
-        if (after == before) return
+        var before: TasklaneSnapshot
+        var after: TasklaneSnapshot
+        // Bucle de compare-and-set: hay dos productores reales —el EDT y la carga en
+        // Dispatchers.IO— y un leer-modificar-escribir suelto perdería comandos.
+        do {
+            before = _snapshot.value
+            after = reducer.reduce(before, command)
+            if (after == before) return
+        } while (!_snapshot.compareAndSet(before, after))
 
-        _snapshot.value = after
+        reportRemapped(before, after)
 
-        // Una carga desde disco no es una edición: no marca el repo como sucio.
-        if (command !is TaskCommand.Loaded && command.repo !in readOnly) {
-            dirty += command.repo
-            saveSignal.tryEmit(Unit)
-        }
+        // Una carga desde disco no es una edición: no marca nada como sucio.
+        if (command is TaskCommand.Loaded) return
+        markDirty(before, after)
     }
 
     fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly
+
+    fun requestReveal(ids: Set<TaskId>) {
+        if (ids.isNotEmpty()) _reveal.tryEmit(ids)
+    }
+
+    /**
+     * Qué repositorios hay que reescribir. Se deduce comparando el antes y el después
+     * en vez de leerlo del comando: desde la Fase 2 hay comandos —cambio de
+     * configuración, reasignación— que tocan varios repos a la vez, y un comando
+     * puede no cambiar nada en alguno de ellos.
+     */
+    private fun markDirty(before: TasklaneSnapshot, after: TasklaneSnapshot) {
+        val changed = after.tasksByRepo.keys.filter { repo ->
+            repo !in readOnly && after.tasksOf(repo) != before.tasksOf(repo)
+        }
+        if (changed.isEmpty()) return
+        dirty += changed
+        saveSignal.tryEmit(Unit)
+    }
 
     // ---------------------------------------------------------------- carga
 
@@ -127,6 +174,36 @@ class TaskService(
         apply(TaskCommand.Loaded(repo, result.tasks))
     }
 
+    // ----------------------------------------------- configuracion desincronizada
+
+    /**
+     * Avisa de las tareas que el reducer acaba de aparcar en el estado por defecto
+     * por apuntar a configuración inexistente. No es un error recuperable en
+     * silencio: el usuario ve sus tareas en un sitio que no eligió, y merece saber
+     * cuántas y cuáles.
+     */
+    private fun reportRemapped(before: TasklaneSnapshot, after: TasklaneSnapshot) {
+        val was = TaskReducer.orphans(before.tasksByRepo.values.flatten()).map { it.id }.toSet()
+        val now = TaskReducer.orphans(after.tasksByRepo.values.flatten())
+        val fresh = now.filterNot { it.id in was }
+        if (fresh.isEmpty()) return
+
+        val ids = fresh.map { it.id }.toSet()
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(
+                TasklaneBundle.message("notification.remapped.title"),
+                TasklaneBundle.message("notification.remapped.content", fresh.size),
+                NotificationType.WARNING,
+            )
+            .addAction(
+                NotificationAction.createSimple(TasklaneBundle.message("notification.remapped.action")) {
+                    requestReveal(ids)
+                },
+            )
+            .notify(project)
+    }
+
     // ------------------------------------------------------------ escritura
 
     private suspend fun flushAll() {
@@ -168,5 +245,7 @@ class TaskService(
     companion object {
         const val NOTIFICATION_GROUP = "Tasklane"
         private val SAVE_DEBOUNCE = 500.milliseconds
+
+        fun getInstance(project: Project): TaskService = project.service()
     }
 }

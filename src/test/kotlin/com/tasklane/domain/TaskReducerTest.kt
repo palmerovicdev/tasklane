@@ -107,4 +107,133 @@ class TaskReducerTest {
         val orders = s.activeTasks.map { it.order }.sorted()
         assertEquals(listOf(1000L, 2000L), orders)
     }
+
+    // ------------------------------------------- configuracion desincronizada
+
+    /** La de fabrica menos «Doing»: simula que alguien lo borro en otra rama. */
+    private val sinDoing = TasklaneConfig.DEFAULT.copy(
+        states = TasklaneConfig.DEFAULT.states.filterNot { it.id == TasklaneConfig.DOING },
+    )
+
+    private fun conTareaEnDoing(): TasklaneSnapshot =
+        reducer.reduce(empty, TaskCommand.Create(repo, "Algo", TasklaneConfig.DOING))
+
+    @Test
+    fun `si el estado desaparece la tarea se aparca y se recuerda de donde venia`() {
+        val after = reducer.reduce(conTareaEnDoing(), TaskCommand.ConfigChanged(sinDoing))
+        val task = after.activeTasks.single()
+
+        assertEquals(TasklaneConfig.TODO, task.stateId)
+        assertEquals(TasklaneConfig.DOING.value, task.extra[TaskReducer.ORIG_STATE])
+    }
+
+    @Test
+    fun `si el estado vuelve la tarea vuelve sola`() {
+        val aparcada = reducer.reduce(conTareaEnDoing(), TaskCommand.ConfigChanged(sinDoing))
+        val restaurada = reducer
+            .reduce(aparcada, TaskCommand.ConfigChanged(TasklaneConfig.DEFAULT))
+            .activeTasks.single()
+
+        assertEquals(TasklaneConfig.DOING, restaurada.stateId)
+        assertNull("la marca se limpia al restaurar", restaurada.extra[TaskReducer.ORIG_STATE])
+    }
+
+    @Test
+    fun `mover a mano una tarea aparcada cancela la vuelta automatica`() {
+        val aparcada = reducer.reduce(conTareaEnDoing(), TaskCommand.ConfigChanged(sinDoing))
+        val id = aparcada.activeTasks.single().id
+
+        // El usuario la coloca donde quiere; eso es una decision, no un fallback.
+        val movida = reducer.reduce(aparcada, TaskCommand.ChangeState(repo, id, TasklaneConfig.DONE))
+        assertNull(movida.activeTasks.single().extra[TaskReducer.ORIG_STATE])
+
+        val vuelta = reducer.reduce(movida, TaskCommand.ConfigChanged(TasklaneConfig.DEFAULT))
+        assertEquals(
+            "recuperar la configuracion no debe pisar lo que el usuario eligio despues",
+            TasklaneConfig.DONE,
+            vuelta.activeTasks.single().stateId,
+        )
+    }
+
+    @Test
+    fun `el primer origen es el que se recuerda tras dos remapeos`() {
+        val aparcada = reducer.reduce(conTareaEnDoing(), TaskCommand.ConfigChanged(sinDoing))
+        // Ahora tambien desaparece ToDo, que es donde la habiamos aparcado.
+        val soloDone = TasklaneConfig.DEFAULT.copy(
+            states = TasklaneConfig.DEFAULT.states.filter { it.id == TasklaneConfig.DONE },
+        )
+        val otraVez = reducer.reduce(aparcada, TaskCommand.ConfigChanged(soloDone)).activeTasks.single()
+
+        assertEquals(
+            "el ID que vale la pena guardar es el original, no el fallback por el que paso",
+            TasklaneConfig.DOING.value,
+            otraVez.extra[TaskReducer.ORIG_STATE],
+        )
+    }
+
+    // ------------------------------------------------------------ reasignacion
+
+    @Test
+    fun `reasignar mueve solo las del estado de origen`() {
+        var s = create("en todo")
+        s = reducer.reduce(s, TaskCommand.Create(repo, "en doing", TasklaneConfig.DOING))
+
+        val after = reducer.reduce(s, TaskCommand.ReassignState(TasklaneConfig.DOING, TasklaneConfig.DONE))
+        val byBody = after.activeTasks.associateBy { it.body }
+
+        assertEquals(TasklaneConfig.TODO, byBody.getValue("en todo").stateId)
+        assertEquals(TasklaneConfig.DONE, byBody.getValue("en doing").stateId)
+        assertEquals(
+            "reasignar a un estado terminal sella la fecha igual que completar a mano",
+            t0,
+            byBody.getValue("en doing").completedAt,
+        )
+        assertNull(byBody.getValue("en todo").completedAt)
+    }
+
+    @Test
+    fun `reasignar prioridad no toca las demas`() {
+        var s = reducer.reduce(empty, TaskCommand.Create(repo, "baja", priorityId = TasklaneConfig.LOW))
+        s = reducer.reduce(s, TaskCommand.Create(repo, "alta", priorityId = TasklaneConfig.HIGH))
+
+        val after = reducer.reduce(s, TaskCommand.ReassignPriority(TasklaneConfig.LOW, TasklaneConfig.HIGH))
+
+        assertEquals(listOf(TasklaneConfig.HIGH, TasklaneConfig.HIGH), after.activeTasks.map { it.priorityId })
+    }
+
+    // ------------------------------------------------- estado recien terminal
+
+    @Test
+    fun `rellenar completedAt usa updatedAt y no lo pisa`() {
+        val viejo = Instant.parse("2026-08-01T09:00:00Z")
+        val abierta = Task(
+            id = TaskId("abierta"),
+            repo = repo,
+            body = "sin cerrar",
+            stateId = TasklaneConfig.DOING,
+            priorityId = TasklaneConfig.NORMAL,
+            createdAt = viejo,
+            updatedAt = viejo,
+        )
+        val yaCerrada = abierta.copy(id = TaskId("cerrada"), completedAt = t0)
+
+        val loaded = reducer.reduce(empty, TaskCommand.Loaded(repo, listOf(abierta, yaCerrada)))
+        val after = reducer.reduce(loaded, TaskCommand.BackfillCompletedAt(setOf(TasklaneConfig.DOING)))
+        val byId = after.activeTasks.associateBy { it.id }
+
+        assertEquals(viejo, byId.getValue(TaskId("abierta")).completedAt)
+        assertEquals(
+            "updatedAt es de donde se deriva la fecha: pisarlo destruiria el dato usado",
+            viejo,
+            byId.getValue(TaskId("abierta")).updatedAt,
+        )
+        assertEquals("una tarea que ya tenia fecha no se toca", t0, byId.getValue(TaskId("cerrada")).completedAt)
+    }
+
+    @Test
+    fun `rellenar no toca estados ajenos`() {
+        val s = create("en todo")
+        val after = reducer.reduce(s, TaskCommand.BackfillCompletedAt(setOf(TasklaneConfig.DOING)))
+        assertSame(s, after)
+    }
 }

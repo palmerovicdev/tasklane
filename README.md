@@ -3,7 +3,8 @@
 Plugin de IntelliJ Platform para gestionar TODOs por repositorio sin salir del IDE.
 
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
-- **Estado:** Fase 1 — crear, editar, completar y borrar tareas, con persistencia local.
+- **Estado:** Fase 2 — estados y prioridades configurables por proyecto, tabs por estado
+  y agrupación por fecha.
 
 ## Arquitectura en una frase
 
@@ -11,6 +12,17 @@ La UI observa un `StateFlow<TasklaneSnapshot>` inmutable y envía `TaskCommand`s
 `TaskReducer` concentra las invariantes y es Kotlin puro, testeable sin arrancar un IDE;
 `TaskFileStore` escribe de forma atómica un XML por repositorio en `.idea/tasklane/`.
 La UI nunca toca el almacén.
+
+## Qué se versiona y qué no
+
+| Fichero | Qué hay | VCS |
+|---|---|---|
+| `.idea/tasklane.xml` | estados y prioridades del proyecto | **sí** — compartible con el equipo |
+| `.idea/tasklane/` | las tareas | no — lleva su propio `.gitignore` con `*` |
+| `tasklane-defaults.xml` (config del IDE) | plantilla para proyectos nuevos | n/a — es lo único que roamea |
+
+Un proyecto sin `.idea/tasklane.xml` se siembra desde la plantilla al abrirse, así que
+configurar por proyecto no obliga a reconfigurar cada proyecto.
 
 ## Requisitos
 
@@ -51,7 +63,7 @@ cualquier uso accidental de una API posterior.
 ## Comandos
 
 ```bash
-./gradlew test                             # 18 tests de dominio y almacén, sin IDE
+./gradlew test                             # 51 tests de dominio, config y almacén, sin IDE
 ./gradlew buildPlugin                      # -> build/distributions/tasklane-0.1.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
@@ -70,8 +82,8 @@ cualquier uso accidental de una API posterior.
 | | | |
 |---|---|---|
 | 0 | Andamiaje | ✅ build verde, `tasklane-0.1.0.zip` generado |
-| 1 | Dominio, persistencia, CRUD | ✅ 18 tests verdes |
-| 2 | Estados y prioridades | pendiente |
+| 1 | Dominio, persistencia, CRUD | ✅ |
+| 2 | Estados y prioridades | ✅ 51 tests verdes |
 | 3 | Multi-repositorio | pendiente |
 | 4 | Teclado y búsqueda | pendiente |
 | 5 | Enlaces y exportación | pendiente |

@@ -31,15 +31,19 @@ data class TaskPriority(
 )
 
 /**
- * Configuración de fábrica.
+ * Estados y prioridades del proyecto.
  *
- * En la Fase 2 esto pasa a ser un `PersistentStateComponent` de proyecto editable
- * desde Settings; aquí es la semilla. Se aísla en el dominio a propósito: el resto
- * del código ya consume [TasklaneConfig], así que cambiar el origen no toca nada más.
+ * El dominio sólo conoce este tipo inmutable. Desde la Fase 2 su origen es
+ * `TasklaneConfigService`, un `PersistentStateComponent` que la plataforma escribe
+ * en `.idea/tasklane.xml`; [DEFAULT] queda como semilla de fábrica. Que el resto del
+ * código consuma siempre [TasklaneConfig] es lo que hizo que cambiar el origen no
+ * tocara ni el reducer ni la UI.
  */
 data class TasklaneConfig(
     val states: List<TaskState>,
     val priorities: List<TaskPriority>,
+    /** Interruptor general de los triggers de prioridad. Fase 4. */
+    val triggersEnabled: Boolean = true,
 ) {
     val defaultState: TaskState get() = states.firstOrNull { it.isDefault } ?: states.first()
     val defaultPriority: TaskPriority get() = priorities.firstOrNull { it.isDefault } ?: priorities.first()
@@ -47,9 +51,31 @@ data class TasklaneConfig(
     fun state(id: StateId): TaskState? = states.firstOrNull { it.id == id }
     fun priority(id: PriorityId): TaskPriority? = priorities.firstOrNull { it.id == id }
 
-    /** Un estado que ya no existe no puede tumbar la carga: se remapea. Ver [TaskReducer]. */
+    /** Un estado que ya no existe no puede tumbar la carga: se remapea. Ver `TaskReducer`. */
     fun stateOrDefault(id: StateId): TaskState = state(id) ?: defaultState
     fun priorityOrDefault(id: PriorityId): TaskPriority = priority(id) ?: defaultPriority
+
+    /**
+     * Reafirma las invariantes que la UI y el fichero podrían haber roto: `order`
+     * coincide con la posición, y hay exactamente un elemento por defecto.
+     *
+     * Se aplica al salir de los ajustes y al leer de disco, de modo que ningún
+     * consumidor tenga que preguntarse si lo que recibe está bien formado.
+     */
+    fun normalized(): TasklaneConfig {
+        val defaultStateIndex = states.indexOfFirst { it.isDefault }.takeIf { it >= 0 } ?: 0
+        val defaultPriorityIndex = priorities.indexOfFirst { it.isDefault }.takeIf { it >= 0 } ?: 0
+        return copy(
+            states = states.mapIndexed { i, s -> s.copy(order = i, isDefault = i == defaultStateIndex) },
+            priorities = priorities.mapIndexed { i, p ->
+                p.copy(
+                    order = i,
+                    isDefault = i == defaultPriorityIndex,
+                    trigger = p.trigger?.trim()?.takeIf(String::isNotEmpty),
+                )
+            },
+        )
+    }
 
     companion object {
         val TODO = StateId("s-todo")
