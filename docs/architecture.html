@@ -1,0 +1,914 @@
+<title>Arquitectura de Tasklane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root{
+  --ground:#F6F6F3; --surface:#FFFFFF; --surface-2:#EFEFEB;
+  --ink:#16181B; --ink-2:#3D434A; --muted:#6C737C;
+  --line:#E1E2DD; --line-strong:#C9CBC5;
+  --accent:#1A5A73; --accent-soft:#E4EEF2;
+  --p-low:#5C8A9E; --p-normal:#B0700F; --p-high:#B3392C; --ok:#2C6B4B;
+  --code-bg:#F1F1ED; --code-ink:#23272C;
+  --shadow:0 1px 2px rgba(22,24,27,.05), 0 8px 24px -16px rgba(22,24,27,.22);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141619; --surface:#1B1E22; --surface-2:#22262B;
+    --ink:#E7E8EA; --ink-2:#C1C6CC; --muted:#8C939B;
+    --line:#2A2E34; --line-strong:#3A4047;
+    --accent:#74B6D1; --accent-soft:#16313D;
+    --p-low:#84B4C7; --p-normal:#DBA646; --p-high:#E2705F; --ok:#5FB088;
+    --code-bg:#181B1F; --code-ink:#CDD3DA;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 28px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141619; --surface:#1B1E22; --surface-2:#22262B;
+  --ink:#E7E8EA; --ink-2:#C1C6CC; --muted:#8C939B;
+  --line:#2A2E34; --line-strong:#3A4047;
+  --accent:#74B6D1; --accent-soft:#16313D;
+  --p-low:#84B4C7; --p-normal:#DBA646; --p-high:#E2705F; --ok:#5FB088;
+  --code-bg:#181B1F; --code-ink:#CDD3DA;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 28px -18px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+.shell{max-width:1240px;margin:0 auto;padding:0 24px 96px;display:grid;grid-template-columns:1fr;gap:0}
+@media (min-width:1120px){
+  .shell{grid-template-columns:212px minmax(0,1fr);gap:56px;padding-right:40px}
+}
+
+/* ---------- nav ---------- */
+nav.toc{display:none}
+@media (min-width:1120px){
+  nav.toc{
+    display:block;position:sticky;top:0;align-self:start;
+    max-height:100vh;overflow-y:auto;padding:104px 0 48px;
+  }
+  nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  nav.toc a{
+    display:grid;grid-template-columns:22px 1fr;gap:8px;
+    font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;line-height:1.45;
+    color:var(--muted);text-decoration:none;padding:4px 8px 4px 0;border-radius:4px;
+  }
+  nav.toc a span{color:var(--line-strong)}
+  nav.toc a:hover{color:var(--accent)}
+  nav.toc a:hover span{color:var(--accent)}
+  nav.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+}
+
+/* ---------- hero ---------- */
+header.hero{padding:96px 0 44px;border-bottom:1px solid var(--line)}
+.kicker{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:500;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 20px;
+}
+h1{
+  font-family:"Instrument Serif",Georgia,"Times New Roman",serif;font-weight:400;
+  font-size:clamp(44px,7vw,74px);line-height:1.02;letter-spacing:-.015em;
+  margin:0 0 22px;text-wrap:balance;
+}
+h1 em{font-style:italic;color:var(--accent)}
+.lede{font-size:19px;line-height:1.55;color:var(--ink-2);max-width:62ch;margin:0 0 34px}
+.meta{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.meta div{padding:12px 18px;border-right:1px solid var(--line);flex:1 1 auto;min-width:150px}
+.meta div:last-child{border-right:0}
+.meta dt{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin:0 0 5px}
+.meta dd{margin:0;font-size:14px;font-weight:500;font-variant-numeric:tabular-nums}
+
+/* ---------- sections ---------- */
+section{padding:56px 0 8px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin:0 0 8px}
+.sec-num{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;font-weight:700;
+  color:var(--accent);letter-spacing:.04em;flex:0 0 auto;padding-top:2px;
+}
+h2{
+  font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(28px,3.6vw,38px);
+  line-height:1.12;letter-spacing:-.01em;margin:0;text-wrap:balance;
+}
+h3{font-size:17px;font-weight:600;letter-spacing:-.005em;margin:38px 0 10px;color:var(--ink)}
+h4{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:700;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:28px 0 8px;
+}
+p{margin:0 0 14px;max-width:68ch}
+ul,ol{margin:0 0 16px;padding-left:22px;max-width:68ch}
+li{margin:0 0 6px}
+li::marker{color:var(--line-strong)}
+a{color:var(--accent);text-underline-offset:2px}
+strong{font-weight:600}
+code{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.855em;
+  background:var(--code-bg);color:var(--code-ink);padding:.13em .36em;border-radius:3px;
+  border:1px solid var(--line);white-space:nowrap;
+}
+pre{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.65;
+  background:var(--code-bg);color:var(--code-ink);border:1px solid var(--line);
+  border-radius:6px;padding:16px 18px;margin:0 0 18px;overflow-x:auto;
+}
+pre code{background:none;border:0;padding:0;font-size:inherit;white-space:pre}
+.cap{font-size:12.5px;color:var(--muted);margin:-10px 0 20px;max-width:68ch}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:0 0 20px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
+th{
+  text-align:left;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500;
+  padding:11px 14px;border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap;
+}
+td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.5}
+tr:last-child td{border-bottom:0}
+td code{white-space:normal}
+
+/* ---------- decision cards (priority-stripe motif) ---------- */
+.adr{
+  background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:0 6px 6px 0;padding:16px 20px;margin:0 0 14px;box-shadow:var(--shadow);
+}
+.adr.alt{border-left-color:var(--line-strong)}
+.adr.open{border-left-color:var(--p-normal)}
+.adr.warn{border-left-color:var(--p-high)}
+.adr p:last-child{margin-bottom:0}
+.adr .tag{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);display:block;margin:0 0 6px;font-weight:700;
+}
+.adr.alt .tag{color:var(--muted)}
+.adr.open .tag{color:var(--p-normal)}
+.adr.warn .tag{color:var(--p-high)}
+
+/* ---------- layer diagram ---------- */
+.layers{display:flex;flex-direction:column;gap:0;margin:0 0 8px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.layer{padding:14px 18px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:118px minmax(0,1fr);gap:16px;align-items:center}
+.layer:last-child{border-bottom:0}
+.layer .lname{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--accent);
+}
+.layer .lbody{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:3px 8px;color:var(--ink-2);
+}
+.flowline{
+  display:flex;justify-content:space-between;padding:7px 18px;background:var(--accent-soft);
+  border-bottom:1px solid var(--line);font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:10.5px;letter-spacing:.06em;color:var(--accent);text-transform:uppercase;
+}
+
+/* ---------- phase list ---------- */
+.phase{display:grid;grid-template-columns:76px minmax(0,1fr);gap:18px;padding:16px 0;border-bottom:1px solid var(--line)}
+.phase:last-child{border-bottom:0}
+.phase .pn{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:700;
+  color:var(--accent);letter-spacing:.06em;padding-top:3px;
+}
+.phase .pn small{display:block;color:var(--muted);font-weight:400;letter-spacing:0;margin-top:3px}
+.phase h3{margin:0 0 4px;font-size:16px}
+.phase p{margin:0 0 6px;font-size:14.5px;color:var(--ink-2)}
+.gate{font-size:13px;color:var(--muted);border-left:2px solid var(--ok);padding-left:10px;margin-top:8px;max-width:68ch}
+.gate b{color:var(--ok);font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.11em;text-transform:uppercase;display:block}
+
+footer{padding:44px 0 0;color:var(--muted);font-size:13px;border-top:1px solid var(--line);margin-top:48px}
+::selection{background:var(--accent-soft)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Índice">
+  <ol>
+    <li><a href="#d0"><span>00</span>Decisiones</a></li>
+    <li><a href="#d1"><span>01</span>Arquitectura</a></li>
+    <li><a href="#d2"><span>02</span>Modelo de dominio</a></li>
+    <li><a href="#d3"><span>03</span>Packages</a></li>
+    <li><a href="#d4"><span>04</span>Persistencia</a></li>
+    <li><a href="#d5"><span>05</span>Tool Window</a></li>
+    <li><a href="#d6"><span>06</span>Quick Add</a></li>
+    <li><a href="#d7"><span>07</span>Repositorios</a></li>
+    <li><a href="#d8"><span>08</span>Búsqueda</a></li>
+    <li><a href="#d9"><span>09</span>Enlaces e imágenes</a></li>
+    <li><a href="#d10"><span>10</span>Estados y prioridades</a></li>
+    <li><a href="#d11"><span>11</span>APIs</a></li>
+    <li><a href="#d12"><span>12</span>Edge cases</a></li>
+    <li><a href="#d13"><span>13</span>Fases</a></li>
+    <li><a href="#d14"><span>14</span>Riesgos y abiertos</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <p class="kicker">Propuesta técnica · plugin IntelliJ Platform</p>
+  <h1>Arquitectura de <em>Tasklane</em></h1>
+  <p class="lede">Gestión de TODOs por repositorio dentro del IDE: una Tool Window nativa, estados y prioridades configurables, creación por teclado y persistencia local por proyecto. Este documento cierra las decisiones técnicas antes de escribir código.</p>
+  <dl class="meta">
+    <div><dt>Lenguaje</dt><dd>Kotlin 2.x · JVM 21</dd></div>
+    <div><dt>Plataforma</dt><dd>IC 2025.2 · sinceBuild 252</dd></div>
+    <div><dt>Build</dt><dd>IntelliJ Platform Gradle 2.x</dd></div>
+    <div><dt>Dependencias externas</dt><dd>Ninguna</dd></div>
+  </dl>
+  <p class="cap" style="margin-top:14px"><em>Tasklane</em> es un nombre de trabajo; el ID del plugin y los prefijos de paquete se fijan antes de la Fase 0.</p>
+</header>
+
+<!-- ============ 0 ============ -->
+<section id="d0">
+  <div class="sec-head"><span class="sec-num">00</span><h2>Decisiones en una tabla</h2></div>
+  <p>Cada fila es una decisión con consecuencias de código. Las que llevan alternativa descartada se justifican en su sección.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Área</th><th>Elección</th><th>Descartado</th><th>Motivo</th></tr></thead>
+    <tbody>
+      <tr><td>Composición</td><td>Servicios ligeros <code>@Service</code> con <code>CoroutineScope</code> inyectado</td><td>Componentes / singletons propios</td><td>Ciclo de vida y cancelación gestionados por la plataforma</td></tr>
+      <tr><td>Estado de UI</td><td><code>StateFlow&lt;TasklaneSnapshot&gt;</code> inmutable</td><td><code>MessageBus</code> Topic propio</td><td>Sin fugas de listeners, diff trivial, testeable sin IDE</td></tr>
+      <tr><td>Config (estados, prioridades)</td><td><code>PersistentStateComponent</code> de proyecto → <code>.idea/tasklane.xml</code></td><td>Nivel aplicación con roaming</td><td>Flujos distintos por proyecto; el equipo puede versionar la configuración</td></tr>
+      <tr><td>Proyectos nuevos</td><td>Plantilla de defaults a nivel aplicación</td><td>Reconfigurar cada proyecto a mano</td><td>Neutraliza el único coste de que la config sea por proyecto</td></tr>
+      <tr><td>Datos de tareas</td><td>Un XML por repositorio en <code>.idea/tasklane/</code></td><td>PSC único / cache del IDE</td><td>Aislamiento por repo; contenido de autoría, no cache</td></tr>
+      <tr><td>Serializador</td><td>Mapeo a mano sobre JDOM + <code>JDOMUtil</code></td><td>kotlinx-serialization propio; <code>XmlSerializer</code> de xmlb</td><td>kotlinx: conflicto de classloader. xmlb: <strong>descarta los atributos desconocidos</strong>, lo que anularía <code>extra</code></td></tr>
+      <tr><td>Cuerpo de la tarea</td><td>Markdown-lite en texto plano</td><td>HTML / RTF / <code>StyledDocument</code></td><td>Búsqueda, export y diff triviales</td></tr>
+      <tr><td>Imágenes</td><td>Blobs direccionados por contenido + <code>Inlay</code> de bloque</td><td>Base64 embebido</td><td>Tamaño de fichero, dedupe y GC</td></tr>
+      <tr><td>Vista principal</td><td><code>CheckboxTree</code> + <code>DefaultTreeModel</code>, modelo construido fuera del EDT</td><td><code>JBList</code>; <code>AsyncTreeModel</code></td><td>Grupos plegables y hit-testing del checkbox resueltos. <code>AsyncTreeModel</code> <strong>no compone</strong> con <code>CheckboxTree</code></td></tr>
+      <tr><td>Estados en la UI</td><td><code>Content</code> del <code>ContentManager</code> (tabs nativas)</td><td><code>JBTabbedPane</code> interno</td><td>Integra con el header y el keymap de la tool window</td></tr>
+      <tr><td>Búsqueda</td><td>Escaneo normalizado + <code>MinusculeMatcher</code>, debounce 120 ms</td><td>Índice invertido</td><td>O(n) con n ≤ 10⁴ cuesta &lt; 5 ms fuera del EDT</td></tr>
+      <tr><td>Repositorios</td><td><code>GitRepositoryManager</code> + <code>VCS_REPOSITORY_MAPPING_UPDATED</code></td><td>Escaneo manual de <code>.git</code></td><td>Usa el modelo VCS real del IDE y sus eventos</td></tr>
+      <tr><td>Atajos</td><td>Actions en <code>plugin.xml</code> + <code>registerCustomShortcutSet</code> local</td><td>Bindings Swing propios</td><td>Configurable en Keymap y gana en su contexto</td></tr>
+      <tr><td>Ajustes</td><td><code>BoundSearchableConfigurable</code> + Kotlin UI DSL v2</td><td>Swing a mano</td><td>Buscable desde Settings y correcto en ambos temas</td></tr>
+      <tr><td>UI web</td><td>Ninguna (sin JCEF)</td><td>Preview JCEF del plugin Markdown</td><td>Restricción del proyecto; Swing cubre el caso</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ 1 ============ -->
+<section id="d1">
+  <div class="sec-head"><span class="sec-num">01</span><h2>Arquitectura general</h2></div>
+  <p>Cuatro capas con dependencias en una sola dirección y un flujo de datos unidireccional: la UI envía <em>comandos</em> hacia abajo y recibe <em>snapshots inmutables</em> hacia arriba. El contenedor de servicios de la plataforma hace de inyector de dependencias; no se introduce ningún framework de DI.</p>
+
+  <div class="layers">
+    <div class="layer"><span class="lname">ui · actions</span><span class="lbody">
+      <span class="chip">TasklaneToolWindowFactory</span><span class="chip">StateTabPanel</span><span class="chip">QuickAddPopup</span><span class="chip">TaskEditorPopup</span><span class="chip">TasklaneConfigurable</span><span class="chip">AnAction ×12</span>
+    </span></div>
+    <div class="flowline"><span>↓ comandos tipados</span><span>↑ StateFlow&lt;Snapshot&gt;</span></div>
+    <div class="layer"><span class="lname">application</span><span class="lbody">
+      <span class="chip">TaskService</span><span class="chip">ConfigService</span><span class="chip">RepositoryRegistry</span><span class="chip">SearchService</span><span class="chip">ExportService</span><span class="chip">Notifier</span>
+    </span></div>
+    <div class="flowline"><span>↓ lectura/escritura</span><span>↑ DTO + migraciones</span></div>
+    <div class="layer"><span class="lname">data</span><span class="lbody">
+      <span class="chip">TaskFileStore</span><span class="chip">AttachmentStore</span><span class="chip">MigrationRunner</span><span class="chip">TasklaneSettings (PSC)</span><span class="chip">StorageLayout</span>
+    </span></div>
+    <div class="flowline"><span>↓ tipos puros</span><span>↑ sin dependencias</span></div>
+    <div class="layer"><span class="lname">domain</span><span class="lbody">
+      <span class="chip">Task</span><span class="chip">TaskState</span><span class="chip">TaskPriority</span><span class="chip">LinkExtractor</span><span class="chip">DateGrouper</span><span class="chip">TriggerParser</span><span class="chip">TaskExporter</span>
+    </span></div>
+  </div>
+  <p class="cap">La capa <code>domain</code> no importa nada de <code>com.intellij</code>. Es la única que se testea con JUnit puro, sin <code>BasePlatformTestCase</code>, y ahí vive toda la lógica no trivial: triggers, agrupación por fecha, extracción de enlaces, exportación, ordenación.</p>
+
+  <h3>Reglas de dependencia</h3>
+  <ul>
+    <li>La UI <strong>nunca</strong> toca <code>data</code>. No hay ninguna referencia a <code>TaskFileStore</code> fuera de <code>service/</code>.</li>
+    <li>Los componentes Swing no contienen lógica de negocio: un renderer decide <em>cómo</em> se pinta una fila, nunca <em>qué</em> estado tiene una tarea.</li>
+    <li>Ninguna clase del core referencia <code>git4idea</code>. El acceso a Git va detrás de la interfaz <code>RepositoryProvider</code> y su implementación se registra sólo si el plugin Git está presente.</li>
+  </ul>
+
+  <h3>Flujo unidireccional</h3>
+  <pre><code>// application/TaskService.kt
+@Service(Service.Level.PROJECT)
+class TaskService(private val project: Project, private val scope: CoroutineScope) {
+
+    private val _snapshot = MutableStateFlow(TasklaneSnapshot.EMPTY)
+    val snapshot: StateFlow&lt;TasklaneSnapshot&gt; = _snapshot.asStateFlow()
+
+    private val dirty = MutableSharedFlow&lt;RepoKey&gt;(extraBufferCapacity = 64)
+
+    init {
+        scope.launch(Dispatchers.IO) {
+            dirty.debounce(500.milliseconds)
+                 .collect { key -&gt; store.write(key, _snapshot.value.tasksOf(key)) }
+        }
+    }
+
+    fun apply(command: TaskCommand) {                // único punto de mutación
+        val next = reducer.reduce(_snapshot.value, command)
+        _snapshot.value = next
+        dirty.tryEmit(command.repo)
+    }
+}</code></pre>
+  <div class="adr">
+    <span class="tag">Por qué StateFlow y no MessageBus</span>
+    <p>Un <code>Topic</code> obliga a cada consumidor a gestionar su suscripción con <code>Disposer</code> y a reconstruir estado a partir de eventos incrementales — la fuente clásica de UI desincronizada y de listeners filtrados al cerrar proyectos. Con un snapshot inmutable la UI siempre repinta desde la verdad completa y la cancelación la hace el <code>CoroutineScope</code> del servicio. Se reserva <code>MessageBus</code> para lo que la plataforma ya publica (eventos VCS, cambios de tema).</p>
+  </div>
+  <div class="adr alt">
+    <span class="tag">Coste aceptado</span>
+    <p>Repintar desde el snapshot completo es más caro que aplicar un delta. Con el modelo de árbol asíncrono y unos miles de nodos es irrelevante; si alguna vez deja de serlo, el reducer ya devuelve qué <code>TaskId</code> cambiaron y se puede pasar a actualización parcial sin tocar la UI.</p>
+  </div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="d2">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Modelo de dominio</h2></div>
+  <p>Inmutable, con identificadores estables y un hueco explícito para extensiones futuras. Los nombres son mutables; los IDs no. Esa separación es lo que permite renombrar un estado sin tocar una sola tarea.</p>
+
+  <pre><code>@JvmInline value class TaskId(val value: String)        // UUID v4
+@JvmInline value class StateId(val value: String)
+@JvmInline value class PriorityId(val value: String)
+@JvmInline value class RepoKey(val value: String)
+@JvmInline value class AttachmentId(val value: String)   // sha-256 hex
+
+data class Task(
+    val id: TaskId,
+    val repo: RepoKey,
+    val body: String,                 // Markdown-lite, fuente de verdad
+    val stateId: StateId,
+    val priorityId: PriorityId,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val completedAt: Instant?,        // se fija al entrar en un estado terminal
+    val order: Long,                  // orden manual disperso: 1000, 2000, 3000…
+    val links: List&lt;TaskLink&gt;,        // derivado de body, cacheado
+    val attachments: List&lt;AttachmentRef&gt;,
+    val tags: List&lt;String&gt; = emptyList(),
+    val extra: Map&lt;String, String&gt; = emptyMap()   // forward-compat
+)
+
+data class TaskLink(val url: String, val display: String, val range: IntRange)
+data class AttachmentRef(val id: AttachmentId, val ext: String, val w: Int, val h: Int)</code></pre>
+
+  <pre><code>data class TaskState(
+    val id: StateId,
+    val name: String,
+    val order: Int,
+    val grouping: Grouping,          // NONE | BY_DATE
+    val anchor: DateAnchor,          // CREATED | UPDATED | COMPLETED
+    val terminal: Boolean,           // al entrar se fija completedAt
+    val isDefault: Boolean           // destino por defecto de Quick Add
+)
+
+data class TaskPriority(
+    val id: PriorityId,
+    val name: String,
+    val order: Int,
+    val colorLight: Int,             // RGB; se combinan en JBColor(light, dark)
+    val colorDark: Int,
+    val trigger: String?,            // "!", "!!", "!!!" — opcional
+    val isDefault: Boolean
+)
+
+data class RepositoryRef(
+    val key: RepoKey,
+    val displayName: String,         // "api", "frontend"
+    val rootPath: String,
+    val kind: Kind,                  // GIT | PROJECT_ROOT | CONTENT_ROOT
+    val available: Boolean           // false = tiene datos pero ya no está en disco
+)</code></pre>
+
+  <h3>Decisiones del modelo</h3>
+  <ul>
+    <li><strong><code>body</code> como texto plano</strong>, no como árbol de nodos. La búsqueda, la exportación y el diff en Git son triviales; el enriquecimiento (enlaces, imágenes) se deriva y se cachea en <code>links</code> / <code>attachments</code> para que pintar una fila nunca implique re-parsear.</li>
+    <li><strong>Dos colores por prioridad.</strong> Un único RGB obliga a derivar la variante oscura por heurística y produce contrastes malos en Darcula. Con <code>colorLight</code> + <code>colorDark</code> se construye un <code>JBColor</code> que el IDE resuelve solo al cambiar de tema.</li>
+    <li><strong><code>order</code> disperso.</strong> Reordenar por drag &amp; drop inserta en el punto medio (<code>(a+b)/2</code>) sin reescribir la lista entera; se renormaliza sólo cuando el hueco se agota.</li>
+    <li><strong><code>extra</code> como bolsa de compatibilidad.</strong> Al leer un fichero escrito por una versión más nueva, los atributos desconocidos se conservan ahí y se vuelven a escribir. Sin esto, abrir el proyecto con una versión vieja del plugin borra silenciosamente datos futuros.</li>
+    <li><strong><code>completedAt</code> es un hecho, no un derivado.</strong> Se fija la primera vez que la tarea entra en un estado terminal. Si el usuario la saca de <code>Done</code> y la vuelve a meter, se conserva la marca original salvo que se reabra explícitamente — es lo que hace que la agrupación histórica sea estable.</li>
+  </ul>
+
+  <h3>Lógica pura del dominio</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Componente</th><th>Responsabilidad</th></tr></thead>
+    <tbody>
+      <tr><td><code>TriggerParser</code></td><td>Resolver el prefijo de prioridad por coincidencia más larga y devolver el texto ya limpio</td></tr>
+      <tr><td><code>DateGrouper</code></td><td><code>Instant</code> + <code>ZoneId</code> → <code>Today</code> / <code>Yesterday</code> / <code>This week</code> / <code>Sep 10</code> / <code>Sep 2025</code></td></tr>
+      <tr><td><code>LinkExtractor</code></td><td>URLs sueltas y <code>[texto](url)</code>, ignorando bloques de código; acortado con dominio primero</td></tr>
+      <tr><td><code>TaskExporter</code></td><td>Colección de tareas → texto de clipboard según <code>ExportFormat</code></td></tr>
+      <tr><td><code>TaskReducer</code></td><td><code>(Snapshot, Command) → Snapshot</code>; aquí viven las invariantes</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="d3">
+  <div class="sec-head"><span class="sec-num">03</span><h2>Estructura de packages</h2></div>
+  <pre><code>com.tasklane
+├── TasklaneBundle.kt                 # DynamicBundle, textos en messages/
+├── domain/
+│   ├── model/      Task, TaskState, TaskPriority, RepositoryRef, ids, Snapshot
+│   ├── command/    TaskCommand (sealed), TaskReducer
+│   ├── text/       TriggerParser, LinkExtractor, PlainTextRenderer, UrlShortener
+│   ├── grouping/   DateGrouper, DateGroup
+│   ├── query/      TaskQuery, QueryParser, TaskFilter, TaskSorter
+│   └── export/     TaskExporter, ExportFormat, ExportScope
+├── data/
+│   ├── migration/  Migration, MigrationRunner, V1toV2
+│   ├── store/      StorageLayout, TasksCodec, TaskFileStore, ReadResult
+│   └── attachment/ AttachmentStore, ImageNormalizer, AttachmentGc
+├── settings/
+│   ├── TasklaneConfig.kt             # @Service project-level → .idea/tasklane.xml
+│   ├── TasklaneDefaults.kt           # @Service app-level: plantilla de proyectos nuevos
+│   ├── TasklaneWorkspaceState.kt     # @Service project-level, WORKSPACE_FILE
+│   └── ui/         TasklaneConfigurable, StatesTable, PrioritiesTable, ReassignDialog
+├── repo/
+│   ├── RepositoryRegistry.kt         # @Service project-level, StateFlow
+│   ├── RepositoryProvider.kt         # interfaz
+│   ├── GitRepositoryProvider.kt      # sólo se registra con Git4Idea presente
+│   ├── ContentRootProvider.kt        # fallback
+│   └── RepoKeyFactory.kt
+├── service/
+│   ├── TaskService.kt   ConfigService.kt   SearchService.kt
+│   ├── ExportService.kt Notifier.kt
+├── search/            TaskSearchIndex, LinearScanIndex, SearchDocument, Highlighter
+├── ui/
+│   ├── toolwindow/  TasklaneToolWindowFactory, TasklanePanel, StateTabPanel,
+│   │                TaskTreeStructure, TaskNode, GroupNode, TaskRowRenderer,
+│   │                RepoSelectorAction, TasklaneSearchField
+│   ├── quickadd/    QuickAddPopup, QuickAddModel
+│   ├── editor/      TaskEditorPopup, MarkdownField, ImageInlayRenderer,
+│   │                ImagePasteHandler, AttachmentPreview
+│   └── common/      TasklaneIcons, PriorityStripe, LinkChip, TasklaneDataKeys
+├── actions/         QuickAddAction, FocusSearchAction, ToggleCompleteAction,
+│                    ChangeStateAction, ChangePriorityAction, DeleteTaskAction,
+│                    ExportStateAction, ExportGroupAction, ExportSelectionAction
+└── startup/         TasklaneStartupActivity (ProjectActivity), VcsMappingBridge</code></pre>
+  <div class="adr warn">
+    <span class="tag">Corregido durante la Fase 1 · no hay capa de DTOs</span>
+    <p>El diseño original tenía un paquete <code>data/dto</code> con clases anotadas para <code>com.intellij.util.xmlb</code>. Al implementarlo apareció un problema que lo invalida: <strong>xmlb descarta los atributos que no reconoce</strong>. Eso destruye justo la garantía que <code>Task.extra</code> existe para dar — que abrir el proyecto con una versión vieja del plugin no borre datos escritos por una nueva.</p>
+    <p>La sustitución es <code>TasksCodec</code>, que mapea <code>Element</code> ↔ <code>Task</code> a mano sobre JDOM: todo atributo desconocido entra en <code>extra</code> y se vuelve a escribir tal cual. De paso desaparece la fricción de xmlb con Kotlin, que exigía DTOs con <code>var</code> y constructor sin argumentos. Hay un test que fija el comportamiento.</p>
+  </div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="d4">
+  <div class="sec-head"><span class="sec-num">04</span><h2>Persistencia</h2></div>
+  <p>El requisito pedía analizar las opciones antes de elegir. Aquí está el análisis y la elección, que no es única: hay dos tipos de datos con necesidades distintas.</p>
+
+  <h3>Las cuatro opciones</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Opción</th><th>Qué da</th><th>Qué falla aquí</th></tr></thead>
+    <tbody>
+      <tr><td><code>PersistentStateComponent</code></td><td>Escritura atómica, guardado fuera del EDT, roaming, recarga ante cambios externos</td><td>Los <code>@Storage</code> son estáticos: no hay un fichero por repositorio sin <code>StateSplitterEx</code>, que es API semi-interna. Y los adjuntos necesitan un directorio propio de todas formas.</td></tr>
+      <tr><td>Ficheros dentro del repositorio</td><td>Los datos viajan con el clon; versionables si el usuario quiere</td><td>Ensucia repos ajenos y obliga a tocar sus <code>.gitignore</code></td></tr>
+      <tr><td><code>.idea/</code> del proyecto abierto</td><td>Ubicación canónica de datos por proyecto; sobrevive a «Invalidate Caches»; no se indexa</td><td>Con varios repos, vive en la raíz, no dentro de cada subrepo</td></tr>
+      <tr><td><code>ProjectUtil.getProjectCachePath</code></td><td>Fuera de VCS por definición, sin ensuciar nada</td><td>Es el directorio de <em>caches</em>. Aquí hay contenido escrito por el usuario que no puede morir al limpiar caches</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="adr">
+    <span class="tag">Elección · tres niveles</span>
+    <p><strong>Configuración del proyecto</strong> (estados, prioridades, triggers, agrupación por estado) → <code>PersistentStateComponent</code> de proyecto, <code>@Storage("tasklane.xml")</code>, que la plataforma escribe en <code>.idea/tasklane.xml</code>. Queda fuera del directorio auto-ignorado a propósito: un equipo puede versionarla y compartir el flujo de trabajo.</p>
+    <p><strong>Plantilla de defaults</strong> → <code>PersistentStateComponent</code> de aplicación, <code>SettingsCategory.TOOLS</code>. Lo único que roamea. Siembra los proyectos que aún no tienen configuración.</p>
+    <p><strong>Estado de UI</strong> (repo seleccionado, tab activa, filtros, nodos expandidos) → <code>PersistentStateComponent</code> a nivel proyecto con <code>StoragePathMacros.WORKSPACE_FILE</code>. Es por proyecto y por máquina, y <code>workspace.xml</code> ya está fuera de VCS.</p>
+    <p><strong>Tareas y adjuntos</strong> → almacén propio, un directorio por repositorio bajo <code>.idea/tasklane/</code>, escrito con <code>java.nio</code> y serializado con <code>xmlb</code>.</p>
+  </div>
+
+  <h4>Disposición en disco</h4>
+  <pre><code>&lt;proyecto&gt;/.idea/
+├── tasklane.xml                       # config del proyecto: estados, prioridades, triggers
+│                                      #   versionable — el equipo comparte el flujo
+└── tasklane/                          # datos locales, auto-ignorados
+    ├── .gitignore                     # contiene "*"
+    ├── layout.xml                     # schemaVersion + registro repoKey → ruta, displayName
+    └── repos/
+        ├── root-4f2a9c1b/
+        │   ├── tasks.xml
+        │   ├── tasks.xml.bak          # última versión que se leyó correctamente
+        │   └── attachments/
+        │       └── 9f86d08188…e7cf.png
+        └── sinonte-backend-api-a3f91d0e/
+            ├── tasks.xml
+            └── attachments/</code></pre>
+  <p class="cap">La separación es deliberada: <strong>la configuración es compartible, los datos son locales</strong>. <code>tasklane.xml</code> lo gestiona <code>PersistentStateComponent</code> y vive fuera del directorio auto-ignorado, así que un equipo puede versionar sus estados y prioridades sin arrastrar los TODOs personales de nadie. El <code>.gitignore</code> con <code>*</code> dentro de nuestro propio directorio mantiene los datos fuera de VCS sin tocar ni una línea del <code>.gitignore</code> del usuario.</p>
+
+  <h4>Formato</h4>
+  <pre><code>&lt;tasks version="1" repoKey="sinonte-backend-api-a3f91d0e"&gt;
+  &lt;task id="7c2f…" state="s-todo" priority="p-high" order="3000"
+        createdAt="1757635200000" updatedAt="1757638800000"&gt;
+    &lt;body&gt;Revisar https://youtrack.jetbrains.com/issue/ABC-123
+![](tasklane:9f86d08188…e7cf)&lt;/body&gt;
+  &lt;/task&gt;
+&lt;/tasks&gt;</code></pre>
+  <p>XML y no JSON por una razón concreta: <strong>empaquetar kotlinx-serialization en un plugin provoca conflictos de classloader</strong> con la copia que trae la plataforma, un fallo que aparece en runtime y sólo en algunas versiones del IDE. JDOM ya está en la plataforma y no añade nada. Además <code>.idea</code> es un mundo XML: el formato queda consistente con sus vecinos.</p>
+  <p>El mapeo lo hace <code>TasksCodec</code> a mano, no <code>XmlSerializer</code>. La razón es concreta: xmlb <strong>descarta los atributos que no conoce</strong>, y eso vacía de contenido la promesa de <code>extra</code>. Mapeando a mano, un atributo escrito por una versión futura se lee, se guarda y se vuelve a escribir intacto.</p>
+
+  <h4>Escritura segura</h4>
+  <ol>
+    <li>Serializar en memoria, en <code>Dispatchers.IO</code>.</li>
+    <li>Copiar el <code>tasks.xml</code> actual a <code>tasks.xml.bak</code>.</li>
+    <li>Escribir <code>tasks.xml.tmp</code> y forzar <code>FileChannel.force(true)</code>.</li>
+    <li><code>Files.move(tmp, target, ATOMIC_MOVE, REPLACE_EXISTING)</code>.</li>
+  </ol>
+  <p>Un <code>Mutex</code> por <code>RepoKey</code> garantiza un único escritor. Si el disco está lleno o faltan permisos, el fallo ocurre en el paso 3 y el fichero bueno sobrevive intacto. Las escrituras van por <code>debounce(500 ms)</code>, más un <em>flush</em> síncrono en <code>ProjectCloseListener.projectClosing</code> — síncrono a propósito, porque el <code>CoroutineScope</code> del servicio ya está cancelado en ese punto.</p>
+
+  <h4>Lectura y recuperación</h4>
+  <ul>
+    <li>Carga perezosa por repositorio; el repo activo se precarga en un <code>ProjectActivity</code>, fuera del EDT.</li>
+    <li>Fallo de parseo → se renombra a <code>tasks.corrupt-&lt;timestamp&gt;.xml</code>, se intenta <code>.bak</code>, y sólo si tampoco se arranca vacío — siempre con una notificación que enlaza al fichero. Nunca en silencio.</li>
+    <li><code>version</code> mayor que la soportada → el repositorio se abre en <strong>solo lectura</strong> con un aviso, en lugar de degradar el fichero. Es la contrapartida de <code>extra</code>: entre los dos, una versión vieja del plugin no destruye datos de una nueva.</li>
+    <li>Migraciones como cadena de <code>Migration</code> que opera sobre el <code>Element</code> de JDOM antes de mapear a dominio.</li>
+  </ul>
+
+  <div class="adr alt">
+    <span class="tag">Alternativa contemplada · guardar dentro de cada repo</span>
+    <p>Se deja como ajuste opcional («Store task data inside each repository» → <code>&lt;repoRoot&gt;/.tasklane/</code>) para quien quiera que los TODOs viajen con el clon o compartirlos con el equipo. No es el valor por defecto porque escribir en repos que el usuario no pidió tocar es intrusivo.</p>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="d5">
+  <div class="sec-head"><span class="sec-num">05</span><h2>Diseño de la Tool Window</h2></div>
+  <pre><code>┌ Tasklane ─────────────────────────────── ⚙ ⋮ ┐   ← header nativo
+│ [api ▾]   🔍 auth                    ⚲  ⇅  ⧉ │   ← ActionToolbar
+├──────────────────────────────────────────────┤
+│  ToDo │ Doing │ Done                         │   ← ContentManager (tabs)
+├──────────────────────────────────────────────┤
+│ ▾ Today                                      │
+│ ┃ ☐ Fix authentication error           14:32 │
+│ ┃    🔗 2   🖼 1                              │
+│ ┃ ☐ Update docs                       11:02 │
+│ ▾ Yesterday                                  │
+│ ┃ ☑ Implement login                          │
+└──────────────────────────────────────────────┘
+   └─ franja de 3 px con el color de la prioridad</code></pre>
+
+  <h3>Estados como tabs</h3>
+  <p>Cada estado es un <code>Content</code> del <code>ContentManager</code> de la tool window, no <code>isCloseable</code>. Da la barra de tabs nativa, la navegación con <code>Alt+←/→</code> del keymap y la opción «Show tabs in one row» sin escribir nada. Un <code>JBTabbedPane</code> interno se descartó porque no se integra con el header ni con el keymap.</p>
+  <p>Con más de cinco o seis estados la fila de tabs se aprieta en una tool window lateral. Por eso el ajuste <strong>«Vista: tabs · lista única con secciones»</strong> reutiliza exactamente el mismo componente de árbol y presenta los estados como nodos raíz. Reordenar o renombrar estados reconstruye las tabs preservando la selección <em>por <code>StateId</code></em>, nunca por índice.</p>
+
+  <h3>El árbol</h3>
+  <p><code>CheckboxTree</code> con la raíz oculta y dos tipos de nodo: <code>GroupNode</code> (grupo de fecha) y <code>TaskNode</code>.</p>
+  <div class="adr warn">
+    <span class="tag">Corregido durante la Fase 1 · sin AsyncTreeModel</span>
+    <p>El diseño original combinaba <code>CheckboxTree</code> con <code>StructureTreeModel</code>/<code>AsyncTreeModel</code>. <strong>No componen:</strong> <code>CheckboxTree</code> castea su modelo a <code>DefaultTreeModel</code> para notificar cambios de nodo y trabaja sobre <code>CheckedTreeNode</code>, mientras que <code>AsyncTreeModel</code> opera con descriptores de estructura.</p>
+    <p>Se conserva <code>CheckboxTree</code>, que era la razón de la elección — hit-testing del checkbox y toggle con <code>Espacio</code> ya resueltos — y se mantiene el EDT libre por otra vía: el trabajo caro (filtrar, ordenar, agrupar) se hace fuera del EDT y en el hilo de UI sólo queda construir los nodos y recargar. Si con decenas de miles de tareas eso llegara a notarse, la salida es <code>Tree</code> + <code>AsyncTreeModel</code> con hit-testing propio, que ya estaba presupuestado como riesgo.</p>
+  </div>
+  <ul>
+    <li><strong>Por qué árbol y no <code>JBList</code>:</strong> la agrupación por fecha necesita secciones plegables, y el árbol trae gratis <code>TreeSpeedSearch</code>, navegación por teclado, <code>TreeState</code> para recordar qué estaba expandido y selección múltiple.</li>
+    <li><strong>Por qué <code>CheckboxTree</code>:</strong> ya resuelve el hit-testing del checkbox y el toggle con <code>Espacio</code>, que es literalmente el requisito «completar con un clic». Su renderer base es un <code>JPanel</code> con <code>JCheckBox</code> + <code>ColoredTreeCellRenderer</code>, justo la composición que hace falta. Se desactiva la propagación a hijos con la <code>CheckPolicy</code>.</li>
+    <li><strong>Por qué <code>AsyncTreeModel</code>:</strong> construir el modelo con miles de nodos ocurre fuera del EDT. Es la diferencia entre una tool window que se siente ligera y una que congela el IDE al cambiar de repo.</li>
+  </ul>
+
+  <h3>La fila</h3>
+  <p>Renderer propio de dos líneas — <code>tree.rowHeight = 0</code> habilita altura variable por fila. De izquierda a derecha: franja de prioridad de 3 px pintada con <code>JBColor(colorLight, colorDark)</code>, checkbox, texto (primera línea del cuerpo, con elipsis), y fecha alineada a la derecha vía <code>appendTextPadding</code> de <code>SimpleColoredComponent</code>. Segunda línea, sólo si hay algo que mostrar: tags, indicador de enlaces y de imágenes.</p>
+  <p>La prioridad es una <em>propiedad visual de la fila</em>, no un eje de navegación: no hay secciones «HIGH / MEDIUM / LOW». Por debajo de unos 220 px de ancho el renderer retira la columna de fecha y luego la segunda línea, de modo que el título siempre se lee.</p>
+
+  <h3>Barra de herramientas</h3>
+  <p><code>ActionToolbar</code> construida desde un <code>ActionGroup</code> declarado en <code>plugin.xml</code>, con <code>targetComponent</code> apuntando al árbol para que las acciones reciban el contexto correcto. Contiene: nueva tarea, selector de repositorio (<code>ComboBoxAction</code> con speed search), toggle de agrupación por fecha, filtros de prioridad y estado, exportar, expandir/colapsar y acceso a los ajustes. El campo de búsqueda (<code>SearchTextField</code>, con historial persistido) va sobre el árbol.</p>
+  <p>El menú contextual del árbol es un <code>ActionGroup</code> registrado, así que todas sus entradas aparecen en <em>Settings → Keymap</em> y en <em>Search Everywhere</em> sin trabajo extra.</p>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="d6">
+  <div class="sec-head"><span class="sec-num">06</span><h2>Quick Add</h2></div>
+  <pre><code>┌────────────────────────────────────────────────┐
+│ !!! Resolver fallo de autenticación en Android  │  ← foco inmediato
+├────────────────────────────────────────────────┤
+│ ⬤ High ▾    ToDo ▾    api ▾          ⏎ Create   │
+└────────────────────────────────────────────────┘</code></pre>
+  <p>Un <code>JBPopup</code> construido con <code>createComponentPopupBuilder(panel, textField)</code>, centrado en la ventana, <code>setRequestFocus(true)</code> y <code>setCancelOnWindowDeactivation(false)</code> para que cambiar de ventana no pierda lo escrito. Tres <code>DropDownLink</code> para prioridad, estado y proyecto. Nada de <code>DialogWrapper</code>: un diálogo modal con botones OK/Cancel es demasiada fricción para algo que debe durar tres segundos.</p>
+
+  <h3>Teclado</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Tecla</th><th>Acción</th></tr></thead>
+    <tbody>
+      <tr><td><code>Enter</code></td><td>Crear y cerrar</td></tr>
+      <tr><td><code>⌘Enter</code></td><td>Crear y dejar el popup abierto, para encadenar varias</td></tr>
+      <tr><td><code>⇧Enter</code></td><td>Salto de línea</td></tr>
+      <tr><td><code>Tab</code> / <code>⇧Tab</code></td><td>Recorrer prioridad → estado → proyecto</td></tr>
+      <tr><td><code>⌥1…9</code></td><td>Seleccionar prioridad por posición</td></tr>
+      <tr><td><code>Esc</code></td><td>Cancelar</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Triggers de prioridad en vivo</h3>
+  <p>Un <code>DocumentListener</code> pasa el texto por <code>TriggerParser</code> en cada pulsación. Si el prefijo coincide, el chip de prioridad cambia de color al instante y el trigger <strong>se consume</strong>: lo que se guarda es <code>"Resolver fallo de autenticación en Android"</code>, no <code>"!!! Resolver…"</code>. Si el usuario borra el trigger, la prioridad vuelve a la anterior.</p>
+  <p>La resolución es por <strong>coincidencia más larga primero</strong> sobre el primer token, y exige un espacio detrás. Así <code>!!!</code> gana a <code>!</code>, y un texto como <code>!importante revisar</code> no dispara nada.</p>
+
+  <h3>Valores por defecto sensatos</h3>
+  <p>El proyecto propuesto no es «el último usado» sino <strong>el repositorio del fichero abierto en el editor</strong> (<code>FileEditorManager.selectedTextEditor</code> → repositorio que contiene ese fichero), con el último seleccionado en la tool window como respaldo. Es el detalle que hace que crear una tarea desde el fichero en el que estás trabajando no requiera tocar el selector.</p>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="d7">
+  <div class="sec-head"><span class="sec-num">07</span><h2>Detección de repositorios</h2></div>
+  <p>No se escanea el disco buscando carpetas <code>.git</code>. El IDE ya mantiene ese modelo y lo mantiene bien.</p>
+
+  <pre><code>@Service(Service.Level.PROJECT)
+class RepositoryRegistry(project: Project, scope: CoroutineScope) {
+    val repositories: StateFlow&lt;List&lt;RepositoryRef&gt;&gt;
+}
+
+// Proveedores, en orden de preferencia
+GitRepositoryProvider   → GitRepositoryManager.getInstance(project).repositories
+ContentRootProvider     → ProjectRootManager.contentRoots + project.basePath   // fallback
+
+// Suscripciones, sobre project.messageBus.connect(disposable)
+VcsRepositoryManager.VCS_REPOSITORY_MAPPING_UPDATED   → recalcular
+ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED      → recalcular
+GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el tooltip</code></pre>
+
+  <p><code>VCS_REPOSITORY_MAPPING_UPDATED</code> es el evento correcto, no <code>GIT_REPO_CHANGE</code>: se dispara cuando cambian los <em>mappings</em> y las instancias de repositorio ya están creadas. Al abrir el proyecto, <code>GitRepositoryManager</code> puede devolver una lista vacía durante los primeros milisegundos — por eso el primer render usa la última lista conocida de <code>layout.xml</code> y se corrige con el primer evento, sin parpadeo.</p>
+
+  <h3>Git como dependencia opcional</h3>
+  <pre><code>&lt;depends optional="true" config-file="tasklane-git.xml"&gt;Git4Idea&lt;/depends&gt;</code></pre>
+  <p>El plugin funciona sin Git: sin él, <code>ContentRootProvider</code> produce un pseudo-repositorio «Project». Ninguna clase del core importa <code>git4idea</code>, porque hacerlo provoca <code>NoClassDefFoundError</code> en IDEs donde el plugin Git esté desactivado.</p>
+
+  <h3><code>RepoKey</code> estable</h3>
+  <pre><code>repoKey = "${slug(rutaRelativaAlProyecto)}-${sha256(rutaCanonica).take(8)}"
+// sinonte-backend-api-a3f91d0e   ·   root-4f2a9c1b</code></pre>
+  <p>El slug hace legibles los directorios en disco; el hash evita colisiones entre dos carpetas <code>api</code> en ramas distintas del árbol.</p>
+
+  <h3>Profundidad y comportamiento del selector</h3>
+  <p>El requisito habla de repos en subdirectorios <em>hijos directos</em> de la raíz. Se implementa como un filtro de profundidad configurable (por defecto 1), pero con una salvedad: <strong>un repositorio más profundo que ya tenga tareas nunca se oculta</strong> — aparece bajo un separador «Other» en el selector. Filtrar datos existentes fuera de la vista es indistinguible de perderlos.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Situación</th><th>Comportamiento</th></tr></thead>
+    <tbody>
+      <tr><td>Un solo repositorio</td><td>El selector se oculta; el nombre va en el título de la tool window</td></tr>
+      <tr><td>Ninguno (proyecto sin VCS)</td><td>Pseudo-repositorio «Project» sobre la raíz</td></tr>
+      <tr><td>Se añade uno en caliente</td><td>Aparece en el selector sin reiniciar, vía el evento de mappings</td></tr>
+      <tr><td>Desaparece uno con tareas</td><td>Entrada deshabilitada con aviso; los datos no se tocan; acción «Exportar y quitar»</td></tr>
+      <tr><td>Repos detectados sin registrar en VCS</td><td>Notificación sugiriendo registrarlos, con enlace a los ajustes de VCS — nunca se modifica la configuración del usuario</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="d8">
+  <div class="sec-head"><span class="sec-num">08</span><h2>Búsqueda</h2></div>
+  <div class="adr">
+    <span class="tag">No hace falta un índice invertido</span>
+    <p>5.000 tareas de ~200 caracteres son ~1 MB de texto normalizado. Un <code>contains</code> sobre cadenas ya normalizadas y cacheadas cuesta del orden de 1–3 ms; 50.000 tareas siguen por debajo de 20 ms. Eso cabe holgadamente dentro de un solo tick de debounce y ocurre fuera del EDT. Construir un índice invertido aquí sería infraestructura sin beneficio medible, y añadiría invalidación incremental — la parte que se rompe.</p>
+  </div>
+
+  <h3>Diseño</h3>
+  <ul>
+    <li><strong>Documento cacheado por tarea:</strong> texto en minúsculas y sin diacríticos (<code>Normalizer.NFD</code> + descarte de marcas), de modo que <em>autenticación</em> encuentre <em>autenticacion</em>. Se invalida al escribir esa tarea, no en cada búsqueda.</li>
+    <li><strong>Consulta:</strong> texto libre más operadores <code>state:</code>, <code>p:</code>, <code>repo:</code>, <code>is:done|open</code>, <code>has:link|image</code>, <code>#tag</code>.</li>
+    <li><strong>Emparejado y ranking:</strong> <code>NameUtil.buildMatcher(...)</code> → <code>MinusculeMatcher</code>, con <code>matchingDegree()</code> para ordenar. Es el mismo motor que usa <em>Search Everywhere</em>, así que el comportamiento le resulta familiar al usuario.</li>
+    <li><strong>Resaltado:</strong> <code>SpeedSearchUtil.appendColoredFragmentForMatcher</code> en el renderer — subrayado nativo, correcto en ambos temas, sin pintar nada a mano.</li>
+    <li><strong>Ejecución:</strong> <code>MutableStateFlow&lt;String&gt;</code> → <code>debounce(120 ms)</code> → <code>flatMapLatest</code> en <code>Dispatchers.Default</code>, que cancela la búsqueda anterior. Los resultados se publican como <code>StateFlow</code> y el modelo del árbol filtra sobre ellos.</li>
+    <li><strong>Alcance:</strong> repositorio actual por defecto, con toggle «Buscar en todos los repositorios».</li>
+  </ul>
+
+  <pre><code>interface TaskSearchIndex {
+    fun search(query: TaskQuery, scope: SearchScope): List&lt;ScoredTask&gt;
+    fun invalidate(ids: Collection&lt;TaskId&gt;)
+}
+// Implementación inicial: LinearScanIndex
+// Si el profiling alguna vez lo pide: InvertedTrigramIndex, sin tocar la UI</code></pre>
+  <p>La interfaz existe precisamente para que la decisión de arriba sea reversible sin coste.</p>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="d9">
+  <div class="sec-head"><span class="sec-num">09</span><h2>Enlaces e imágenes</h2></div>
+
+  <h3>Enlaces</h3>
+  <p>La extracción ocurre <strong>al escribir</strong>, no al pintar: <code>LinkExtractor</code> recorre el cuerpo (URLs sueltas, <code>www.</code> y <code>[texto](url)</code>, ignorando bloques de código) y el resultado se cachea en <code>task.links</code>. Pintar una fila nunca implica ejecutar una regex.</p>
+  <p>En el árbol, los fragmentos de enlace se pintan con <code>SimpleTextAttributes.LINK_ATTRIBUTES</code> — el estilo de enlace de la plataforma, correcto en cualquier tema — y el clic se resuelve con <code>SimpleColoredComponent.findFragmentAt(x)</code>. El cursor cambia a mano al pasar por encima.</p>
+  <p>El acortado antepone el dominio: <code>https://youtrack.jetbrains.com/issue/ABC-123</code> se muestra como <code>youtrack.jetbrains.com/…/ABC-123</code> y, si aún no cabe, como <code>youtrack.jetbrains.com/…</code>. La URL completa vive en el modelo y en el tooltip; lo que se abre es siempre la original.</p>
+  <p><strong>Indicador de enlaces en la fila:</strong> un icono de cadena con el número, en la segunda línea. Un clic abre el enlace si sólo hay uno; si hay varios, un <code>ListPopup</code> con las URLs acortadas. Funciona esté donde esté el enlace dentro del texto, y nunca hace falta entrar a editar. Sólo se abren esquemas <code>http</code> y <code>https</code> vía <code>BrowserUtil.browse</code>: un <code>file:</code> o un <code>javascript:</code> pegado en una tarea no debe ser clicable.</p>
+
+  <h3>Imágenes</h3>
+  <div class="adr">
+    <span class="tag">Representación elegida</span>
+    <p>Cuerpo en <strong>Markdown-lite</strong>, imágenes como <strong>blobs direccionados por contenido</strong> fuera del fichero de tareas. La referencia es <code>![](tasklane:&lt;sha256&gt;)</code> y el fichero vive en <code>attachments/&lt;sha256&gt;.png</code>.</p>
+    <p>Direccionar por contenido resuelve tres cosas de golpe: la misma captura pegada en dos tareas ocupa un blob, no hay nombres que colisionen, y la recolección de basura es contar referencias. Base64 embebido se descartó por lo obvio — infla el fichero de tareas, lo carga entero en memoria y destroza cualquier diff.</p>
+  </div>
+  <p>Markdown se elige porque mantiene el cuerpo como texto plano (búsqueda, exportación y diff triviales) y porque coincide con la ruta de renderizado que recomienda JetBrains: convertir con <code>org.jetbrains:markdown</code> y mostrar en <code>JBHtmlPane</code>. Pero no se impone como sintaxis al usuario: quien escriba texto plano nunca ve una marca.</p>
+
+  <h4>Editor de tareas</h4>
+  <ul>
+    <li><strong>Componente:</strong> <code>EditorTextField</code> — un editor real de IntelliJ, con undo, selección múltiple y el keymap del usuario. Con el plugin Markdown presente (dependencia opcional) se obtiene resaltado de sintaxis; sin él, texto plano.</li>
+    <li><strong>Pegar:</strong> un <code>TransferHandler</code> sobre el componente del editor comprueba <code>DataFlavor.imageFlavor</code>, normaliza la imagen en <code>Dispatchers.IO</code> (reescalado si supera el máximo configurado, re-codificación a PNG) e inserta la referencia en la posición del cursor dentro de un <code>WriteCommandAction</code>, para que <code>⌘Z</code> funcione.</li>
+    <li><strong>Previsualización en línea:</strong> <code>InlayModel.addBlockElement</code> con un <code>EditorCustomElementRenderer</code> que pinta la imagen escalada bajo la línea de la referencia. Los inlays se recalculan con debounce al cambiar el documento y la <code>BufferedImage</code> escalada se cachea; <code>JBUIScale</code> mantiene la nitidez en HiDPI.</li>
+    <li><strong>Ampliar:</strong> el clic sobre el inlay abre el fichero adjunto con <code>FileEditorManager</code>, que lo entrega al plugin <em>Images</em> incluido en el IDE — zoom, ajuste y rueda del ratón, gratis. Respaldo: un <code>JBPopup</code> con la imagen escalada.</li>
+    <li><strong>Borrar:</strong> el cursor sobre el inlay y <code>Supr</code>, o la acción de contexto «Quitar imagen».</li>
+    <li><strong>Recolección:</strong> <code>AttachmentGc</code> corre al abrir el proyecto, fuera del EDT, y borra blobs sin referencias con un periodo de gracia — para que deshacer un pegado no deje una referencia rota.</li>
+  </ul>
+  <p class="cap">Se descartó incrustar el preview JCEF del plugin Markdown: viola la restricción de no usar WebView y añade una dependencia dura a un plugin que no está en todos los IDEs.</p>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="d10">
+  <div class="sec-head"><span class="sec-num">10</span><h2>Estados y prioridades configurables</h2></div>
+  <p>Ambos viven en <code>TasklaneConfig</code>, un <code>PersistentStateComponent</code> <strong>de proyecto</strong> que la plataforma escribe en <code>.idea/tasklane.xml</code>, como listas ordenadas de entidades con UUID estable. Renombrar cambia <code>name</code>; el <code>id</code> no se toca nunca. Esa es toda la razón por la que renombrar un estado no puede perder tareas.</p>
+
+  <h3>Por proyecto, sin el coste de serlo</h3>
+  <p>Configuración por proyecto permite flujos distintos por cliente y deja que un equipo versione <code>.idea/tasklane.xml</code> para compartir estados y prioridades. Su único coste real —reconfigurar cada proyecto nuevo— se neutraliza con una <strong>plantilla de defaults a nivel aplicación</strong>: un proyecto sin configuración se siembra desde ella al abrirse, y los ajustes ofrecen «Guardar como plantilla para proyectos nuevos». La plantilla es lo único que roamea.</p>
+  <p>La semilla de fábrica es <code>ToDo · Doing · Done</code>, con <code>Done</code> marcado como terminal y agrupado por <code>completedAt</code>, y <code>Low · Normal · High</code> con los triggers <code>!</code>, <code>!!</code> y <code>!!!</code>.</p>
+
+  <h3>Borrado con reasignación obligatoria</h3>
+  <pre><code>┌ Delete state "Doing" ────────────────────────┐
+│                                              │
+│  42 tasks use this state.                    │
+│  Move them to:  [ ToDo            ▾ ]        │
+│                                              │
+│                      [ Cancel ]  [ Delete ]  │
+└──────────────────────────────────────────────┘</code></pre>
+  <p>Un <code>DialogWrapper</code> sin opción destructiva por defecto. Cancelar no borra nada. Si es el último estado, el borrado se bloquea — siempre debe quedar al menos uno. Lo mismo para prioridades.</p>
+
+  <h3>Resiliencia ante configuración desincronizada</h3>
+  <p>Con la configuración por proyecto, un <code>tasks.xml</code> que referencia un <code>stateId</code> inexistente deja de ser el camino común — pero no desaparece: basta con que alguien edite <code>.idea/tasklane.xml</code> en una rama, resuelva mal un <em>merge</em>, o copie datos entre proyectos. La red de seguridad se mantiene:</p>
+  <ul>
+    <li>La tarea <strong>no se descarta</strong>: se remapea al estado por defecto.</li>
+    <li>El ID original se guarda en <code>extra["origStateId"]</code>, así que si la configuración vuelve, se puede restaurar.</li>
+    <li>Una notificación informa de cuántas tareas se remapearon, con acción para revisarlas.</li>
+  </ul>
+
+  <h3>Triggers</h3>
+  <ul>
+    <li>Resolución por coincidencia más larga sobre el primer token, con espacio obligatorio detrás.</li>
+    <li>Unicidad validada en vivo en los ajustes; un duplicado se marca con aviso en línea antes de poder guardar.</li>
+    <li>Son opcionales por prioridad, y el sistema completo se puede desactivar.</li>
+    <li>Funcionan con prioridades añadidas por el usuario sin ningún caso especial: el parser sólo conoce la lista ordenada por longitud.</li>
+  </ul>
+
+  <h3>Agrupación por fecha, por estado</h3>
+  <p>Cada estado tiene su propia <code>Grouping</code> y su propio <code>DateAnchor</code>. <code>Done</code> agrupa por <code>completedAt</code>; <code>ToDo</code> no agrupa; otro estado podría agrupar por <code>createdAt</code>. Los grupos son <code>Today</code>, <code>Yesterday</code>, <code>This week</code>, luego <code>Sep 10</code> dentro del año en curso y <code>Sep 2025</code> más atrás, todo con <code>DateFormatUtil</code> para respetar el locale.</p>
+
+  <h3>Página de ajustes</h3>
+  <p><code>BoundSearchableConfigurable</code> con Kotlin UI DSL v2 y dos tablas envueltas en <code>ToolbarDecorator</code> (añadir, quitar, subir, bajar). La columna de color usa <code>ColorPanel</code>, con celdas separadas para claro y oscuro. Los atajos <strong>no</strong> se configuran aquí: hay un enlace a <em>Settings → Keymap</em> filtrado por el grupo de acciones del plugin, porque duplicar el sistema de keymap sería exactamente lo que el requisito prohíbe.</p>
+</section>
+
+<!-- ============ 11 ============ -->
+<section id="d11">
+  <div class="sec-head"><span class="sec-num">11</span><h2>APIs de la plataforma</h2></div>
+  <div class="tw"><table>
+    <thead><tr><th>Área</th><th>API</th></tr></thead>
+    <tbody>
+      <tr><td>Tool Window</td><td><code>ToolWindowFactory</code>, <code>ToolWindowManager</code>, <code>ContentFactory</code>, <code>ContentManager</code>, <code>SimpleToolWindowPanel</code>, <code>ToolWindowEx.setTitleActions</code></td></tr>
+      <tr><td>Árbol y listas</td><td><code>CheckboxTree</code>, <code>com.intellij.ui.treeStructure.Tree</code>, <code>StructureTreeModel</code>, <code>AsyncTreeModel</code>, <code>SimpleTreeStructure</code>, <code>ColoredTreeCellRenderer</code>, <code>SimpleColoredComponent</code>, <code>TreeState</code>, <code>TreeUtil</code>, <code>ToolbarDecorator</code></td></tr>
+      <tr><td>Acciones</td><td><code>AnAction</code>, <code>ActionUpdateThread.BGT</code>, <code>DefaultActionGroup</code>, <code>ComboBoxAction</code>, <code>ToggleAction</code>, <code>ActionToolbar</code>, <code>ActionManager</code>, <code>CustomShortcutSet</code>, <code>DataKey</code>, <code>UiDataProvider</code></td></tr>
+      <tr><td>Popups y diálogos</td><td><code>JBPopupFactory</code>, <code>ListPopup</code>, <code>DialogWrapper</code>, <code>DropDownLink</code>, <code>Messages</code></td></tr>
+      <tr><td>Búsqueda</td><td><code>SearchTextField</code>, <code>TreeSpeedSearch</code>, <code>NameUtil</code>, <code>MinusculeMatcher</code>, <code>SpeedSearchUtil</code></td></tr>
+      <tr><td>Persistencia</td><td><code>PersistentStateComponent</code>, <code>@State</code>, <code>@Storage</code>, <code>StoragePathMacros</code>, <code>SettingsCategory</code>, <code>RoamingType</code>, <code>com.intellij.util.xmlb.XmlSerializer</code>, <code>JDOMUtil</code></td></tr>
+      <tr><td>Servicios y concurrencia</td><td><code>@Service</code>, <code>Service.Level</code>, inyección de <code>CoroutineScope</code>, <code>Dispatchers.EDT</code>, <code>ModalityState</code>, <code>ProjectActivity</code>, <code>Disposer</code>, <code>ProjectCloseListener</code>, <code>ReadAction</code></td></tr>
+      <tr><td>VCS y Git</td><td><code>GitRepositoryManager</code>, <code>GitRepository</code>, <code>VcsRepositoryManager.VCS_REPOSITORY_MAPPING_UPDATED</code>, <code>ProjectLevelVcsManager</code>, <code>VcsRootDetector</code>, <code>ProjectRootManager</code></td></tr>
+      <tr><td>Editor e imágenes</td><td><code>EditorTextField</code>, <code>EditorFactory</code>, <code>InlayModel.addBlockElement</code>, <code>EditorCustomElementRenderer</code>, <code>WriteCommandAction</code>, <code>CommandProcessor</code>, <code>FileEditorManager</code>, <code>ImageLoader</code>, <code>ImageUtil</code>, <code>JBImageIcon</code>, <code>JBUIScale</code></td></tr>
+      <tr><td>Enlaces y texto</td><td><code>BrowserUtil.browse</code>, <code>SimpleTextAttributes.LINK_ATTRIBUTES</code>, <code>JBHtmlPane</code>, <code>org.jetbrains:markdown</code>, <code>StringUtil</code>, <code>DateFormatUtil</code></td></tr>
+      <tr><td>Clipboard</td><td><code>CopyPasteManager</code>, <code>TextTransferable</code>, <code>DataFlavor.imageFlavor</code></td></tr>
+      <tr><td>Ajustes</td><td>EP <code>projectConfigurable</code>, <code>BoundSearchableConfigurable</code>, Kotlin UI DSL v2 (<code>panel { }</code>), <code>ColorPanel</code>, <code>TableView</code>, <code>ListTableModel</code>, <code>ShowSettingsUtil</code></td></tr>
+      <tr><td>Tema, iconos, avisos</td><td><code>JBColor</code>, <code>JBUI</code>, <code>LafManagerListener</code>, <code>AllIcons</code>, <code>IconLoader</code>, <code>NotificationGroupManager</code></td></tr>
+      <tr><td>i18n</td><td><code>DynamicBundle</code>, <code>@Nls</code>, <code>messages/TasklaneBundle.properties</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ 12 ============ -->
+<section id="d12">
+  <div class="sec-head"><span class="sec-num">12</span><h2>Edge cases</h2></div>
+
+  <h4>Estados y prioridades</h4>
+  <ul>
+    <li>Borrar el último estado o la última prioridad: bloqueado.</li>
+    <li>Borrar uno con tareas: diálogo de reasignación obligatorio; cancelar no borra nada.</li>
+    <li>Reordenar estados con la tool window abierta: las tabs se reconstruyen preservando la selección por <code>StateId</code>, no por índice.</li>
+    <li><code>stateId</code> o <code>priorityId</code> desconocido al cargar: remapeo al valor por defecto, ID original preservado en <code>extra</code>, notificación con recuento.</li>
+    <li>Dos triggers idénticos: validación en vivo impide guardar.</li>
+    <li>Trigger que es prefijo de otro (<code>!</code> vs <code>!!!</code>): gana el más largo.</li>
+    <li>Marcar como terminal un estado que ya tiene tareas: se ofrece una vez rellenar <code>completedAt</code> desde <code>updatedAt</code>.</li>
+    <li>Quitar el flag terminal: <code>completedAt</code> se conserva; no se destruye información.</li>
+  </ul>
+
+  <h4>Repositorios</h4>
+  <ul>
+    <li>Repositorio añadido o eliminado en caliente: el selector reacciona por evento, sin reiniciar.</li>
+    <li>Repositorio que desaparece del disco con tareas dentro: entrada deshabilitada, datos intactos.</li>
+    <li>Dos carpetas con el mismo nombre en rutas distintas: el hash de ruta en <code>RepoKey</code> las separa.</li>
+    <li>Repositorio movido o renombrado: cambia el <code>RepoKey</code>; los datos huérfanos quedan y hay una acción de reasignación en ajustes.</li>
+    <li>Submódulos Git: aparecen como repositorios independientes, bajo «Other» si exceden la profundidad configurada.</li>
+    <li>Plugin Git desactivado: pseudo-repositorio «Project», sin errores.</li>
+  </ul>
+
+  <h4>Persistencia</h4>
+  <ul>
+    <li><code>tasks.xml</code> corrupto: <code>.bak</code>, y si falla, vacío con notificación. El fichero malo se conserva renombrado.</li>
+    <li>Fichero escrito por una versión futura: solo lectura con aviso, nunca degradado.</li>
+    <li>Dos ventanas del IDE sobre el mismo proyecto: se comprueba <code>lastModified</code> antes de escribir; si cambió, se recarga y se fusiona por <code>taskId</code> con <em>last-write-wins</em> según <code>updatedAt</code>.</li>
+    <li>Disco lleno o sin permisos: falla la escritura temporal, el fichero bueno sobrevive, notificación de error.</li>
+    <li>Cierre del IDE con el debounce pendiente: <em>flush</em> síncrono en <code>projectClosing</code>.</li>
+  </ul>
+
+  <h4>UI</h4>
+  <ul>
+    <li>Tool window por debajo de ~220 px: el renderer retira fecha y segunda línea antes que truncar el título.</li>
+    <li>Miles de tareas en un estado: modelo construido fuera del EDT; grupos anteriores a «Yesterday» colapsados por defecto.</li>
+    <li>Cambio de tema en caliente: colores vía <code>JBColor</code>, repintado por <code>LafManagerListener</code>.</li>
+    <li>Escalado al 200 %: todas las medidas del renderer y de los inlays pasan por <code>JBUI.scale</code>.</li>
+    <li>Tarea vacía: Quick Add deshabilita <code>Enter</code>.</li>
+    <li>Texto pegado de megabytes: se acepta, pero la fila usa sólo la primera línea y el renderer corta a un máximo de caracteres.</li>
+  </ul>
+
+  <h4>Enlaces e imágenes</h4>
+  <ul>
+    <li>Esquema no <code>http(s)</code>: no clicable.</li>
+    <li>URL dentro de un bloque de código: no se extrae.</li>
+    <li>Adjunto referenciado pero ausente: marcador de posición en el inlay; la referencia no se borra.</li>
+    <li>Misma imagen en dos tareas: un solo blob; sólo se recoge cuando no queda ninguna referencia.</li>
+    <li>Captura enorme del portapapeles: se reescala al máximo configurado antes de guardar.</li>
+    <li>Deshacer tras pegar: el texto se revierte; el blob queda huérfano y lo recoge el GC tras el periodo de gracia.</li>
+  </ul>
+</section>
+
+<!-- ============ 13 ============ -->
+<section id="d13">
+  <div class="sec-head"><span class="sec-num">13</span><h2>Plan de implementación</h2></div>
+  <p>Ocho fases, cada una entregable y probable a mano. El orden se desvía del propuesto en dos puntos, por dependencias reales: <strong>multi-repo va antes que Quick Add</strong>, porque el popup necesita el selector de proyecto; y <strong>la exportación sube a la fase de enlaces</strong>, porque sólo depende del dominio y sale casi gratis ahí.</p>
+
+  <div class="phase"><div class="pn">FASE 0<small>✅ hecha</small></div><div>
+    <h3>Andamiaje</h3>
+    <p>Gradle con IntelliJ Platform Gradle Plugin 2.x, <code>plugin.xml</code>, <code>TasklaneBundle</code>, tool window vacía, iconos, CI con <code>verifyPlugin</code>.</p>
+    <div class="gate"><b>Criterio</b>El plugin se instala en un IDE de desarrollo y la tool window aparece.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 1<small>✅ hecha</small></div><div>
+    <h3>Núcleo: dominio, persistencia, CRUD</h3>
+    <p>Modelo, <code>TaskReducer</code>, <code>TaskFileStore</code> con escritura atómica, <code>TaskService</code> con <code>StateFlow</code>, árbol con renderer básico y un pseudo-repositorio único. Tests JUnit del dominio y del store.</p>
+    <div class="gate"><b>Criterio</b>Crear, editar, completar y borrar tareas; cerrar y reabrir el proyecto las recupera intactas.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 2<small>2–3 d</small></div><div>
+    <h3>Estados y prioridades</h3>
+    <p><code>TasklaneConfig</code> de proyecto más la plantilla de defaults a nivel aplicación, <code>projectConfigurable</code> con las dos tablas, tabs por estado, franja de prioridad, agrupación por fecha configurable, diálogo de reasignación al borrar.</p>
+    <div class="gate"><b>Criterio</b>Un proyecto nuevo arranca sembrado desde la plantilla; crear un estado, reordenarlo y borrar uno con tareas reasignándolas no hace desaparecer ninguna.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 3<small>2 d</small></div><div>
+    <h3>Multi-repositorio</h3>
+    <p><code>RepositoryRegistry</code>, proveedores Git y de content roots, selector en la barra, aislamiento de datos por <code>RepoKey</code>, reacción a eventos VCS.</p>
+    <div class="gate"><b>Criterio</b>Con tres repos en una ventana, cada uno muestra sólo sus tareas; añadir uno en caliente lo hace aparecer.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 4<small>2–3 d</small></div><div>
+    <h3>Teclado y búsqueda</h3>
+    <p>Quick Add popup, acciones registradas con sus atajos, <code>⌘K</code> al campo de búsqueda, búsqueda con debounce y resaltado, triggers de prioridad en vivo.</p>
+    <div class="gate"><b>Criterio</b>Crear una tarea con prioridad y proyecto sin tocar el ratón; buscar sobre 5.000 tareas sin lag perceptible.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 5<small>1–2 d</small></div><div>
+    <h3>Enlaces y exportación</h3>
+    <p><code>LinkExtractor</code>, acortado con dominio primero, fragmentos clicables, indicador de enlaces por fila, exportación al portapapeles por estado, por grupo y por selección.</p>
+    <div class="gate"><b>Criterio</b>Abrir un enlace desde la fila sin entrar a editar; exportar «Done → Today» produce la lista de guiones esperada.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 6<small>3–4 d</small></div><div>
+    <h3>Imágenes</h3>
+    <p><code>AttachmentStore</code> direccionado por contenido, pegado desde el portapapeles, inlays de bloque, apertura ampliada, borrado y recolección de basura.</p>
+    <div class="gate"><b>Criterio</b>Pegar una captura, verla en el editor, ampliarla, deshacer, y que el blob no quede para siempre.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn">FASE 7<small>2–3 d</small></div><div>
+    <h3>Robustez y pulido</h3>
+    <p>Migraciones y modo solo lectura por versión, recuperación de ficheros corruptos, notificaciones, accesibilidad y navegación por teclado completa, tests de integración, <code>verifyPlugin</code> contra 2025.2 → 2026.2, documentación.</p>
+    <div class="gate"><b>Criterio</b>Corromper <code>tasks.xml</code> a mano y comprobar que el plugin recupera desde <code>.bak</code> y avisa.</div>
+  </div></div>
+</section>
+
+<!-- ============ 14 ============ -->
+<section id="d14">
+  <div class="sec-head"><span class="sec-num">14</span><h2>Riesgos y decisiones abiertas</h2></div>
+
+  <h3>Riesgos técnicos</h3>
+  <div class="adr warn">
+    <span class="tag">Conflicto de atajos en macOS</span>
+    <p>Los dos atajos propuestos ya están ocupados en el keymap de macOS: <code>⌘⌥R</code> es <em>Resume Program</em> y <code>⌘K</code> es <em>Commit</em>. La mitigación es doble: registrar ambas acciones en <code>plugin.xml</code> (para que sean configurables en Keymap) y además instalarlas sobre el panel con <code>registerCustomShortcutSet</code>, leyendo el atajo <em>desde el keymap</em>. Así ganan dentro de la tool window sin pelear con el binding global. <code>⌘K</code> queda resuelto así. <code>⌘⌥R</code> es global y sí compite de verdad con <em>Resume Program</em>; la decisión tomada es <strong>mantenerlo</strong> como default — el IDE avisa del conflicto en <em>Settings → Keymap</em> y el usuario elige cuál gana. Se documenta en el README y en la descripción del plugin.</p>
+  </div>
+  <div class="adr alt">
+    <span class="tag">Resuelto en la Fase 1 · serialización</span>
+    <p>Este riesgo se materializó y se resolvió eliminando xmlb del camino de datos: ver la corrección en §03 y §04. El dominio quedó inmutable y sin capa de DTOs.</p>
+  </div>
+  <div class="adr alt">
+    <span class="tag">Filas de dos líneas en CheckboxTree</span>
+    <p>Altura variable por fila (<code>rowHeight = 0</code>) más el hit-testing del checkbox heredado. Hay que verificar pronto que el checkbox sigue respondiendo con la fila alta; si no, se reimplementa el hit-testing sobre <code>Tree</code>, que es media jornada de trabajo conocido. La Fase 1 usa filas de una línea, así que sigue abierto.</p>
+    <p>Nota de implementación: la franja de prioridad se pinta como <code>Border</code> del renderer, no como componente. El <code>BorderLayout</code> del renderer de <code>CheckboxTree</code> ya tiene el checkbox en el WEST, así que insertar un componente ahí sería frágil; pintando en el borde la franja queda en el extremo izquierdo real de la fila.</p>
+  </div>
+  <div class="adr alt">
+    <span class="tag">Inlays de imagen y rendimiento</span>
+    <p>Recalcular inlays en cada pulsación es caro. Debounce más caché de la <code>BufferedImage</code> escalada por <code>(AttachmentId, ancho)</code>.</p>
+  </div>
+  <div class="adr alt">
+    <span class="tag">Dependencia opcional a Git4Idea</span>
+    <p>Cualquier referencia a <code>git4idea</code> desde una clase del core provoca <code>NoClassDefFoundError</code> donde el plugin Git esté desactivado. Se aísla en su propio descriptor (<code>tasklane-git.xml</code>) y se accede sólo por interfaz.</p>
+  </div>
+
+  <h3>Decisiones cerradas</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Decisión</th><th>Elegido</th><th>Consecuencia</th></tr></thead>
+    <tbody>
+      <tr><td>Ubicación de los datos</td><td><code>.idea/tasklane/</code> con <code>.gitignore</code> propio</td><td>Nada se escribe fuera del proyecto abierto. Guardar dentro de cada repo queda como ajuste opcional, no como default.</td></tr>
+      <tr><td>Atajo de creación rápida</td><td><code>⌘⌥R</code>, asumiendo el choque con <em>Resume Program</em></td><td>Se documenta el conflicto. <code>⌘K</code> no lo tiene porque se instala sobre el panel.</td></tr>
+      <tr><td>Ámbito de estados y prioridades</td><td>Por proyecto, en <code>.idea/tasklane.xml</code></td><td>Añade la plantilla de defaults a nivel aplicación y una siembra en el primer arranque de cada proyecto. Entra en la Fase 2.</td></tr>
+      <tr><td>Versión mínima del IDE</td><td><code>sinceBuild = 252</code> (2025.2)</td><td>Kotlin 2.x/K2 obligatorio y todas las APIs modernas disponibles sin condicionales. <code>verifyPlugin</code> cubre 2025.2 → 2026.2.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>
+  <p>Documento de arquitectura · sin código de producción todavía. Las cuatro decisiones de §14 están cerradas: siguiente paso, Fase 0.</p>
+</footer>
+</main>
+</div>

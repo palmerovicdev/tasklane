@@ -1,0 +1,14 @@
+.gradle/
+.kotlin/
+build/
+out/
+*.iml
+
+# Caché de dependencias del IntelliJ Platform Gradle Plugin.
+.intellijPlatform/
+
+# Config local del IDE de este repo (no confundir con .idea/tasklane/,
+# que es donde el plugin guarda datos en los proyectos del usuario).
+.idea/
+
+.DS_Store

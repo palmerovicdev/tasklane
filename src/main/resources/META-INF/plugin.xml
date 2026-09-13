@@ -1,0 +1,28 @@
+<idea-plugin>
+    <!-- id, name, version e idea-version los inyecta Gradle desde gradle.properties
+         (bloque intellijPlatform.pluginConfiguration en build.gradle.kts). -->
+    <vendor>Victor Palmero</vendor>
+
+    <description><![CDATA[
+        <p>Gestión rápida de TODOs por repositorio, sin salir del IDE.</p>
+        <ul>
+          <li>Tool Window nativa con estados y prioridades configurables.</li>
+          <li>Un conjunto de tareas independiente por repositorio Git de la ventana.</li>
+          <li>Creación por teclado, búsqueda instantánea y exportación al portapapeles.</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <resource-bundle>messages.TasklaneBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Tasklane" displayType="BALLOON"/>
+
+        <toolWindow
+            id="Tasklane"
+            anchor="right"
+            icon="com.tasklane.ui.common.TasklaneIcons.ToolWindow"
+            factoryClass="com.tasklane.ui.toolwindow.TasklaneToolWindowFactory"/>
+    </extensions>
+</idea-plugin>
