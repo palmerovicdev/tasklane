@@ -9,13 +9,22 @@ package com.tasklane.domain.model
  */
 data class TasklaneSnapshot(
     val config: TasklaneConfig,
-    /** Tareas por repositorio. En la Fase 1 solo hay [RepoKey.ROOT]. */
+    /** Tareas por repositorio. Sólo están los que ya se han leído de disco. */
     val tasksByRepo: Map<RepoKey, List<Task>>,
     val activeRepo: RepoKey,
+    /**
+     * Los repositorios de la ventana, ya filtrados y ordenados por `RepoCatalog`.
+     * Están en el snapshot y no en un servicio aparte porque la UI los pinta junto
+     * a las tareas: dos fuentes distintas darían un selector desincronizado del
+     * árbol durante un repintado.
+     */
+    val repositories: List<RepositoryRef> = emptyList(),
     /** Repos cuyo fichero aún no se ha leído. Evita repintar como si estuvieran vacíos. */
     val loading: Set<RepoKey> = emptySet(),
 ) {
     val activeTasks: List<Task> get() = tasksByRepo[activeRepo].orEmpty()
+
+    val activeRepository: RepositoryRef? get() = repositories.firstOrNull { it.key == activeRepo }
 
     fun tasksOf(repo: RepoKey): List<Task> = tasksByRepo[repo].orEmpty()
 

@@ -77,8 +77,10 @@ internal fun buildConfig(
     states: List<StateRow>,
     priorities: List<PriorityRow>,
     triggersEnabled: Boolean,
+    repoDepth: Int,
 ): TasklaneConfig = TasklaneConfig(
     states = states.mapIndexed { i, row -> row.toDomain(i) },
     priorities = priorities.mapIndexed { i, row -> row.toDomain(i) },
     triggersEnabled = triggersEnabled,
+    repoDepth = repoDepth,
 )

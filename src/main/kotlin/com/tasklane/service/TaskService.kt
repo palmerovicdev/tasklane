@@ -10,6 +10,7 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneConfigService
+import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
 import com.tasklane.domain.command.TaskCommand
@@ -17,6 +18,7 @@ import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.repo.RepositoryRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -50,12 +52,11 @@ class TaskService(
     private val store = layout?.let(::TaskFileStore)
     private val reducer = TaskReducer()
     private val configService = TasklaneConfigService.getInstance(project)
+    private val registry = RepositoryRegistry.getInstance(project)
+    private val workspace = TasklaneWorkspaceService.getInstance(project)
 
     private val _snapshot = MutableStateFlow(
-        TasklaneSnapshot.EMPTY.copy(
-            config = configService.config.value,
-            loading = setOf(RepoKey.ROOT),
-        ),
+        TasklaneSnapshot.EMPTY.copy(config = configService.config.value),
     )
     val snapshot: StateFlow<TasklaneSnapshot> = _snapshot.asStateFlow()
 
@@ -74,6 +75,13 @@ class TaskService(
     /** Repos abiertos en solo lectura por venir de una versión futura del esquema. */
     private val readOnly: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
 
+    /**
+     * Repos cuya lectura ya se ha lanzado. Es lo que impide que dos emisiones
+     * seguidas del registro —abrir el proyecto dispara varias— lean el mismo
+     * fichero dos veces en paralelo.
+     */
+    private val requested: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
+
     @OptIn(FlowPreview::class)
     private fun startSaveLoop() {
         scope.launch(Dispatchers.IO) {
@@ -83,10 +91,19 @@ class TaskService(
 
     init {
         startSaveLoop()
+        // La selección guardada se restaura ANTES de que llegue el catálogo: así el
+        // primer `loadPending` ya sabe cuál es el repositorio que hay que leer
+        // primero, y la tool window no llega a pintar el equivocado.
+        workspace.selectedRepo?.let { apply(TaskCommand.SelectRepo(RepoKey(it))) }
         // La configuración entra en el modelo como un comando más. El primer valor
         // que emite el StateFlow es el que ya se sembró arriba, así que es inocuo.
         scope.launch { configService.config.collect { apply(TaskCommand.ConfigChanged(it)) } }
-        scope.launch(Dispatchers.IO) { load(RepoKey.ROOT) }
+        scope.launch(Dispatchers.IO) {
+            registry.repositories.collect { repositories ->
+                apply(TaskCommand.RepositoriesChanged(repositories))
+                loadPending()
+            }
+        }
     }
 
     // ------------------------------------------------------------------ API
@@ -111,6 +128,19 @@ class TaskService(
 
     fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly
 
+    /**
+     * Cambia el repositorio activo y lo recuerda para la próxima apertura. Pasa por
+     * aquí y no por el propio `apply` porque persistir la selección es un efecto que
+     * sólo tiene sentido cuando la decisión es del usuario, no cuando el reducer
+     * mueve el activo porque el suyo desapareció.
+     */
+    fun selectRepo(repo: RepoKey) {
+        if (repo == _snapshot.value.activeRepo) return
+        apply(TaskCommand.SelectRepo(repo))
+        workspace.selectedRepo = repo.value
+        scope.launch(Dispatchers.IO) { loadPending() }
+    }
+
     fun requestReveal(ids: Set<TaskId>) {
         if (ids.isNotEmpty()) _reveal.tryEmit(ids)
     }
@@ -131,6 +161,29 @@ class TaskService(
     }
 
     // ---------------------------------------------------------------- carga
+
+    /**
+     * Lee los repositorios que aún no están en memoria, **el activo primero**: es el
+     * único que se está mirando y el que decide cuándo deja de verse vacía la
+     * ventana.
+     *
+     * Los demás se leen a continuación en vez de esperar a que alguien los abra,
+     * porque hay comandos de alcance de proyecto —reasignar un estado al borrarlo—
+     * que actúan sobre el snapshot entero: un repositorio sin leer se los perdería y
+     * sus tareas acabarían remapeadas al estado por defecto en lugar de al que el
+     * usuario eligió.
+     */
+    private suspend fun loadPending() {
+        val snapshot = _snapshot.value
+        val order = snapshot.repositories
+            .map { it.key }
+            .sortedByDescending { it == snapshot.activeRepo }
+        for (repo in order) {
+            if (repo in snapshot.tasksByRepo) continue
+            if (!requested.add(repo)) continue
+            load(repo)
+        }
+    }
 
     private suspend fun load(repo: RepoKey) {
         val store = store ?: run {

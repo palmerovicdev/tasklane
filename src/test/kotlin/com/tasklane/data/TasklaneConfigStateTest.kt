@@ -99,4 +99,19 @@ class TasklaneConfigStateTest {
 
         assertEquals(TasklaneConfig.DEFAULT, roundTripped.toDomain())
     }
+
+    @Test
+    fun `la profundidad de deteccion viaja con la configuracion del proyecto`() {
+        val config = TasklaneConfig.DEFAULT.copy(repoDepth = 3)
+        assertEquals(3, config.toState().toDomain()!!.repoDepth)
+    }
+
+    @Test
+    fun `una profundidad absurda se recorta en vez de romper el selector`() {
+        assertEquals(
+            TasklaneConfig.MAX_REPO_DEPTH,
+            TasklaneConfig.DEFAULT.copy(repoDepth = 99).normalized().repoDepth,
+        )
+        assertEquals(0, TasklaneConfig.DEFAULT.copy(repoDepth = -1).normalized().repoDepth)
+    }
 }

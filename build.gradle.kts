@@ -46,6 +46,15 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
 
     intellijPlatform {
+        // Dependencia OPCIONAL en plugin.xml pero obligatoria para compilar: el
+        // proveedor de repositorios Git necesita git4idea en el classpath, aunque
+        // en runtime su descriptor no se cargue si el plugin Git esta desactivado.
+        bundledPlugin("Git4Idea")
+        // Git4Idea expone tipos de dvcs en su API (GitRepository : Repository), y
+        // esos modulos de la plataforma no entran solos en el classpath.
+        bundledModule("intellij.platform.vcs.dvcs")
+        bundledModule("intellij.platform.vcs.dvcs.impl")
+
         if (localIde != null) {
             // Descarga cero: se compila contra el IDE ya instalado.
             local(localIde)

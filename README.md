@@ -3,8 +3,8 @@
 Plugin de IntelliJ Platform para gestionar TODOs por repositorio sin salir del IDE.
 
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
-- **Estado:** v0.2.0 — Fase 2: estados y prioridades configurables por proyecto, tabs por
-  estado y agrupación por fecha.
+- **Estado:** v0.3.0 — Fase 3: multi-repositorio, con detección por VCS, selector en la
+  cabecera y un conjunto de tareas aislado por repositorio.
 
 ## Arquitectura en una frase
 
@@ -18,11 +18,35 @@ La UI nunca toca el almacén.
 | Fichero | Qué hay | VCS |
 |---|---|---|
 | `.idea/tasklane.xml` | estados y prioridades del proyecto | **sí** — compartible con el equipo |
-| `.idea/tasklane/` | las tareas | no — lleva su propio `.gitignore` con `*` |
+| `.idea/tasklane/` | las tareas y el registro de repositorios (`layout.xml`) | no — lleva su propio `.gitignore` con `*` |
 | `tasklane-defaults.xml` (config del IDE) | plantilla para proyectos nuevos | n/a — es lo único que roamea |
 
 Un proyecto sin `.idea/tasklane.xml` se siembra desde la plantilla al abrirse, así que
 configurar por proyecto no obliga a reconfigurar cada proyecto.
+
+## Repositorios
+
+Cada repositorio de la ventana tiene su propio conjunto de tareas. No se escanea el
+disco buscando carpetas `.git`: el modelo lo mantiene el IDE y se lee de ahí.
+
+| | |
+|---|---|
+| Con Git | Los repositorios registrados en el VCS del proyecto, submódulos incluidos |
+| Sin Git (o con el plugin desactivado) | Pseudo-repositorio sobre la raíz del proyecto |
+| Uno añadido en caliente | Aparece sin reiniciar, por el evento de *mappings* |
+| Un solo repositorio | El selector se esconde y el nombre va al título de la ventana |
+
+**Profundidad.** Por defecto sólo cuentan los hijos directos de la raíz
+(*Settings → Tools → Tasklane → Repositories*). Es un filtro de vista, no un borrado:
+un repositorio más profundo que ya tenga tareas nunca se oculta, aparece bajo «Other».
+Lo mismo con una carpeta que desaparece del disco — se marca como ausente, pero se
+puede abrir y sus tareas siguen ahí. Esconder datos es indistinguible de perderlos.
+
+**Claves.** El directorio de cada repositorio es
+`slug(ruta relativa)-sha256(esa ruta).take(8)` — `backend-api-a3f91d0e` — y la raíz
+del proyecto se queda con `root`. Al ser relativa, mover el proyecto entero no cambia
+ninguna clave. Renombrar un subrepositorio sí, y sus tareas quedan accesibles bajo la
+entrada ausente hasta que la Fase 5 traiga «exportar y quitar».
 
 ## Requisitos
 
@@ -63,8 +87,8 @@ cualquier uso accidental de una API posterior.
 ## Comandos
 
 ```bash
-./gradlew test                             # 51 tests de dominio, config y almacén, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-0.2.0.zip
+./gradlew test                             # 91 tests de dominio, config y almacén, sin IDE
+./gradlew buildPlugin                      # -> build/distributions/tasklane-0.3.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -88,8 +112,8 @@ cualquier uso accidental de una API posterior.
 |---|---|---|---|
 | 0 | Andamiaje | — | ✅ salió junto con la Fase 1 |
 | 1 | Dominio, persistencia, CRUD | `0.1.0` | ✅ |
-| 2 | Estados y prioridades | `0.2.0` | ✅ 51 tests verdes |
-| 3 | Multi-repositorio | `0.3.0` | pendiente |
+| 2 | Estados y prioridades | `0.2.0` | ✅ |
+| 3 | Multi-repositorio | `0.3.0` | ✅ 91 tests verdes |
 | 4 | Teclado y búsqueda | `0.4.0` | pendiente |
 | 5 | Enlaces y exportación | `0.5.0` | pendiente |
 | 6 | Imágenes | `0.6.0` | pendiente |

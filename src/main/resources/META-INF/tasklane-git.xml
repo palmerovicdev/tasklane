@@ -1,0 +1,20 @@
+<idea-plugin>
+    <!-- Todo lo que referencia git4idea o dvcs. Este descriptor solo se carga si
+         Git4Idea esta instalado y activo, que es lo que mantiene el core libre de
+         NoClassDefFoundError en un IDE con el plugin Git desactivado. -->
+    <extensions defaultExtensionNs="com.tasklane">
+        <repositoryProvider implementation="com.tasklane.repo.GitRepositoryProvider"/>
+    </extensions>
+
+    <projectListeners>
+        <!-- El evento correcto para "aparecio o desaparecio un repositorio": se
+             dispara cuando cambian los mappings, con las instancias ya creadas. -->
+        <listener
+            class="com.tasklane.repo.VcsMappingBridge"
+            topic="com.intellij.dvcs.repo.VcsRepositoryMappingListener"/>
+        <!-- Solo para refrescar la rama del tooltip. -->
+        <listener
+            class="com.tasklane.repo.VcsMappingBridge"
+            topic="git4idea.repo.GitRepositoryChangeListener"/>
+    </projectListeners>
+</idea-plugin>

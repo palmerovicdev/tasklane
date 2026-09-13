@@ -2,6 +2,7 @@ package com.tasklane.domain.command
 
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
@@ -59,6 +60,23 @@ sealed interface TaskCommand {
     data class ReassignState(val from: StateId, val to: StateId) : TaskCommand
 
     data class ReassignPriority(val from: PriorityId, val to: PriorityId) : TaskCommand
+
+    /**
+     * El registro acaba de publicar un catálogo nuevo —arranque, evento de VCS o
+     * cambio de profundidad—.
+     *
+     * Fija también qué repositorio queda activo: si el que estaba desapareció, se
+     * cae al primero de la lista en vez de dejar el árbol apuntando a una clave que
+     * ya no existe.
+     */
+    data class RepositoriesChanged(val repositories: List<RepositoryRef>) : TaskCommand
+
+    /**
+     * El usuario cambió de repositorio en el selector. No se valida contra el
+     * catálogo a propósito: al abrir el proyecto se restaura la selección guardada
+     * antes de que la detección haya terminado.
+     */
+    data class SelectRepo(val repo: RepoKey) : TaskCommand
 
     /**
      * Rellena `completedAt` desde `updatedAt` en las tareas de [states] que aún no

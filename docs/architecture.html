@@ -418,7 +418,9 @@ data class RepositoryRef(
 │   ├── RepositoryProvider.kt         # interfaz
 │   ├── GitRepositoryProvider.kt      # sólo se registra con Git4Idea presente
 │   ├── ContentRootProvider.kt        # fallback
-│   └── RepoKeyFactory.kt
+│   ├── RepoKeyFactory.kt
+│   ├── RepoCatalog.kt                # politica del catalogo, Kotlin puro
+│   └── VcsMappingBridge.kt           # solo con Git4Idea: eventos VCS -> refresh()
 ├── service/
 │   ├── TaskService.kt   ConfigService.kt   SearchService.kt
 │   ├── ExportService.kt Notifier.kt
@@ -434,7 +436,7 @@ data class RepositoryRef(
 ├── actions/         QuickAddAction, FocusSearchAction, ToggleCompleteAction,
 │                    ChangeStateAction, ChangePriorityAction, DeleteTaskAction,
 │                    ExportStateAction, ExportGroupAction, ExportSelectionAction
-└── startup/         TasklaneStartupActivity (ProjectActivity), VcsMappingBridge</code></pre>
+└── startup/         TasklaneStartupActivity (ProjectActivity)</code></pre>
   <div class="adr warn">
     <span class="tag">Corregido durante la Fase 1 · no hay capa de DTOs</span>
     <p>El diseño original tenía un paquete <code>data/dto</code> con clases anotadas para <code>com.intellij.util.xmlb</code>. Al implementarlo apareció un problema que lo invalida: <strong>xmlb descarta los atributos que no reconoce</strong>. Eso destruye justo la garantía que <code>Task.extra</code> existe para dar — que abrir el proyecto con una versión vieja del plugin no borre datos escritos por una nueva.</p>
@@ -618,9 +620,14 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <p>El plugin funciona sin Git: sin él, <code>ContentRootProvider</code> produce un pseudo-repositorio «Project». Ninguna clase del core importa <code>git4idea</code>, porque hacerlo provoca <code>NoClassDefFoundError</code> en IDEs donde el plugin Git esté desactivado.</p>
 
   <h3><code>RepoKey</code> estable</h3>
-  <pre><code>repoKey = "${slug(rutaRelativaAlProyecto)}-${sha256(rutaCanonica).take(8)}"
-// sinonte-backend-api-a3f91d0e   ·   root-4f2a9c1b</code></pre>
+  <pre><code>repoKey = "${slug(rutaRelativaAlProyecto)}-${sha256(rutaRelativaAlProyecto).take(8)}"
+// backend-api-a3f91d0e   ·   root</code></pre>
   <p>El slug hace legibles los directorios en disco; el hash evita colisiones entre dos carpetas <code>api</code> en ramas distintas del árbol.</p>
+  <div class="adr warn">
+    <span class="tag">Corregido durante la Fase 3 · la clave no depende de dónde esté el proyecto</span>
+    <p>El diseño hasheaba la <strong>ruta canónica absoluta</strong>. Se hashea la ruta <strong>relativa al proyecto</strong>, la misma que ya alimentaba el slug. Con la absoluta, mover o renombrar la carpeta del proyecto cambiaba todas las claves de golpe y huerfanaba todas las tareas — y los datos viven dentro de <code>.idea/</code>, así que se mueven con el proyecto: no había nada que justificara perderlos. Lo que el hash tenía que evitar lo evita igual, porque dos <code>api</code> en ramas distintas ya tienen rutas relativas distintas.</p>
+    <p>La raíz conserva la clave desnuda <code>root</code>, sin hash: su ruta relativa es vacía, no puede colisionar con nada, y así los datos escritos por la Fase 1 siguen donde estaban sin migración.</p>
+  </div>
 
   <h3>Profundidad y comportamiento del selector</h3>
   <p>El requisito habla de repos en subdirectorios <em>hijos directos</em> de la raíz. Se implementa como un filtro de profundidad configurable (por defecto 1), pero con una salvedad: <strong>un repositorio más profundo que ya tenga tareas nunca se oculta</strong> — aparece bajo un separador «Other» en el selector. Filtrar datos existentes fuera de la vista es indistinguible de perderlos.</p>
@@ -630,10 +637,14 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
       <tr><td>Un solo repositorio</td><td>El selector se oculta; el nombre va en el título de la tool window</td></tr>
       <tr><td>Ninguno (proyecto sin VCS)</td><td>Pseudo-repositorio «Project» sobre la raíz</td></tr>
       <tr><td>Se añade uno en caliente</td><td>Aparece en el selector sin reiniciar, vía el evento de mappings</td></tr>
-      <tr><td>Desaparece uno con tareas</td><td>Entrada deshabilitada con aviso; los datos no se tocan; acción «Exportar y quitar»</td></tr>
-      <tr><td>Repos detectados sin registrar en VCS</td><td>Notificación sugiriendo registrarlos, con enlace a los ajustes de VCS — nunca se modifica la configuración del usuario</td></tr>
+      <tr><td>Desaparece uno con tareas</td><td>Entrada marcada como ausente pero <strong>seleccionable</strong>; los datos no se tocan. La acción «Exportar y quitar» llega con la exportación, en la Fase 5</td></tr>
+      <tr><td>Repos detectados sin registrar en VCS</td><td>Lo avisa la propia plataforma (<code>VcsRootProblemNotifier</code>); duplicarlo sería una segunda notificación diciendo lo mismo</td></tr>
     </tbody>
   </table></div>
+  <div class="adr warn">
+    <span class="tag">Corregido durante la Fase 3 · una entrada ausente sigue siendo clicable</span>
+    <p>La tabla decía «entrada deshabilitada». Deshabilitarla dejaría sus tareas visibles en el selector y a la vez inalcanzables, que es exactamente lo que este mismo apartado prohíbe dos párrafos más arriba. Se marca con icono de aviso y tooltip, y se puede abrir.</p>
+  </div>
 </section>
 
 <!-- ============ 8 ============ -->
@@ -844,9 +855,9 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <div class="gate"><b>Criterio</b>Un proyecto nuevo arranca sembrado desde la plantilla; crear un estado, reordenarlo y borrar uno con tareas reasignándolas no hace desaparecer ninguna.</div>
   </div></div>
 
-  <div class="phase"><div class="pn">FASE 3<small>2 d · v0.3.0</small></div><div>
+  <div class="phase"><div class="pn">FASE 3<small>✅ hecha · v0.3.0</small></div><div>
     <h3>Multi-repositorio</h3>
-    <p><code>RepositoryRegistry</code>, proveedores Git y de content roots, selector en la barra, aislamiento de datos por <code>RepoKey</code>, reacción a eventos VCS.</p>
+    <p><code>RepositoryRegistry</code>, proveedores Git y de content roots, selector en la cabecera de la tool window, aislamiento de datos por <code>RepoKey</code>, reacción a eventos VCS, filtro de profundidad configurable y registro en <code>layout.xml</code>. La política vive en <code>RepoCatalog</code>, que es Kotlin puro y se testea sin IDE.</p>
     <div class="gate"><b>Criterio</b>Con tres repos en una ventana, cada uno muestra sólo sus tareas; añadir uno en caliente lo hace aparecer.</div>
   </div></div>
 

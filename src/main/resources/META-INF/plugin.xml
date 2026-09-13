@@ -14,7 +14,25 @@
 
     <depends>com.intellij.modules.platform</depends>
 
+    <!-- Opcional a proposito: sin Git el plugin funciona igual, con la raiz del
+         proyecto como pseudo-repositorio. Todo lo que toca git4idea vive en el
+         descriptor, que no se carga si el plugin Git esta desactivado. -->
+    <depends optional="true" config-file="tasklane-git.xml">Git4Idea</depends>
+
     <resource-bundle>messages.TasklaneBundle</resource-bundle>
+
+    <extensionPoints>
+        <!-- Quien sabe que repositorios hay. Es un EP para que la implementacion
+             Git pueda registrarse SOLO cuando Git4Idea esta presente. -->
+        <extensionPoint
+            name="repositoryProvider"
+            interface="com.tasklane.repo.RepositoryProvider"
+            dynamic="true"/>
+    </extensionPoints>
+
+    <extensions defaultExtensionNs="com.tasklane">
+        <repositoryProvider implementation="com.tasklane.repo.ContentRootProvider"/>
+    </extensions>
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Tasklane" displayType="BALLOON"/>

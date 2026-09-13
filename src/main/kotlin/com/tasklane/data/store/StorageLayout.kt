@@ -13,6 +13,7 @@ import java.nio.file.Paths
  *     ├── tasklane.xml          config del proyecto (Fase 2) — VERSIONABLE
  *     └── tasklane/             datos — auto-ignorados
  *         ├── .gitignore        contiene "*"
+ *         ├── layout.xml        registro repoKey -> ruta (Fase 3)
  *         └── repos/<repoKey>/
  *             ├── tasks.xml
  *             ├── tasks.xml.bak
@@ -23,11 +24,20 @@ import java.nio.file.Paths
  */
 class StorageLayout(val root: Path) {
 
+    /** Registro `repoKey -> ruta` de la última detección. Ver [RepoLayoutCodec]. */
+    fun layoutFile(): Path = root.resolve(LAYOUT_FILE)
+
     fun repoDir(repo: RepoKey): Path = root.resolve("repos").resolve(repo.value)
     fun tasksFile(repo: RepoKey): Path = repoDir(repo).resolve(TASKS_FILE)
     fun backupFile(repo: RepoKey): Path = repoDir(repo).resolve("$TASKS_FILE.bak")
     fun attachmentsDir(repo: RepoKey): Path = repoDir(repo).resolve("attachments")
     fun corruptFile(repo: RepoKey, stamp: Long): Path = repoDir(repo).resolve("tasks.corrupt-$stamp.xml")
+
+    /**
+     * ¿Este repositorio tiene tareas guardadas? Es la pregunta que decide si una
+     * entrada que ya no se detecta sigue mereciendo un sitio en el selector.
+     */
+    fun hasTasks(repo: RepoKey): Boolean = Files.exists(tasksFile(repo))
 
     /**
      * Un `.gitignore` con `*` DENTRO de nuestro propio directorio: los datos quedan
@@ -42,6 +52,7 @@ class StorageLayout(val root: Path) {
 
     companion object {
         const val TASKS_FILE = "tasks.xml"
+        const val LAYOUT_FILE = "layout.xml"
         const val DIR_NAME = "tasklane"
 
         fun forProject(project: Project): StorageLayout? {

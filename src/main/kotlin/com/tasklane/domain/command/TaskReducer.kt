@@ -48,6 +48,32 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 }
             }
 
+            is TaskCommand.RepositoriesChanged -> {
+                val repos = command.repositories
+                // Que el activo sobreviva es la invariante: perderlo dejaría el
+                // árbol pintando un repositorio que ya no está en la lista.
+                val active = when {
+                    repos.isEmpty() -> snapshot.activeRepo
+                    repos.any { it.key == snapshot.activeRepo } -> snapshot.activeRepo
+                    else -> repos.first().key
+                }
+                // Pendientes de leer = los del catálogo que aún no tienen lista. Se
+                // recalcula entero: un repositorio que sale del catálogo deja de
+                // estar pendiente de nada.
+                val loading = repos.map { it.key }.filterNot { it in snapshot.tasksByRepo }.toSet()
+                // Los eventos de VCS llegan repetidos. Devolver el MISMO snapshot
+                // cuando nada cambió es lo que evita que el servicio se ponga a
+                // recorrer repositorios buscando qué reescribir.
+                if (repos == snapshot.repositories && active == snapshot.activeRepo && loading == snapshot.loading) {
+                    return snapshot
+                }
+                snapshot.copy(repositories = repos, activeRepo = active, loading = loading)
+            }
+
+            is TaskCommand.SelectRepo ->
+                if (command.repo == snapshot.activeRepo) snapshot
+                else snapshot.copy(activeRepo = command.repo)
+
             is TaskCommand.BackfillCompletedAt -> snapshot.mapAllTasks { task ->
                 // `updatedAt` no se toca: la fecha que se rellena se DERIVA de ella,
                 // así que pisarla destruiría justamente el dato que se está usando.

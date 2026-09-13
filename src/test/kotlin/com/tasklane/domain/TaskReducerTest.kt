@@ -4,6 +4,7 @@ import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
@@ -235,5 +236,115 @@ class TaskReducerTest {
         val s = create("en todo")
         val after = reducer.reduce(s, TaskCommand.BackfillCompletedAt(setOf(TasklaneConfig.DOING)))
         assertSame(s, after)
+    }
+
+    // ---------------------------------------------------------- repositorios
+
+    private val api = RepoKey("api-a3f91d0e")
+    private val web = RepoKey("web-1b2c3d4e")
+
+    private fun ref(key: RepoKey, name: String) = RepositoryRef(
+        key = key,
+        displayName = name,
+        rootPath = "/proyecto/$name",
+        kind = RepositoryRef.Kind.GIT,
+        depth = if (key == RepoKey.ROOT) 0 else 1,
+    )
+
+    // Lista y no vararg: Kotlin no admite `vararg` de una value class.
+    private fun withRepos(keys: List<RepoKey>): TasklaneSnapshot =
+        reducer.reduce(empty, TaskCommand.RepositoriesChanged(keys.map { ref(it, it.value) }))
+
+    @Test
+    fun `cada repositorio ve solo sus tareas`() {
+        var s = withRepos(listOf(api, web))
+        s = reducer.reduce(s, TaskCommand.Create(api, "de api"))
+        s = reducer.reduce(s, TaskCommand.Create(web, "de web"))
+
+        assertEquals(listOf("de api"), s.tasksOf(api).map { it.body })
+        assertEquals(listOf("de web"), s.tasksOf(web).map { it.body })
+        assertEquals("el activo es el primero del catalogo", listOf("de api"), s.activeTasks.map { it.body })
+    }
+
+    @Test
+    fun `los repositorios sin leer quedan marcados como pendientes`() {
+        val s = withRepos(listOf(api, web))
+        assertEquals(setOf(api, web), s.loading)
+
+        val cargado = reducer.reduce(s, TaskCommand.Loaded(api, emptyList()))
+        assertEquals("leer uno no marca al otro", setOf(web), cargado.loading)
+    }
+
+    @Test
+    fun `un catalogo nuevo no vuelve a marcar como pendiente lo ya leido`() {
+        var s = withRepos(listOf(api))
+        s = reducer.reduce(s, TaskCommand.Loaded(api, emptyList()))
+        s = reducer.reduce(s, TaskCommand.RepositoriesChanged(listOf(ref(api, "api"), ref(web, "web"))))
+
+        assertEquals(setOf(web), s.loading)
+    }
+
+    @Test
+    fun `si el repositorio activo desaparece se cae al primero`() {
+        var s = withRepos(listOf(api, web))
+        s = reducer.reduce(s, TaskCommand.SelectRepo(web))
+        assertEquals(web, s.activeRepo)
+
+        val after = reducer.reduce(s, TaskCommand.RepositoriesChanged(listOf(ref(api, "api"))))
+        assertEquals(api, after.activeRepo)
+    }
+
+    @Test
+    fun `mientras el activo siga en el catalogo no se mueve`() {
+        var s = withRepos(listOf(api, web))
+        s = reducer.reduce(s, TaskCommand.SelectRepo(web))
+
+        val after = reducer.reduce(s, TaskCommand.RepositoriesChanged(listOf(ref(web, "web"), ref(api, "api"))))
+        assertEquals(web, after.activeRepo)
+    }
+
+    @Test
+    fun `seleccionar un repositorio que aun no esta en el catalogo se respeta`() {
+        // Al abrir el proyecto la seleccion guardada se restaura ANTES de que la
+        // deteccion termine; validarla contra un catalogo vacio la perderia.
+        val s = reducer.reduce(empty, TaskCommand.SelectRepo(web))
+        assertEquals(web, s.activeRepo)
+    }
+
+    @Test
+    fun `un catalogo identico no produce snapshot nuevo`() {
+        val s = withRepos(listOf(api, web))
+        assertSame(s, reducer.reduce(s, TaskCommand.RepositoriesChanged(s.repositories)))
+    }
+
+    @Test
+    fun `un catalogo vacio no deja el activo en el aire`() {
+        val s = withRepos(listOf(api))
+        val after = reducer.reduce(s, TaskCommand.RepositoriesChanged(emptyList()))
+        assertEquals(api, after.activeRepo)
+    }
+
+    @Test
+    fun `borrar en un repositorio no toca al otro`() {
+        var s = withRepos(listOf(api, web))
+        s = reducer.reduce(s, TaskCommand.Create(api, "de api"))
+        s = reducer.reduce(s, TaskCommand.Create(web, "de web"))
+        val victima = s.tasksOf(api).single().id
+
+        val after = reducer.reduce(s, TaskCommand.Delete(api, listOf(victima)))
+        assertTrue(after.tasksOf(api).isEmpty())
+        assertEquals(1, after.tasksOf(web).size)
+    }
+
+    @Test
+    fun `reasignar un estado alcanza a todos los repositorios`() {
+        var s = withRepos(listOf(api, web))
+        s = reducer.reduce(s, TaskCommand.Create(api, "de api", TasklaneConfig.DOING))
+        s = reducer.reduce(s, TaskCommand.Create(web, "de web", TasklaneConfig.DOING))
+
+        val after = reducer.reduce(s, TaskCommand.ReassignState(TasklaneConfig.DOING, TasklaneConfig.TODO))
+
+        assertEquals(TasklaneConfig.TODO, after.tasksOf(api).single().stateId)
+        assertEquals(TasklaneConfig.TODO, after.tasksOf(web).single().stateId)
     }
 }

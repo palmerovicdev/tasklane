@@ -44,6 +44,13 @@ data class TasklaneConfig(
     val priorities: List<TaskPriority>,
     /** Interruptor general de los triggers de prioridad. Fase 4. */
     val triggersEnabled: Boolean = true,
+    /**
+     * Hasta qué profundidad se buscan repositorios bajo la raíz del proyecto. 1 =
+     * hijos directos, que es lo que pide el requisito. Es un filtro de **vista**:
+     * un repositorio más profundo que ya tenga tareas nunca se oculta, aparece bajo
+     * «Other». Ver `RepoCatalog`.
+     */
+    val repoDepth: Int = DEFAULT_REPO_DEPTH,
 ) {
     val defaultState: TaskState get() = states.firstOrNull { it.isDefault } ?: states.first()
     val defaultPriority: TaskPriority get() = priorities.firstOrNull { it.isDefault } ?: priorities.first()
@@ -66,6 +73,7 @@ data class TasklaneConfig(
         val defaultStateIndex = states.indexOfFirst { it.isDefault }.takeIf { it >= 0 } ?: 0
         val defaultPriorityIndex = priorities.indexOfFirst { it.isDefault }.takeIf { it >= 0 } ?: 0
         return copy(
+            repoDepth = repoDepth.coerceIn(0, MAX_REPO_DEPTH),
             states = states.mapIndexed { i, s -> s.copy(order = i, isDefault = i == defaultStateIndex) },
             priorities = priorities.mapIndexed { i, p ->
                 p.copy(
@@ -78,6 +86,12 @@ data class TasklaneConfig(
     }
 
     companion object {
+        /** Hijos directos de la raíz: lo que pide el requisito. */
+        const val DEFAULT_REPO_DEPTH = 1
+
+        /** Más allá de esto el selector deja de ser un selector. */
+        const val MAX_REPO_DEPTH = 5
+
         val TODO = StateId("s-todo")
         val DOING = StateId("s-doing")
         val DONE = StateId("s-done")

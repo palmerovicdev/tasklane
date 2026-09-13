@@ -9,6 +9,7 @@ import com.intellij.openapi.options.ex.Settings
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.Messages
+import com.intellij.ui.JBIntSpinner
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
@@ -51,6 +52,17 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     private val statesTable = StatesTable(::updateProblems, ::confirmStateRemoval)
     private val prioritiesTable = PrioritiesTable(::updateProblems, ::confirmPriorityRemoval)
     private val triggersCheckBox = JBCheckBox(TasklaneBundle.message("settings.triggers.enabled"))
+
+    /**
+     * Profundidad de detección de repositorios. Es un filtro de vista, no un borrado:
+     * bajarla nunca esconde un repositorio que ya tenga tareas.
+     */
+    private val depthSpinner = JBIntSpinner(
+        TasklaneConfig.DEFAULT_REPO_DEPTH,
+        0,
+        TasklaneConfig.MAX_REPO_DEPTH,
+    )
+
     /** Aviso de validación bajo las tablas; la fila exacta la marca la tabla. */
     private val problemLabel = JBLabel("", AllIcons.General.Error, SwingConstants.LEADING).apply {
         isVisible = false
@@ -80,6 +92,11 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.priorities.comment")) }
         }
 
+        group(TasklaneBundle.message("settings.repos.title")) {
+            row(TasklaneBundle.message("settings.repos.depth")) { cell(depthSpinner) }
+            row { comment(TasklaneBundle.message("settings.repos.comment")) }
+        }
+
         row { cell(problemLabel) }
 
         row {
@@ -96,6 +113,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         statesTable.rows = states
         prioritiesTable.rows = priorities
         triggersCheckBox.isSelected = config.triggersEnabled
+        depthSpinner.number = config.repoDepth
         stateReassign.clear()
         priorityReassign.clear()
         updateProblems()
@@ -137,7 +155,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     }
 
     private fun currentConfig(): TasklaneConfig =
-        buildConfig(statesTable.rows, prioritiesTable.rows, triggersCheckBox.isSelected).normalized()
+        buildConfig(statesTable.rows, prioritiesTable.rows, triggersCheckBox.isSelected, depthSpinner.number)
+            .normalized()
 
     // ----------------------------------------------------------- validación
 
