@@ -33,6 +33,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
 | **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo o sólo la selección |
 
+- **Repositorio:** [palmerovicdev/tasklane](https://github.com/palmerovicdev/tasklane)
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
 - **Historial de versiones:** [`CHANGELOG.md`](CHANGELOG.md)
 - **Licencia:** [MIT](LICENSE)
@@ -431,11 +432,13 @@ tocan el repositorio:
 no en el estable, y sólo la ve quien haya añadido ese canal en el IDE. El canal sale
 del propio número de versión, así que no hay un segundo sitio que pueda discrepar.
 
-**Lo que no está en el repositorio.** Las **capturas** de la ficha se suben desde el
-panel del Marketplace, no desde `plugin.xml`: la descripción no resuelve rutas
-relativas y un `<img>` con URL absoluta se rompe el día que se mueva el repositorio.
-Las de este README, en [`docs/screenshots/`](docs/screenshots), son las mismas y
-sirven de origen.
+**Publica el repositorio antes que el plugin.** Las capturas de la ficha se sirven por
+URL absoluta desde `main` —la descripción del Marketplace no resuelve rutas relativas—,
+así que si el repositorio no está publicado la ficha sale con las imágenes rotas. Las
+fuentes están en [`docs/screenshots/`](docs/screenshots) y son las mismas de este README.
+
+Conviene además subirlas al **carrusel** desde el panel del Marketplace: es lo que se ve
+en los resultados de búsqueda, donde la descripción todavía no se ha abierto.
 
 ## Licencia
 

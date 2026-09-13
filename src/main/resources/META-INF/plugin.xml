@@ -1,11 +1,13 @@
 <idea-plugin>
     <!-- id, name, version e idea-version los inyecta Gradle desde gradle.properties
          (bloque intellijPlatform.pluginConfiguration en build.gradle.kts). -->
-    <vendor>Victor Palmero</vendor>
+    <vendor email="palmerodev@gmail.com" url="https://github.com/palmerovicdev/tasklane">Victor Palmero</vendor>
 
-    <!-- La ficha del Marketplace. Va en ingles como el resto de la interfaz, y sin
-         <img>: el Marketplace no resuelve rutas relativas, y las capturas se suben
-         aparte desde su panel de administracion. Ver README, «Publicar». -->
+    <!-- La ficha del Marketplace. Va en ingles como el resto de la interfaz.
+         Las capturas se sirven por URL ABSOLUTA desde el repositorio: el Marketplace
+         no resuelve rutas relativas. Apuntan a `main`, asi que el repositorio tiene
+         que estar publicado ANTES de publicar el plugin o la ficha sale con las
+         imagenes rotas. Ver README, «Publicar». -->
     <description><![CDATA[
         <p>
             <b>Tasklane</b> keeps a to-do list inside your project, one per repository,
@@ -15,6 +17,11 @@
 
         <p>It is built for the notes you take <i>while</i> you code — the ones that never
             survive the trip to an external tracker.</p>
+
+        <p>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/tool-window.png" alt="The Tasklane tool window: states as tabs with live counts, a search field, and one card per task with its priority stripe" width="330"/>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/new-task.png" alt="The new-task dialog: a Markdown body with a formatting toolbar, a drop zone for images, and fields for state, priority, due date and tags" width="440"/>
+        </p>
 
         <h3>What it does</h3>
         <ul>
