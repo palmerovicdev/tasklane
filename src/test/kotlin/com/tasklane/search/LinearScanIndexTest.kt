@@ -2,6 +2,7 @@ package com.tasklane.search
 
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.AttachmentRef
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
@@ -32,6 +33,7 @@ class LinearScanIndexTest {
         tags: List<String> = emptyList(),
         links: List<TaskLink> = emptyList(),
         attachments: List<AttachmentRef> = emptyList(),
+        anchors: List<CodeAnchor> = emptyList(),
     ) = Task(
         id = TaskId(id),
         repo = repo,
@@ -43,6 +45,7 @@ class LinearScanIndexTest {
         tags = tags,
         links = links,
         attachments = attachments,
+        anchors = anchors,
     )
 
     private fun snapshot(vararg tasks: Task) = TasklaneSnapshot(
@@ -59,6 +62,58 @@ class LinearScanIndexTest {
 
     private fun LinearScanIndex.find(query: String, scope: SearchScope = SearchScope.Repo(RepoKey.ROOT)) =
         search(QueryParser.parse(query), scope).map { it.task.id.value }
+
+    // ------------------------------------------------------ anclas de codigo
+
+    private val anchor = CodeAnchor.of("src/main/kotlin/AuthService.kt", 41, text = "fun login() {")
+
+    @Test
+    fun `file encuentra por el nombre del fichero aunque la ruta lleve directorios`() {
+        val index = index(
+            task("a", "Arreglar el login", anchors = listOf(anchor)),
+            task("b", "Revisar el PR"),
+        )
+        assertEquals(listOf("a"), index.find("file:authservice"))
+    }
+
+    @Test
+    fun `file tambien casa por un trozo de la ruta`() {
+        val index = index(task("a", "Arreglar el login", anchors = listOf(anchor)))
+
+        assertEquals(listOf("a"), index.find("file:main/kotlin"))
+        assertTrue(index.find("file:otracosa").isEmpty())
+    }
+
+    @Test
+    fun `has code acota a las tareas que apuntan al codigo`() {
+        val index = index(
+            task("a", "Arreglar el login", anchors = listOf(anchor)),
+            task("b", "Comprar leche"),
+        )
+        assertEquals(listOf("a"), index.find("has:code"))
+    }
+
+    /** La ruta entra en el texto libre: se busca el fichero sin saberse el operador. */
+    @Test
+    fun `el texto libre alcanza la ruta anclada`() {
+        val index = index(
+            task("a", "Arreglar el login", anchors = listOf(anchor)),
+            task("b", "Revisar el PR"),
+        )
+        assertEquals(listOf("a"), index.find("authservice"))
+    }
+
+    /** El documento se cachea por contenido: quitar un ancla tiene que invalidarlo. */
+    @Test
+    fun `quitar un ancla deja de encontrarla`() {
+        val index = LinearScanIndex()
+        val anclada = task("a", "Arreglar el login", anchors = listOf(anchor))
+        index.setCorpus(snapshot(anclada))
+        assertEquals(listOf("a"), index.find("file:authservice"))
+
+        index.setCorpus(snapshot(anclada.copy(anchors = emptyList())))
+        assertTrue(index.find("file:authservice").isEmpty())
+    }
 
     // ---------------------------------------------------------------- texto
 

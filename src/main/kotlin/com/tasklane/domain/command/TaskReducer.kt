@@ -143,6 +143,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                     order = snapshot.nextOrder(repo),
                     tags = command.tags.map(String::trim).filter(String::isNotEmpty).distinct(),
                     dueDate = command.dueDate,
+                    anchors = command.anchors.distinct(),
                 )
             }
 
@@ -165,6 +166,11 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                     updatedAt = now,
                     extra = task.extra - ORIG_PRIORITY,
                 )
+            }
+
+            is TaskCommand.SetAnchors -> current.mapTask(command.id) { task ->
+                val anchors = command.anchors.distinct()
+                if (task.anchors == anchors) task else task.copy(anchors = anchors, updatedAt = now)
             }
 
             is TaskCommand.SetDueDate -> current.mapTask(command.id) { task ->

@@ -10,15 +10,19 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBIntSpinner
+import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.panel
 import com.tasklane.TasklaneBundle
+import com.tasklane.code.AnchorMarkers
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneDefaultsService
 import com.tasklane.domain.command.TaskCommand
+import com.tasklane.domain.model.AnchorMarkerStyle
 import com.tasklane.domain.model.ConfigProblem
 import com.tasklane.domain.model.ConfigValidator
 import com.tasklane.domain.model.PriorityId
@@ -82,6 +86,11 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
     private val keymapLink = ActionLink(TasklaneBundle.message("settings.keymap.link")) { openKeymap() }
 
+    private val markers = AnchorMarkers.getInstance(project)
+
+    private val markerRenderer =
+        SimpleListCellRenderer.create<AnchorMarkerStyle?>("") { it?.label().orEmpty() }
+
     /**
      * Destinos elegidos en los diálogos de borrado, pendientes de aplicarse.
      * Se iteran en orden de inserción, así que una cadena A→B seguida de B→C acaba
@@ -107,6 +116,18 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         group(TasklaneBundle.message("settings.repos.title")) {
             row(TasklaneBundle.message("settings.repos.depth")) { cell(depthSpinner) }
             row { comment(TasklaneBundle.message("settings.repos.comment")) }
+        }
+
+        // La marca del editor es del usuario, no del proyecto: se guarda en
+        // `workspace.xml` y por eso no pasa por `currentConfig()` sino por su servicio,
+        // que la escribe y de paso repinta los editores abiertos. El `bind` del DSL se
+        // encarga de Apply, Cancel y de saber si hay algo modificado.
+        group(TasklaneBundle.message("settings.anchors.title")) {
+            row(TasklaneBundle.message("settings.anchors.marker")) {
+                comboBox(AnchorMarkerStyle.entries, markerRenderer)
+                    .bindItem({ markers.style }, { markers.style = it ?: AnchorMarkerStyle.GUTTER })
+            }
+            row { comment(TasklaneBundle.message("settings.anchors.comment")) }
         }
 
         group(TasklaneBundle.message("settings.images.title")) {

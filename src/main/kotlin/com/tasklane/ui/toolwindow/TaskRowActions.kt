@@ -12,7 +12,7 @@ import java.awt.event.MouseEvent
 import javax.swing.JTree
 
 /**
- * Los dos controles de la derecha de cada fila: el marcador y el menú `⋮`.
+ * Los controles de la derecha de cada fila: desplegar, el marcador y el menú `⋮`.
  *
  * Sólo aparecen en la fila que tiene el ratón encima, así que esto mantiene además
  * cuál es —`hoveredRow` del renderer— y repinta las dos filas implicadas en cada
@@ -20,9 +20,10 @@ import javax.swing.JTree
  * decenas de veces por segundo.
  *
  * El marcador se pulsa **sin** abrir el menú: es la acción que se repite, y meterla
- * dentro de un desplegable la convertiría en dos clics. El menú reutiliza el grupo
- * `Tasklane.ContextMenu` del `plugin.xml`, el mismo del clic derecho: una sola lista
- * de acciones que mantener.
+ * dentro de un desplegable la convertiría en dos clics. Lo mismo el desplegable de la
+ * tarjeta, que además tiene que poder pulsarse una y otra vez sin perder el sitio. El
+ * menú reutiliza el grupo `Tasklane.ContextMenu` del `plugin.xml`, el mismo del clic
+ * derecho: una sola lista de acciones que mantener.
  */
 internal object TaskRowActions {
 
@@ -44,6 +45,11 @@ internal object TaskRowActions {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount != 1 || e.button != MouseEvent.BUTTON1 || e.isPopupTrigger) return
                 when (renderer.targetAt(tree, e.point)) {
+                    TaskTreeRenderer.RowTarget.EXPAND -> {
+                        e.consume()
+                        taskAt(tree, e.point)?.let(panel::toggleExpanded)
+                    }
+
                     TaskTreeRenderer.RowTarget.BOOKMARK -> {
                         e.consume()
                         taskAt(tree, e.point)?.let(panel::toggleBookmark)

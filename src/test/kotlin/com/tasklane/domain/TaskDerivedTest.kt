@@ -1,5 +1,6 @@
 package com.tasklane.domain
 
+import com.tasklane.domain.model.DetailBlock
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
@@ -29,6 +30,48 @@ class TaskDerivedTest {
         updatedAt = Instant.EPOCH,
     )
 
+    /**
+     * Que el cuerpo llegue a la tarjeta desplegada **en el orden en que se escribió**.
+     * Es lo que permite pintar cada captura debajo de su párrafo, como hace el
+     * diálogo; con el texto por un lado y las imágenes por otro acabarían todas
+     * amontonadas al final.
+     */
+    @Test
+    fun `el cuerpo conserva el orden de texto e imagenes`() {
+        val task = task("Arreglar login\nFalla al refrescar\n![](tasklane:$SHA)\nY en Safari tampoco")
+
+        assertEquals(
+            listOf("t:Falla al refrescar", "i:$SHA", "t:Y en Safari tampoco"),
+            task.detailBlocks.map(::describe),
+        )
+    }
+
+    /**
+     * El título es su línea **sin** las imágenes, así que una captura escrita ahí no
+     * es parte de él. Si tampoco se recogiera aquí no se pintaría en ningún sitio.
+     */
+    @Test
+    fun `una imagen en la linea del titulo tambien se recoge`() {
+        val task = task("Arreglar login ![](tasklane:$SHA)\nFalla al refrescar")
+
+        assertEquals("Arreglar login ![](tasklane:$SHA)", task.title)
+        assertEquals(listOf("i:$SHA", "t:Falla al refrescar"), task.detailBlocks.map(::describe))
+    }
+
+    /** Las líneas de texto salen de los bloques, así que no pueden discrepar de ellos. */
+    @Test
+    fun `las lineas del cuerpo son los bloques de texto`() {
+        val task = task("Arreglar login\nprimera\n![](tasklane:$SHA)\nsegunda")
+
+        assertEquals(listOf("primera", "segunda"), task.detailLines)
+        assertEquals("primera", task.description)
+    }
+
+    private fun describe(block: DetailBlock): String = when (block) {
+        is DetailBlock.Text -> "t:" + block.text
+        is DetailBlock.Image -> "i:" + block.id.value
+    }
+
     @Test
     fun `la descripcion es la primera linea util bajo el titulo`() {
         val task = task("Arreglar login\n\nFalla al refrescar el token")
@@ -57,5 +100,10 @@ class TaskDerivedTest {
         assertTrue(task("x").copy(dueDate = ayer).isOverdue(ahora))
         assertFalse("una tarea cerrada ya no vence", task("x").copy(dueDate = ayer, completedAt = ahora).isOverdue(ahora))
         assertFalse("sin fecha no hay vencimiento", task("x").isOverdue(ahora))
+    }
+
+    private companion object {
+        /** Un SHA-256 de mentira, con la longitud exacta que exige `ImageRefParser`. */
+        const val SHA = "abc123def456abc123def456abc123def456abc123def456abc123def4561234"
     }
 }

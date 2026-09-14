@@ -23,16 +23,21 @@ data class TaskQuery(
     val repos: Set<String> = emptySet(),
     /** Prefijos de etiqueta. Se piden todas. */
     val tags: Set<String> = emptySet(),
+    /**
+     * Trozos de la ruta de un ancla de código. **Contiene**, no empieza por: lo que se
+     * teclea es el nombre del fichero y la ruta lleva sus directorios delante.
+     */
+    val files: Set<String> = emptySet(),
     /** `is:done` / `is:open`. `null` = da igual. */
     val done: Boolean? = null,
     val has: Set<Facet> = emptySet(),
 ) {
-    enum class Facet { LINK, IMAGE }
+    enum class Facet { LINK, IMAGE, CODE }
 
     /** Una consulta vacía no filtra nada: la UI la usa para volver a la vista normal. */
     val isEmpty: Boolean
         get() = terms.isEmpty() && states.isEmpty() && priorities.isEmpty() &&
-            repos.isEmpty() && tags.isEmpty() && done == null && has.isEmpty()
+            repos.isEmpty() && tags.isEmpty() && files.isEmpty() && done == null && has.isEmpty()
 
     /** El texto libre unido, que es lo que se resalta en la fila. */
     val text: String get() = terms.joinToString(" ")

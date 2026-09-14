@@ -9,6 +9,161 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [1.3.0] — Tarjetas que se leen y se tocan
+
+Tres cosas que la tarjeta pedía desde el rediseño: que su texto se pueda coger, que se
+pueda leer entera sin abrir la tarea, y que la prioridad se cambie desde donde se lee.
+
+### Añadido
+- **El texto de la tarjeta se selecciona y se copia.** Se arrastra con el ratón por
+  encima, `⌘C` lo copia y `Escape` lo suelta. La selección se queda dentro de **una**
+  tarjeta: arrastrar fuera se pega a su principio o a su final, en vez de llevarse media
+  lista por delante. El cursor pasa a ser una I sobre el texto, que es la única pista de
+  que el gesto existe.
+- **Un botón despliega la tarjeta** y enseña todo lo que escondía: el título sin el tope
+  de tres líneas y **todas** las líneas del cuerpo, no sólo la primera recortada. Volver
+  a pulsarlo la deja como estaba. Aparece sólo cuando hay algo escondido de verdad —una
+  tarjeta que ya se ve entera no lo enseña— y, una vez desplegada, se queda a la vista
+  aunque el ratón se vaya, porque si no no habría forma evidente de volver a plegarla.
+- **Las capturas se ven en la tarjeta desplegada**, escaladas y con el mismo borde y el
+  mismo marcador de carga que en el diálogo: son la misma imagen vista en dos sitios, y
+  si la lista la enseñara de otra forma abrir la tarea parecería enseñar otra. Cada una
+  va detrás de la línea que la nombra, igual que el inlay del editor, y un clic la
+  amplía. Plegada la tarjeta siguen sin verse —una captura dentro de una fila de tres
+  líneas dejaría dos tareas por pantalla—: ahí está el contador «1 img», que desaparece
+  cuando las imágenes ya están a la vista.
+- **La prioridad se cambia desde la propia tarjeta**: un clic en su distintivo —el punto
+  de color incluido, que es a donde se apunta— abre la lista de prioridades con sus
+  colores. Actúa sobre la tarjeta pulsada, como el
+  marcador, sin tener que seleccionarla antes. El distintivo lo llevan **todas** las
+  tarjetas, también las de la prioridad de fábrica: mientras sólo se leía, ésa se
+  callaba —sería la misma palabra en toda la lista—, pero ahora es el botón, y las
+  tarjetas que nadie ha tocado son las que más se cambian de prioridad.
+- **Submenú *Priority*** en el menú contextual, al lado de *Move To*, para cambiar la de
+  toda la selección de una vez.
+
+### Cambiado
+- El cuerpo de una tarea se deriva ahora como **bloques en orden** (`Task.detailBlocks`),
+  texto e imágenes mezclados, y no como dos listas separadas. Es lo que permite pintar
+  cada captura donde se escribió; `detailLines` y `description` salen de ahí.
+- Lo pulsable de una fila —enlace, ancla y ahora prioridad— se resuelve en **una sola
+  consulta** al renderer y no en una por tipo. Resolverlo obliga a montar y medir la
+  fila, y eso corre en cada píxel que recorre el ratón.
+- El despliegue de una tarjeta se recuerda por tarea mientras dure la sesión, así que
+  una búsqueda que la esconda un rato no lo deshace. No se persiste: desplegar es mirar
+  algo un momento, no configurar la lista.
+
+### Corregido
+- **La tarjeta ya no se sale de la tool window.** Con la ventana estrecha y unas cuantas
+  etiquetas, la fila pedía más ancho del que se veía —la línea de distintivos pide el de
+  todos los suyos aunque luego deje fuera los que no caben—, y el árbol crece hasta la
+  fila más ancha: la plataforma daba por recortadas todas las tarjetas y al pasar el
+  ratón sacaba media tarjeta flotando por fuera del panel, con los botones de la derecha
+  dentro. Acercarse a pulsarlos la cerraba antes de llegar. Ahora la fila nunca pide más
+  de lo que se ve y ese trozo flotante está apagado.
+- **La línea de distintivos ya no se cae de la tarjeta.** Era el otro lado de lo mismo:
+  el árbol se quedaba más ancho que el hueco y dejaba de seguirlo, así que la tarjeta se
+  medía a un ancho y se pintaba a otro. El título se partía en una línea más de las que
+  se habían medido y lo que sobraba por abajo —prioridad, fecha, etiquetas— se quedaba
+  fuera del alto de la fila: había tarjetas sin nada de eso y ninguna pista de por qué.
+  Ahora la ventana no deja que las dos medidas se separen, y si aun así una fila viniera
+  corta, la línea de abajo se queda con su sitio y lo que se va es el renglón de texto
+  que sobra —que ya venía recortado, y que se lee entero desplegando la tarjeta—.
+- **La ventana no baja de 300 px de ancho.** Por debajo, el título se parte en líneas de
+  dos palabras y los distintivos empiezan a caerse por la derecha; de ahí para arriba la
+  tarjeta se defiende sola.
+
+## [1.2.1]
+
+### Corregido
+- **El hint de la pastilla del editor desaparecía en menos de un segundo**, con el ratón
+  todavía encima. Lo pintaba `IdeTooltipManager`, que vigila el ratón de toda la interfaz
+  y esconde el tooltip en cuanto llega un movimiento que no reconoce como «dentro» — y un
+  inlay no es un componente Swing, así que no lo reconoce nunca: se iba al primer píxel de
+  movimiento. Ahora es un `Balloon` sin caducidad que se esconde sólo cuando lo decimos
+  nosotros: al salir de la pastilla, al salir del editor, al pulsar, al desplazar el editor
+  o al recolocarse las marcas.
+- El hint aparece con el retardo de tooltip del IDE, pero con tope de medio segundo: el de
+  fábrica pasa del segundo, y sobre una marca que se ha ido a buscar a propósito eso se lee
+  como que no hay nada que enseñar.
+
+## [1.2.0] — Y el código apunta a las tareas
+
+La otra mitad de las anclas. Desde la `1.1.0` la tarea sabía ir al código; el código no
+sabía nada de la tarea, así que una nota sólo aparecía si uno se acordaba de ir a
+buscarla.
+
+### Añadido
+- **Las líneas ancladas se marcan en el editor**, con el logo de Tasklane en el color de
+  su prioridad. El ratón encima abre un tooltip con el título, el estado, la prioridad, el
+  vencimiento y las etiquetas; un clic abre la tool window con esa tarea seleccionada —y
+  cambia de repositorio si la tarea es de otro—.
+- **Sólo se marca lo que sigue abierto.** Una tarea en un estado terminal es historia, no
+  una nota sobre el código; marcarla convertiría el margen en un cementerio y a la semana
+  nadie miraría ninguna.
+- **Dos formas, y se elige** en *Settings → Tools → Tasklane → Code anchors*: un icono en
+  el margen —lo de fábrica, no toca ni un píxel del código— o una pastilla dentro del
+  texto, en el carácter exacto, que es la única que enseña de qué parte de la línea
+  hablaba la nota. Se puede apagar del todo. Es un ajuste de la persona: va a
+  `workspace.xml` y no se comparte con el equipo.
+- La pastilla lleva **la palabra**, no sólo el icono: `✓ TODO`. Un icono suelto entre
+  código se lee como un carácter raro y hay que pasar el ratón para saber qué es. Es el
+  nombre del estado en mayúsculas —la convención de los marcadores de código—, así que
+  con la configuración de fábrica sale `TODO` y una tarea en *Doing* dice `DOING`.
+- **El ancla guarda también la columna.** El cursor vuelve al carácter exacto, no al
+  principio de la línea. Sólo se escribe cuando no es cero, así que un fichero de tareas
+  de la `1.1.0` se lee igual y no engorda.
+- Varias tareas en la misma línea comparten una marca: el logo entero —dos renglones— con
+  el color de la de más prioridad, y el tooltip las lista.
+
+### Cambiado
+- Enseñar una tarea en la ventana (`TaskService.revealTasks`) ya no depende de que esté a
+  la vista: si es de esta pestaña pero la esconden la búsqueda o el filtro, se quitan; y
+  si aún no ha llegado al árbol —porque acaba de cambiar el repositorio activo— se
+  reintenta tras el siguiente repintado. La acción de la notificación de remapeo se
+  beneficia igual.
+
+## [1.1.0] — Las tareas apuntan al código
+
+Primera versión posterior al plan de fases. Manda semver.
+
+### Añadido
+- **Anclas de código.** Una tarea puede apuntar a un `fichero:línea`. *New Tasklane Task
+  from Here*, en el menú contextual del editor, crea la tarea con el sitio ya puesto y,
+  si hay algo seleccionado, con ese texto como cuerpo. La tarjeta enseña un distintivo
+  `Auth.kt:42` que vuelve ahí con un clic.
+- El ancla **sobrevive a que le editen el fichero por encima**: junto al número de línea
+  se guarda el texto de esa línea, y al abrirla se busca hacia fuera desde donde estaba.
+  Un import de más no la rompe.
+- Dos operadores de búsqueda: `file:` —por un trozo de la ruta anclada— y `has:code`. La
+  ruta entra además en el texto libre, así que escribir `AuthService` encuentra lo que
+  apunta a ese fichero aunque la nota lo llame de otra manera.
+- **Mover de estado sin el diálogo**: submenú *Move To ▸* en el menú contextual y en el
+  `⋮` de la fila, y `⇧⌥←/→` para mover la selección una pestaña. Era lo más repetido de
+  una lista con estados y costaba abrir un modal.
+- `⌥←/→` vuelve a cambiar de pestaña de estado. Es la deuda que quedó anotada en
+  `docs/plan-rediseno.md` (R3) al bajar los estados del `ContentManager` al panel, pagada
+  como decía: con un atajo local en la lista.
+
+### Corregido
+- **Las cabeceras de grupo no se plegaban.** Ni con el clic ni con `←`. El
+  `collapsePath` de `com.intellij.ui.treeStructure.Tree` pliega recursivamente cuando el
+  ajuste avanzado `ide.tree.collapse.recursively` está puesto —viene puesto— y ese camino
+  descarta en silencio los nodos de profundidad cero, que es lo que son las cabeceras en
+  un árbol sin manecillas. El panel pliega ahora con `setExpandedState`, que es lo que
+  llama el `collapsePath` de `JTree` sin ese recorte.
+- Plegar un grupo **se recuerda de verdad**. Restaurar la selección después de repintar
+  volvía a abrir el grupo recién plegado —`JTree` despliega los ancestros de lo que se
+  selecciona— y encima borraba el recuerdo, porque el evento llegaba como si fuera un
+  gesto del usuario.
+- El doble clic sobre una cabecera ya no dispara el gesto dos veces ni compite con el
+  plegado por clic de la plataforma.
+
+### Cambiado
+- La ficha y el layout de las etiquetas se comparten con el campo de anclas
+  (`Chip`, `ChipsLayout`), y el clic de la fila —enlaces y anclas— vive en un solo
+  oyente (`RowClicks`) en vez de en uno por cosa.
+
 ## [1.0.0] — Las ocho fases
 
 Cierra la **Fase 7** (robustez y pulido) y con ella el plan de ocho fases. Primera

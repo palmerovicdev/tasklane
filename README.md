@@ -25,6 +25,9 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | | |
 |---|---|
 | **Una tarjeta por tarea** | Franja de prioridad, casilla, vencimiento, etiquetas y marcador. El cuerpo se pinta en Markdown: negrita, cursiva, `código` y tachado |
+| **Leer y copiar sin abrir** | El texto de la tarjeta se selecciona con el ratón y se copia con `⌘C`, y un botón la despliega para ver el cuerpo entero — capturas incluidas |
+| **Cambiar la prioridad de un clic** | Desde su propio distintivo en la tarjeta, o para toda la selección desde el menú contextual |
+| **Apuntar al código** | Una tarea puede anclarse a un `fichero:línea`. Se crea desde el menú contextual del editor y se vuelve ahí con un clic desde la tarjeta |
 | **Estados como pestañas** | Con su recuento en vivo. Estados y prioridades se configuran por proyecto: nombre, orden, color y el prefijo que los selecciona al escribir |
 | **Agrupar y plegar** | Por fecha, prioridad o etiqueta; los grupos se pliegan con un clic y se recuerda por estado |
 | **Buscar con operadores** | En el cuerpo entero, no sólo en el título, más filtros de abiertas, vencidas y marcadas |
@@ -45,7 +48,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-1.0.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-1.3.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -101,6 +104,7 @@ que estaba abierto se recuerda al reabrir el proyecto.
 | *New Task* (botón partido) | El cuerpo crea en la pestaña activa; la flecha deja elegir otro estado destino sin cambiar de pestaña |
 | Filtro de vista | *All tasks* / *Open* / *Overdue* / *Bookmarked*. Es de la ventana entera y se recuerda en `workspace.xml` |
 | Marcador y `⋮` | A la derecha de cada fila. Aparecen con el ratón encima —el marcador, siempre que la tarea lo esté— y el menú es el mismo del clic derecho |
+| *Move To ▸* | En ese menú. Manda la selección a otro estado sin abrir el diálogo; `⇧⌥←/→` hace lo mismo con el teclado |
 
 Los estados estuvieron en la barra de pestañas del IDE hasta la `0.6.1`; se bajaron al
 panel porque en el header competían con el título, el selector de repositorio y el
@@ -164,6 +168,66 @@ cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sinta
 - **Marcador**: sube la tarea al principio de su grupo pase lo que pase, porque
   marcar es precisamente decir «que no se me pierda esto». Se pulsa en la propia fila.
 
+## Anclas de código
+
+Una tarea puede decir **de qué trozo de código habla**. Es la diferencia entre una lista
+de tareas dentro del IDE y una lista de tareas *del* IDE: hasta la `1.0.0` las tareas
+vivían junto al código pero no apuntaban a él, y volver a «¿dónde era esto?» era trabajo
+de quien escribió la nota.
+
+*New Tasklane Task from Here*, en el **menú contextual del editor**, abre el diálogo de
+siempre con el sitio ya puesto. Si hay algo seleccionado, ese texto entra como cuerpo.
+
+| | |
+|---|---|
+| Qué se guarda | La ruta **relativa a la raíz del proyecto**, la línea, la columna, y el texto de esa línea |
+| En la tarjeta | Un distintivo `Auth.kt:42` con color de enlace. Un clic abre el fichero por ahí —en la línea y el carácter exactos—; la ruta entera va al tooltip |
+| En el editor | La línea marcada, con el color de la prioridad. Ver [La marca en el editor](#la-marca-en-el-editor) |
+| Quitarla | En el diálogo de la tarea, con el aspa de su ficha. No se pueden añadir a mano: un ancla es un sitio del editor, y teclear una ruta y un número es lo que esto viene a evitar |
+| Buscar | `file:AuthService` por un trozo de la ruta, `has:code` por tenerla. La ruta entra además en el texto libre |
+
+**La ruta es relativa al proyecto, no al repositorio de la tarea.** Por lo mismo que las
+claves de repositorio: mover el proyecto entero no rompe ninguna ancla. Y una tarea de
+`backend` puede apuntar perfectamente a un fichero de `frontend` — obligar a que no
+fuera así convertiría una anotación en una regla.
+
+**Un número de línea envejece solo**, así que no se guarda a secas: junto a él va el
+texto de la línea, y al abrir el ancla se busca ese texto **hacia fuera** desde donde
+estaba, ganando la coincidencia más cercana. Un import de más, resangrar el bloque o
+mover la función unas líneas no rompen nada. Si la línea desapareció del todo, el
+fichero se abre igualmente por donde estaba: el contexto de alrededor dice enseguida si
+la nota sigue teniendo sentido. Y si el fichero ya no existe, se avisa — un clic que no
+hace nada se lee como un fallo del plugin.
+
+### La marca en el editor
+
+Y el código, a su vez, enseña sus tareas. Una línea con tarea va marcada con el logo de
+Tasklane **en el color de su prioridad**; el ratón encima abre un tooltip con el título,
+el estado, la prioridad, el vencimiento y las etiquetas, y un clic lleva a la tool
+window con esa tarea seleccionada — cambiando de repositorio si la tarea es de otro.
+
+| | |
+|---|---|
+| Qué se marca | Sólo lo que sigue **abierto**. Una tarea en un estado terminal es historia, no una nota sobre el código: marcarla convertiría el margen en un cementerio |
+| Varias en la misma línea | Una sola marca, con el logo entero —dos renglones— y el color de la de más prioridad. El tooltip las lista |
+| Dónde se elige | *Settings → Tools → Tasklane → Code anchors*. Es un ajuste **tuyo**: va a `workspace.xml`, no se comparte con el equipo |
+
+Hay dos formas, y ninguna es buena para todo el mundo:
+
+- **Icono en el margen** (lo de fábrica). No toca ni un píxel del código, y vive donde ya
+  viven los puntos de interrupción y el *Run* de un test. Sólo sabe de líneas.
+- **Pastilla en el texto**, `✓ TODO`. Es la única que enseña **de qué parte de la línea**
+  hablaba la nota — `cache.get(key) ?: load(key)` son dos cosas en el mismo sitio—, a
+  cambio de empujar el código a la derecha. La palabra es **el nombre del estado en
+  mayúsculas**, como un marcador de código de toda la vida: con la configuración de
+  fábrica sale `TODO`, y una tarea en *Doing* dice `DOING` en vez de mentir.
+
+La línea se vuelve a buscar por su texto al abrir el fichero, igual que al pulsar el
+distintivo de la tarjeta; a partir de ahí la marca sigue al código mientras se edita. Y
+las marcas las pone el **modelo**, no el analizador del IDE: mover una tarea a *Done*
+apaga la suya en ese momento, no en el siguiente pase — y funcionan igual en un `.txt`
+que en un `.kt`.
+
 ## Quick Add
 
 `⌘⌥R` abre **el mismo diálogo** que *New Task*, desde cualquier sitio del IDE y sin
@@ -195,7 +259,8 @@ la fila, ignorando mayúsculas y acentos en los dos sentidos: *autenticación* e
 | `p:` | `p:high` |
 | `repo:` | `repo:backend` |
 | `is:` | `is:done`, `is:open` |
-| `has:` | `has:link`, `has:image` |
+| `has:` | `has:link`, `has:image`, `has:code` |
+| `file:` | `file:AuthService`, `file:main/kotlin` — por un trozo de la ruta anclada |
 | `#tag` | `#api #urgente` — se piden todas las etiquetas |
 
 Los valores son prefijos. Varios valores del mismo operador son un «o»; operadores
@@ -330,7 +395,7 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-1.0.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-1.3.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -344,6 +409,8 @@ cualquier uso accidental de una API posterior.
 | `⌘K` | Foco en la búsqueda | Sólo dentro de la Tool Window, así que no compite con *Commit* |
 | `Enter` | Editar la tarea seleccionada | Dentro del árbol |
 | `Supr` | Borrar las seleccionadas | Dentro del árbol |
+| `⌥←/→` | Pestaña de estado anterior / siguiente | Dentro del árbol. Es el `Alt+←/→` que ponía el IDE cuando los estados eran pestañas suyas |
+| `⇧⌥←/→` | Mover la selección a esa pestaña | Mismo eje, y `Shift` significa «llévate esto contigo». No da la vuelta al llegar al extremo |
 
 Todas las acciones están declaradas en `plugin.xml`, así que aparecen en *Settings →
 Keymap* y en *Search Everywhere* aunque no traigan atajo por defecto. Las de la Tool
@@ -379,6 +446,13 @@ tarjeta entera; la `1.0.0` cerró lo de fondo —idioma de los avisos, accesibil
 navegación por teclado, y el criterio de la fase, que es corromper `tasks.xml` a mano y
 comprobar que el plugin recupera del `.bak` **y avisa**—. Lo detalla
 [`CHANGELOG.md`](CHANGELOG.md).
+
+Lo posterior al plan ya no son fases sino versiones. La `1.1.0` añade las **anclas de
+código** y *Move To*, y arregla que las cabeceras de grupo no se plegaran. La `1.2.0`
+cierra el viaje de vuelta: el código **enseña sus tareas** en el editor. La `1.3.0`
+vuelve sobre la tarjeta: su texto se **selecciona y se copia**, un botón la **despliega**
+para leerla entera —con sus **capturas** dentro—, y la **prioridad se cambia** desde su
+distintivo.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -417,7 +491,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.3.0 && git push origin v1.3.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no
@@ -428,7 +502,7 @@ tocan el repositorio:
 | `CERTIFICATE_CHAIN`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSWORD` | Firma del plugin. Se generan una vez siguiendo [*Plugin Signing*](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) |
 | `PUBLISH_TOKEN` | Token del perfil del Marketplace |
 
-**Una versión con sufijo va a su propio canal:** `1.1.0-beta.1` se publica en `beta`,
+**Una versión con sufijo va a su propio canal:** `1.3.0-beta.1` se publica en `beta`,
 no en el estable, y sólo la ve quien haya añadido ese canal en el IDE. El canal sale
 del propio número de versión, así que no hay un segundo sitio que pueda discrepar.
 

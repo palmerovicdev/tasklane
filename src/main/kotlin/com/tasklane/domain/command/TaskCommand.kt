@@ -1,5 +1,6 @@
 package com.tasklane.domain.command
 
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
@@ -30,6 +31,7 @@ sealed interface TaskCommand {
         val priorityId: PriorityId? = null,
         val tags: List<String> = emptyList(),
         val dueDate: Instant? = null,
+        val anchors: List<CodeAnchor> = emptyList(),
     ) : RepoScoped
 
     data class UpdateBody(override val repo: RepoKey, val id: TaskId, val body: String) : RepoScoped
@@ -46,6 +48,17 @@ sealed interface TaskCommand {
 
     /** Sustituye las etiquetas de una tarea por las indicadas. */
     data class SetTags(override val repo: RepoKey, val id: TaskId, val tags: List<String>) : RepoScoped
+
+    /**
+     * Sustituye las anclas de código. Sólo se quitan, nunca se añaden por aquí: se
+     * capturan en el editor al crear la tarea, que es el único sitio que sabe dónde
+     * estaba el cursor.
+     */
+    data class SetAnchors(
+        override val repo: RepoKey,
+        val id: TaskId,
+        val anchors: List<CodeAnchor>,
+    ) : RepoScoped
 
     /** Alterna entre el estado terminal y el estado por defecto. */
     data class ToggleComplete(override val repo: RepoKey, val id: TaskId) : RepoScoped

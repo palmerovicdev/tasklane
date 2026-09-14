@@ -1,6 +1,7 @@
 package com.tasklane.data
 
 import com.tasklane.data.store.TasksCodec
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
@@ -27,6 +28,50 @@ class TasksCodecTest {
         order = 1000,
         tags = listOf("android", "auth"),
     )
+
+    @Test
+    fun `las anclas de codigo sobreviven al ciclo`() {
+        val anclas = listOf(
+            CodeAnchor.of("src/main/kotlin/Auth.kt", 41, column = 17, text = "fun login() {"),
+            CodeAnchor.of("README.md", 0),
+        )
+        val decoded = TasksCodec.decode(TasksCodec.encode(repo, listOf(task().copy(anchors = anclas))), repo)
+
+        assertEquals(anclas, decoded.tasks.single().anchors)
+    }
+
+    /**
+     * La columna cero es el principio de la linea, que es lo que se asume sin ella —y lo
+     * que escribian las versiones anteriores a la marca del editor—. Escribirla seria un
+     * atributo por ancla que no dice nada.
+     */
+    @Test
+    fun `la columna cero no se escribe`() {
+        val encoded = TasksCodec.encode(repo, listOf(task().copy(anchors = listOf(CodeAnchor.of("a.kt", 2)))))
+
+        val anchor = encoded.getChild("task").getChildren("anchor").single()
+        assertEquals(null, anchor.getAttributeValue("column"))
+        assertEquals(0, TasksCodec.decode(encoded, repo).tasks.single().anchors.single().column)
+    }
+
+    /** Una tarea sin anclas no paga ni un elemento: el fichero se reescribe en cada guardado. */
+    @Test
+    fun `sin anclas no se escribe ningun elemento`() {
+        val encoded = TasksCodec.encode(repo, listOf(task()))
+
+        assertEquals(0, encoded.getChild("task").getChildren("anchor").size)
+    }
+
+    /** Un ancla rota se descarta sola, como una tarea sin id: el resto se conserva. */
+    @Test
+    fun `un ancla sin ruta se salta sin llevarse las demas`() {
+        val encoded = TasksCodec.encode(repo, listOf(task().copy(anchors = listOf(CodeAnchor.of("a.kt", 2)))))
+        encoded.getChild("task").addContent(Element("anchor").setAttribute("line", "9"))
+
+        val decoded = TasksCodec.decode(encoded, repo).tasks.single()
+
+        assertEquals(listOf(CodeAnchor.of("a.kt", 2)), decoded.anchors)
+    }
 
     @Test
     fun `el vencimiento y la marca sobreviven al ciclo`() {

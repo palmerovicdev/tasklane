@@ -14,6 +14,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.DueDates
 import com.tasklane.domain.model.DuePreset
 import com.tasklane.domain.model.PriorityId
@@ -71,9 +72,15 @@ internal class TaskEditDialog(
     initialPriority: PriorityId? = null,
     initialTags: List<String> = emptyList(),
     initialDueDate: Instant? = null,
+    initialAnchors: List<CodeAnchor> = emptyList(),
+    /**
+     * Si se está **creando**. Es lo que decide el título, el botón y si los triggers de
+     * prioridad están vivos. Por defecto se deduce del cuerpo —crear empieza en
+     * blanco—, y hay que decirlo a mano en el único caso en que esa deducción falla:
+     * crear desde el editor, que nace con la selección ya escrita.
+     */
+    private val isNew: Boolean = initialBody.isEmpty(),
 ) : DialogWrapper(project) {
-
-    private val isNew = initialBody.isEmpty()
 
     private val bodyField = MarkdownField(project, repo, initialBody, disposable).apply {
         component.setPlaceholder(TasklaneBundle.message("dialog.task.placeholder"))
@@ -107,6 +114,15 @@ internal class TaskEditDialog(
 
     /** Las etiquetas, como fichas. Ver [TagChipsField]. */
     private val tagsField = TagChipsField(initialTags)
+
+    /** Los sitios del código de los que habla la tarea. Ver [AnchorChipsField]. */
+    private val anchorsField = AnchorChipsField(initialAnchors) { syncAnchorsLabel() }
+
+    /**
+     * La etiqueta de esa fila. `lazy` porque [label] la asocia al campo y el campo se
+     * declara justo arriba: sin el retraso, la referencia sería circular.
+     */
+    private val anchorsLabel by lazy { label("dialog.task.code", anchorsField) }
 
     init {
         title = TasklaneBundle.message(if (isNew) "dialog.task.new.title" else "dialog.task.edit.title")
@@ -189,6 +205,16 @@ internal class TaskEditDialog(
         add(dueCombo, at(2, 1, 1.0))
         add(label("dialog.task.tags", tagsField), at(0, 2, 1.0, width = 3))
         add(tagsField, at(0, 3, 1.0, width = 3))
+        // La fila entera se va cuando no hay anclas, etiqueta incluida: ver
+        // [AnchorChipsField]. Se añade igualmente para que el orden de la rejilla no
+        // dependa de con qué se abrió el diálogo.
+        syncAnchorsLabel()
+        add(anchorsLabel, at(0, 4, 1.0, width = 3))
+        add(anchorsField, at(0, 5, 1.0, width = 3))
+    }
+
+    private fun syncAnchorsLabel() {
+        anchorsLabel.isVisible = !anchorsField.isEmpty
     }
 
     /**
@@ -222,6 +248,8 @@ internal class TaskEditDialog(
     val dueDate: Instant? get() = (dueCombo.selectedItem as DueOption).instant
 
     val tags: List<String> get() = tagsField.tags
+
+    val anchors: List<CodeAnchor> get() = anchorsField.anchors
 
     // ------------------------------------------------------------- vencimiento
 

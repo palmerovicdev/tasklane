@@ -3,6 +3,7 @@ package com.tasklane.ui.toolwindow
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonShortcuts
@@ -37,10 +38,12 @@ import com.tasklane.domain.model.DateGrouper
 import com.tasklane.domain.model.GroupKey
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.RepositoryRef
+import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
+import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.service.SearchResults
@@ -58,9 +61,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
+import java.awt.Dimension
 import java.awt.Toolkit
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
+import java.awt.event.InputEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -117,7 +122,58 @@ internal class TasklanePanel(
             val task = (node as? TaskNode)?.task ?: return
             service.apply(TaskCommand.ToggleComplete(task.repo, task.id))
         }
+
+        /**
+         * Plegar de verdad, que es lo que la plataforma se negaba a hacer aquí.
+         *
+         * `CheckboxTree` hereda de `com.intellij.ui.treeStructure.Tree`, y su
+         * `collapsePath` pliega **recursivamente** mientras el ajuste avanzado
+         * `ide.tree.collapse.recursively` esté puesto —viene puesto de fábrica—. Ese
+         * camino descarta los nodos que considera «siempre desplegados»: los de
+         * profundidad cero según `TreeUtil.getNodeDepth`, que resta uno por raíz oculta
+         * y otro por manecillas apagadas. Nuestras cabeceras cuelgan de la raíz y el
+         * árbol va sin manecillas —ver `showsRootHandles` en el `init`—, así que daban
+         * cero: la llamada no plegaba nada y tampoco avisaba de que no lo había hecho.
+         * El síntoma era que la cabecera no respondía ni al clic ni a `←`.
+         *
+         * `setExpandedState` es exactamente lo que llama el `collapsePath` de `JTree`,
+         * sin ese recorte, y sigue disparando `treeCollapsed` —que es como se recuerda
+         * el pliegue—. No se pierde el plegado recursivo por el camino: aquí sólo hay
+         * dos niveles y las tareas son hojas.
+         *
+         * Lo comprueba [com.tasklane.ui.GroupFoldingTest], que falla si la plataforma
+         * cambia de opinión y este atajo deja de hacer falta.
+         */
+        override fun collapsePath(path: TreePath) {
+            setExpandedState(path, false)
+        }
+
+        /**
+         * El árbol mide **exactamente** lo que se ve, siempre.
+         *
+         * De fábrica un `JTree` sólo sigue al viewport cuando ya cabe dentro
+         * (`parent.width > preferredSize.width`); en cuanto una fila pide un píxel de
+         * más, se queda con su ancho y deja de encogerse. Y aquí eso no es un detalle
+         * de aspecto: la tarjeta envuelve su título contra el ancho **visible**, así
+         * que un árbol más ancho que el hueco pinta filas de tres líneas en el sitio
+         * que se midió para dos — y lo que se queda fuera, abajo, es la línea de
+         * distintivos.
+         *
+         * Con esto el ancho del árbol y el del viewport son el mismo número: aparecer
+         * la barra de desplazamiento vertical lo estrecha, estrecharlo dispara su
+         * `componentResized` —ver el `init`—, y ahí se tiran las medidas viejas y se
+         * vuelve a envolver contra lo que hay. Nunca hay barra horizontal, que en una
+         * lista de tarjetas tampoco llevaría a ningún sitio.
+         */
+        override fun getScrollableTracksViewportWidth(): Boolean = true
     }
+
+    /**
+     * Las vistas previas de las tarjetas desplegadas. Vive aquí y no en el renderer
+     * porque cuando una imagen termina de cargarse hay que **rehacer alturas**, y la
+     * altura de una fila es cosa del árbol: el renderer no tiene a quién avisar.
+     */
+    private val cardImages = CardImages(project) { TreeUtil.invalidateCacheAndRepaint(tree.ui) }
 
     /**
      * El historial se persiste con el nombre de propiedad, así que las consultas
@@ -152,7 +208,13 @@ internal class TasklanePanel(
     /** `reload()` dispara eventos de plegado; sin esta guarda se tomarían por gestos del usuario. */
     private var rendering = false
 
+    /**
+     * Lo que se pidió enseñar y todavía no estaba en el árbol. Ver [reveal].
+     */
+    private var pendingReveal: Set<TaskId> = emptySet()
+
     init {
+        renderer.images = cardImages
         tree.isRootVisible = false
         tree.showsRootHandles = false
         // Ni el árbol ni el buscador llevan etiqueta visible —el sitio manda—, así que
@@ -160,6 +222,18 @@ internal class TasklanePanel(
         tree.accessibleContext.accessibleName = TasklaneBundle.message("a11y.tree")
         searchField.textEditor.accessibleContext.accessibleName = TasklaneBundle.message("a11y.search")
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
+        // El gesto de plegar es nuestro —lo atiende [installGroupToggle]—, así que se
+        // apaga el de la plataforma. Si no, el doble clic sobre una cabecera disparaba
+        // los dos y se anulaban entre sí; y encima el número de clics que hace falta
+        // depende de *Expand nodes with single click*, un ajuste del IDE que cambiaría
+        // el gesto de esta lista sin que nadie lo pidiera.
+        tree.toggleClickCount = 0
+        // La selección no manda sobre el plegado. `JTree` despliega por defecto los
+        // ancestros de lo que se selecciona, así que restaurar la selección tras un
+        // repintado reabría el grupo recién plegado —y de paso borraba el recuerdo, que
+        // se lleva escuchando eventos de despliegue—. Abrir un grupo se pide a las
+        // claras: ver [reveal].
+        tree.expandsSelectedPaths = false
         // Altura variable por fila: desde la Fase 5 el renderer tiene una segunda
         // línea que sólo aparece cuando hay enlaces o etiquetas que enseñar.
         tree.rowHeight = 0
@@ -167,6 +241,15 @@ internal class TasklanePanel(
         // detrás del renderer y más ancho que él, así que asomaba por los bordes
         // redondeados. Ver [TaskTreeRenderer.paintComponent].
         RenderingUtil.setHoverPaintingDisabled(tree, true)
+        // Sin la ventanita de «fila completa» de la plataforma. Cuando una fila no cabe
+        // de ancho, `Tree` saca al pasar el ratón un trozo flotante con lo que falta,
+        // **por fuera** del panel. Con estas filas eso es media tarjeta asomando sobre
+        // el editor y, dentro, los botones de la derecha: acercarse a pulsarlos saca el
+        // ratón de la fila y la ventanita se cierra en el camino. La tarjeta ya se
+        // encarga de no pasarse de ancho —ver [TaskTreeRenderer.getPreferredSize]—, así
+        // que esto es el cinturón: una barra de desplazamiento horizontal, un tema con
+        // otras métricas o un distintivo más largo de la cuenta la dejarían volver.
+        tree.setExpandableItemsEnabled(false)
         // Sin speed search del árbol: desde la Fase 4 el campo de búsqueda hace ese
         // trabajo, y mejor —entiende operadores y busca en el cuerpo, no sólo en la
         // fila—. Con los dos vivos, teclear sobre el árbol abriría un buscador
@@ -177,6 +260,10 @@ internal class TasklanePanel(
         // distinto, así que hay que tirarle la caché a la cara.
         tree.addComponentListener(object : ComponentAdapter() {
             override fun componentResized(event: ComponentEvent) {
+                // Y con la caché se va la selección de texto: sus posiciones son
+                // líneas pintadas, y otro ancho son otras líneas. Mantenerla sería
+                // dejar marcado un tramo que ya no es el que se marcó.
+                renderer.selection = null
                 TreeUtil.invalidateCacheAndRepaint(tree.ui)
             }
         })
@@ -197,8 +284,9 @@ internal class TasklanePanel(
 
         installSearchField()
         installShortcuts()
-        TaskLinks.install(tree, renderer)
+        RowClicks.install(tree, renderer, project)
         TaskRowActions.install(tree, renderer, this)
+        CardTextSelection.install(tree, renderer)
 
         uiScope.launch {
             combine(service.snapshot, search.results, view.filter, ::Triple).collect { (snap, found, filter) ->
@@ -232,6 +320,21 @@ internal class TasklanePanel(
     }
 
     // --------------------------------------------------------------- composición
+
+    /**
+     * La tool window no baja de [MIN_WIDTH] píxeles.
+     *
+     * Por debajo de eso la tarjeta deja de ser una tarjeta: el título se parte en tres
+     * líneas de dos palabras, los distintivos empiezan a caerse por la derecha y lo que
+     * queda no se lee. La plataforma respeta el mínimo del contenido al repartir el
+     * ancho de la banda lateral, así que el suelo se pide desde aquí. De ese ancho para
+     * arriba la fila se defiende sola: se envuelve contra lo que hay y nunca pide más
+     * —ver [TaskTreeRenderer.getPreferredSize]—.
+     */
+    override fun getMinimumSize(): Dimension {
+        val size = super.getMinimumSize()
+        return Dimension(maxOf(size.width, JBUI.scale(MIN_WIDTH)), size.height)
+    }
 
     private fun buildContent(): JComponent = JPanel(BorderLayout()).apply {
         searchField.border = JBUI.Borders.empty(2, 4)
@@ -315,9 +418,76 @@ internal class TasklanePanel(
         localShortcut(ACTION_EDIT, CommonShortcuts.ENTER, tree) { editSelected() }
         localShortcut(ACTION_DELETE, CommonShortcuts.getDelete(), tree) { deleteSelected() }
         localShortcut(ACTION_FOCUS_SEARCH, searchShortcut(), this) { focusSearch() }
+        // Los cuatro van sobre el **árbol** y no sobre el panel: con el cursor dentro
+        // del buscador, `⌥←` es «palabra anterior» y robárselo ahí sería peor que no
+        // tener el atajo.
+        localShortcut(ACTION_SELECT_PREV_STATE, altArrow(KeyEvent.VK_LEFT), tree) { selectNeighbourState(-1) }
+        localShortcut(ACTION_SELECT_NEXT_STATE, altArrow(KeyEvent.VK_RIGHT), tree) { selectNeighbourState(1) }
+        localShortcut(ACTION_MOVE_PREV_STATE, altArrow(KeyEvent.VK_LEFT, shift = true), tree) { moveSelected(-1) }
+        localShortcut(ACTION_MOVE_NEXT_STATE, altArrow(KeyEvent.VK_RIGHT, shift = true), tree) { moveSelected(1) }
 
         installDoubleClick()
         installGroupToggle()
+        installTextSelection()
+    }
+
+    /**
+     * `⌘C` copia el texto marcado dentro de una tarjeta, y `Escape` lo desmarca.
+     *
+     * Las dos se **apagan** cuando no hay nada marcado, y eso no es cosmética: una
+     * acción deshabilitada no se queda con la pulsación, así que `Escape` sigue
+     * llevando al editor y `⌘C` sigue siendo de quien fuera antes. Encendidas sólo
+     * cuando hay selección, no le quitan el atajo a nadie.
+     */
+    private fun installTextSelection() {
+        fun action(shortcuts: ShortcutSet, run: () -> Unit) {
+            object : DumbAwareAction() {
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = renderer.selection?.isEmpty == false
+                }
+
+                override fun actionPerformed(e: AnActionEvent) = run()
+            }.registerCustomShortcutSet(shortcuts, tree, this)
+        }
+
+        action(CommonShortcuts.getCopy()) {
+            CardTextSelection.selectedText(tree, renderer)?.let(CardTextSelection::copy)
+        }
+        action(CommonShortcuts.ESCAPE) {
+            renderer.selection = null
+            tree.repaint()
+        }
+    }
+
+    /**
+     * Un clic en la cabecera despliega o pliega su grupo.
+     *
+     * Es el gesto principal con el ratón: el árbol va sin manecillas
+     * —`showsRootHandles = false`, porque la plataforma las pinta fuera de la tarjeta
+     * y desalinearían todas las filas—, así que sin esto nada anunciaría que el grupo
+     * se pliega. El chevrón de la cabecera lo pinta [TaskTreeRenderer.renderGroup].
+     *
+     * Toda la fila responde, no sólo el chevrón: una cabecera es un objetivo ancho y
+     * cómodo, y encima no tiene ninguna otra cosa que pulsar.
+     *
+     * Plegar acaba en el `collapsePath` de nuestro árbol, no en el de la plataforma:
+     * el de la plataforma no plegaba estas cabeceras. Ahí está el porqué.
+     */
+    private fun installGroupToggle() {
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(event: MouseEvent) {
+                // Sólo el primer clic: el segundo de un doble clic llega como otro
+                // evento y desharía lo que acaba de hacer el primero.
+                if (event.clickCount != 1 || event.button != MouseEvent.BUTTON1 || event.isPopupTrigger) return
+                val row = rowAtHeight(tree, event.y)
+                if (row < 0) return
+                if (tree.getPathForRow(row)?.lastPathComponent !is GroupNode) return
+                event.consume()
+                if (tree.isExpanded(row)) tree.collapseRow(row) else tree.expandRow(row)
+            }
+        })
     }
 
     /**
@@ -331,40 +501,17 @@ internal class TasklanePanel(
      * así que no llegaba a enterarse y el gesto no hacía nada. `MOUSE_CLICKED` es
      * otro evento distinto y sí llega.
      */
-    /**
-     * Un clic en la cabecera despliega o pliega su grupo.
-     *
-     * Es el **único** gesto que lo hace con el ratón: el árbol va sin manecillas
-     * —`showsRootHandles = false`, porque la plataforma las pinta fuera de la tarjeta
-     * y desalinearían todas las filas—, así que el grupo se podía plegar sólo con
-     * `←`/`→` del teclado y nada lo anunciaba. El chevrón de la cabecera lo pinta
-     * [TaskTreeRenderer.renderGroup].
-     *
-     * Toda la fila responde, no sólo el chevrón: una cabecera es un objetivo ancho y
-     * cómodo, y encima no tiene ninguna otra cosa que pulsar.
-     */
-    private fun installGroupToggle() {
-        tree.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(event: MouseEvent) {
-                if (event.button != MouseEvent.BUTTON1 || event.isPopupTrigger) return
-                val row = rowAtHeight(tree, event.y)
-                if (row < 0) return
-                if (tree.getPathForRow(row)?.lastPathComponent !is GroupNode) return
-                event.consume()
-                if (tree.isExpanded(row)) tree.collapseRow(row) else tree.expandRow(row)
-            }
-        })
-    }
-
     private fun installDoubleClick() {
         tree.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(event: MouseEvent) {
                 if (event.clickCount != 2 || event.button != MouseEvent.BUTTON1 || event.isPopupTrigger) return
                 // Sobre un enlace manda el enlace: el primer clic ya lo abrió, y
                 // abrir el editor encima sería una segunda cosa que nadie pidió. Lo
-                // mismo con el marcador, el menú y la casilla: el primer clic ya hizo
-                // lo suyo.
-                if (renderer.linksAt(tree, event.point).isNotEmpty()) return
+                // mismo con el ancla de código, el distintivo de prioridad, el
+                // marcador, el menú y la casilla: el primer clic ya hizo lo suyo, y
+                // el desplegable de la prioridad se quedaría además con el diálogo
+                // abriéndose por detrás.
+                if (renderer.hotspotAt(tree, event.point) != null) return
                 if (renderer.targetAt(tree, event.point) != null) return
                 if (renderer.isOnCheckbox(tree, event.point)) return
                 if (selectedTasks().size != 1) return
@@ -372,6 +519,24 @@ internal class TasklanePanel(
                 editSelected()
             }
         })
+    }
+
+    private fun moveSelected(delta: Int) {
+        neighbourState(delta)?.let(::moveSelectedTo)
+    }
+
+    /**
+     * `⌥←/→` cambia de pestaña y `⇧⌥←/→` se lleva la selección con ella: el mismo eje,
+     * y `Shift` significa lo que significa en todas partes.
+     *
+     * `Alt` y no otra cosa porque es lo que el IDE usaba para pasar de pestaña cuando
+     * los estados eran `Content`s, y es la deuda que quedó anotada al bajarlos al panel
+     * (`docs/plan-rediseno.md`, R3). Al ser locales no le quitan `Alt+←/→` a nadie
+     * fuera de esta lista.
+     */
+    private fun altArrow(keyCode: Int, shift: Boolean = false): ShortcutSet {
+        val modifiers = InputEvent.ALT_DOWN_MASK or if (shift) InputEvent.SHIFT_DOWN_MASK else 0
+        return CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, modifiers))
     }
 
     /**
@@ -509,6 +674,14 @@ internal class TasklanePanel(
         snapshot = snap
         tabs.update(snap.config.states, counts, stateId)
         this.sections = sections
+        // Lo que ya no existe no puede seguir desplegado esperando a volver. Se mira
+        // el snapshot entero y no lo que esta pestaña lista: una búsqueda esconde la
+        // tarjeta un rato, y al limpiarla tiene que volver como se dejó.
+        renderer.retainExpanded(
+            snap.tasksByRepo.values.flatMapTo(mutableSetOf()) { tasks -> tasks.map { it.id } },
+        )
+        // Una captura pegada puede rellenar un hueco que antes no estaba.
+        cardImages.forgetMissing()
         renderer.config = snap.config
         renderer.highlighter = found.highlighter
         renderer.activeRepo = snap.activeRepo
@@ -542,6 +715,14 @@ internal class TasklanePanel(
         }
 
         restoreSelection(previouslySelected)
+
+        // Lo que se pidió enseñar antes de que la tarea llegara al árbol. Se vacía antes
+        // de reintentar para que un segundo fallo no lo deje dando vueltas.
+        if (pendingReveal.isNotEmpty()) {
+            val pending = pendingReveal
+            pendingReveal = emptySet()
+            reveal(pending, retry = false)
+        }
     }
 
     /**
@@ -589,19 +770,62 @@ internal class TasklanePanel(
     }
 
     /**
-     * Atiende «enséñame estas tareas» —hoy, la acción de la notificación de remapeo—.
-     * Si ninguna cae en esta pestaña no hace nada, así que las demás pueden ignorarla
-     * sin coordinarse entre sí.
+     * Atiende «enséñame estas tareas»: la acción de la notificación de remapeo y el clic
+     * sobre una marca del editor. Si ninguna cae en esta pestaña no hace nada, así que
+     * las demás pueden ignorarla sin coordinarse entre sí.
+     *
+     * **Puede llegar antes que la tarea.** Pulsar una marca de un fichero cuya tarea vive
+     * en otro repositorio cambia el activo, y el árbol se reconstruye después, fuera del
+     * EDT: mirar el árbol en ese instante no encontraría nada. Y una búsqueda o un filtro
+     * puestos la esconderían aunque ya estuviera. Así que cuando la tarea **es de esta
+     * pestaña** pero no se ve, se quita lo que la tapa y se apunta para el siguiente
+     * repintado, que es cuando se reintenta —una vez, con [retry] a `false`: un reintento
+     * que se re-apunta a sí mismo volvería a intentarlo en cada repintado para siempre—.
      */
-    private fun reveal(ids: Set<TaskId>) {
-        val paths = taskNodes().filter { it.task.id in ids }.map { TreePath(it.path) }.toList()
-        if (paths.isEmpty()) return
+    private fun reveal(ids: Set<TaskId>, retry: Boolean = true) {
+        val nodes = taskNodes().filter { it.task.id in ids }.toList()
+        if (nodes.isEmpty()) {
+            if (retry) waitFor(ids)
+            return
+        }
 
         onSelectState(stateId)
         ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)?.activate(null, false)
 
+        // Una tarea dentro de un grupo plegado obliga a abrirlo, y entonces el pliegue
+        // deja de describir lo que se ve: se olvida a propósito, o el siguiente
+        // repintado volvería a cerrarlo encima de lo que se acaba de enseñar. Va
+        // explícito porque la selección ya no despliega nada por su cuenta —ver
+        // `expandsSelectedPaths` en el `init`—.
+        for (group in nodes.mapNotNull { it.parent as? GroupNode }.distinctBy { it.key }) {
+            collapsed -= group.key
+            tree.expandPath(TreePath(group.path))
+        }
+
+        val paths = nodes.map { TreePath(it.path) }
         tree.selectionPaths = paths.toTypedArray()
         TreeUtil.showRowCentered(tree, tree.getRowForPath(paths.first()), false, true)
+    }
+
+    /**
+     * Prepara la pestaña para una tarea que es suya pero todavía no se ve, y la apunta
+     * para el siguiente repintado.
+     *
+     * El filtro y la búsqueda son **de la ventana**, así que quitarlos afecta a todas las
+     * pestañas. Es deliberado: quien pulsa una marca pide ver *esa* tarea, y enseñarle
+     * una lista donde no está —porque quedaba un `@overdue` de hace media hora— se lee
+     * como que el plugin no hizo nada.
+     */
+    private fun waitFor(ids: Set<TaskId>) {
+        val mine = ids.filter { service.snapshot.value.task(it)?.stateId == stateId }.toSet()
+        if (mine.isEmpty()) return
+        pendingReveal = mine
+
+        onSelectState(stateId)
+        ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)?.activate(null, false)
+
+        if (view.filter.value != TaskFilter.ALL) view.setFilter(TaskFilter.ALL)
+        if (search.rawQuery.value.isNotEmpty()) search.clear()
     }
 
     private fun taskNodes(): Sequence<TaskNode> =
@@ -720,6 +944,7 @@ internal class TasklanePanel(
             task.priorityId,
             task.tags,
             task.dueDate,
+            task.anchors,
         )
         if (!dialog.showAndGet()) return
         with(service) {
@@ -728,7 +953,23 @@ internal class TasklanePanel(
             apply(TaskCommand.ChangePriority(task.repo, task.id, dialog.priorityId))
             apply(TaskCommand.SetTags(task.repo, task.id, dialog.tags))
             apply(TaskCommand.SetDueDate(task.repo, task.id, dialog.dueDate))
+            apply(TaskCommand.SetAnchors(task.repo, task.id, dialog.anchors))
         }
+    }
+
+    /**
+     * Despliega la tarjeta de [task], o la vuelve a plegar. Lo pide [TaskRowActions]
+     * desde el botón de la fila.
+     *
+     * El árbol guarda la altura de cada fila y no tiene forma de enterarse de que el
+     * renderer mide otra cosa, así que hay que tirarle la caché: el mismo problema
+     * —y la misma cura— que al cambiar de ancho la tool window. Y con ella se va la
+     * selección de texto, por lo mismo: desplegar reenvuelve todas las líneas.
+     */
+    fun toggleExpanded(task: Task) {
+        renderer.toggleExpanded(task)
+        renderer.selection = null
+        TreeUtil.invalidateCacheAndRepaint(tree.ui)
     }
 
     /** Marcar desde la fila, sin pasar por la selección: lo usa [TaskRowActions]. */
@@ -756,6 +997,60 @@ internal class TasklanePanel(
         selectedTasks().forEach { service.apply(TaskCommand.ToggleComplete(it.repo, it.id)) }
     }
 
+    // ----------------------------------------------------- mover entre estados
+
+    /** Los estados configurados, en el orden de las pestañas. Lo consume el submenú *Move to*. */
+    val states: List<TaskState> get() = snapshot.config.states
+
+    /**
+     * Las prioridades configuradas, de la más alta a la más baja. Lo consume el
+     * submenú *Priority*, y ese orden es el mismo con el que se agrupa la lista por
+     * prioridad: el de la importancia, que es como se lee una lista de pendientes.
+     */
+    val priorities: List<TaskPriority> get() = snapshot.config.priorities.sortedByDescending { it.order }
+
+    /**
+     * Cambia la prioridad de la selección sin pasar por el diálogo.
+     *
+     * Va tarea a tarea con **su** repositorio por lo mismo que [deleteSelected] y
+     * [moveSelectedTo]: buscando en todos, una misma selección puede mezclar filas de
+     * varios repositorios.
+     */
+    fun setPrioritySelected(target: PriorityId) {
+        selectedTasks().forEach { service.apply(TaskCommand.ChangePriority(it.repo, it.id, target)) }
+    }
+
+    /**
+     * Manda la selección a otro estado sin pasar por el diálogo.
+     *
+     * Es la operación más repetida de una lista con estados, y hasta ahora costaba abrir
+     * un modal, cambiar un desplegable y aceptar. Va tarea a tarea con **su**
+     * repositorio por lo mismo que [deleteSelected]: buscando en todos, una misma
+     * selección puede mezclar filas de varios.
+     */
+    fun moveSelectedTo(target: StateId) {
+        selectedTasks().forEach { service.apply(TaskCommand.ChangeState(it.repo, it.id, target)) }
+    }
+
+    /**
+     * El estado que hay [delta] pestañas más allá de ésta, o `null` si no hay ninguno.
+     *
+     * **No da la vuelta**, ni para mover ni para cambiar de pestaña. Pasar de la última
+     * a la primera convertiría «avanza esta tarea» en «devuélvela al principio», que es
+     * lo contrario y sin decirlo.
+     */
+    fun neighbourState(delta: Int): StateId? {
+        val all = states
+        val index = all.indexOfFirst { it.id == stateId }
+        if (index < 0) return null
+        return all.getOrNull(index + delta)?.id
+    }
+
+    /** Cambia de pestaña al estado vecino. Es el `Alt+←/→` que se perdió al bajarlas al panel. */
+    fun selectNeighbourState(delta: Int) {
+        neighbourState(delta)?.let(onSelectState)
+    }
+
     override fun dispose() {
         uiScope.cancel()
     }
@@ -768,8 +1063,19 @@ internal class TasklanePanel(
         private const val ACTION_EDIT = "Tasklane.EditTask"
         private const val ACTION_DELETE = "Tasklane.DeleteTask"
         private const val ACTION_FOCUS_SEARCH = "Tasklane.FocusSearch"
+        private const val ACTION_SELECT_PREV_STATE = "Tasklane.SelectPreviousState"
+        private const val ACTION_SELECT_NEXT_STATE = "Tasklane.SelectNextState"
+        private const val ACTION_MOVE_PREV_STATE = "Tasklane.MoveToPreviousState"
+        private const val ACTION_MOVE_NEXT_STATE = "Tasklane.MoveToNextState"
 
         /** Clave del historial del campo de búsqueda en `PropertiesComponent`. */
         private const val HISTORY_PROPERTY = "Tasklane.Search"
+
+        /**
+         * Lo más estrecha que se deja poner la ventana. Es el ancho por debajo del cual
+         * una tarjeta deja de leerse: el título se parte en líneas de dos palabras y los
+         * distintivos empiezan a caerse. Ver [getMinimumSize].
+         */
+        private const val MIN_WIDTH = 300
     }
 }

@@ -1,23 +1,12 @@
 package com.tasklane.ui.editor
 
-import com.intellij.icons.AllIcons
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
-import com.intellij.util.ui.GraphicsUtil
-import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.text.TagParser
-import java.awt.BorderLayout
-import java.awt.Component
-import java.awt.Container
-import java.awt.Cursor
-import java.awt.Dimension
-import java.awt.Graphics
-import java.awt.Graphics2D
-import java.awt.LayoutManager
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -45,7 +34,7 @@ import javax.swing.event.DocumentEvent
  * diálogo con `api` escrito y sin cerrar no puede perderlo: nadie entiende que una
  * etiqueta que está viendo escrita no se guarde.
  */
-internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout()) {
+internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout(stretchLast = true)) {
 
     private var chips: List<String> = TagParser.parse(initial.joinToString(","))
 
@@ -110,7 +99,7 @@ internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout()) {
 
     private fun rebuild() {
         removeAll()
-        chips.forEach { add(Chip(it)) }
+        chips.forEach { tag -> add(chipFor(tag)) }
         editor.emptyText.text = if (chips.isEmpty()) TasklaneBundle.message("dialog.task.tags.hint") else ""
         add(editor)
         revalidate()
@@ -121,132 +110,16 @@ internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout()) {
         if (isShowing) editor.requestFocusInWindow()
     }
 
-    private inner class Chip(private val tag: String) : JPanel(BorderLayout(JBUI.scale(GAP), 0)) {
-
-        init {
-            isOpaque = false
-            border = JBUI.Borders.empty(1, CHIP_PADDING, 1, 2)
-            add(
-                JBLabel(tag).apply { font = UIUtil.getFont(UIUtil.FontSize.SMALL, font) },
-                BorderLayout.CENTER,
-            )
-            add(closeButton(), BorderLayout.EAST)
-        }
-
-        private fun closeButton() = JBLabel(AllIcons.Actions.Close).apply {
-            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            toolTipText = TasklaneBundle.message("dialog.task.tags.remove", tag)
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseEntered(e: MouseEvent) {
-                    icon = AllIcons.Actions.CloseHovered
-                }
-
-                override fun mouseExited(e: MouseEvent) {
-                    icon = AllIcons.Actions.Close
-                }
-
-                override fun mousePressed(e: MouseEvent) {
-                    if (e.button != MouseEvent.BUTTON1) return
-                    chips = chips.filterNot { it == tag }
-                    rebuild()
-                }
-            })
-        }
-
-        override fun paintComponent(g: Graphics) {
-            val g2 = g.create() as Graphics2D
-            try {
-                GraphicsUtil.setupAAPainting(g2)
-                g2.color = JBUI.CurrentTheme.ActionButton.pressedBackground()
-                val arc = JBUI.scale(ARC)
-                g2.fillRoundRect(0, 0, width, height, arc, arc)
-            } finally {
-                g2.dispose()
-            }
-            super.paintComponent(g)
-        }
+    private fun chipFor(tag: String) = Chip(
+        text = tag,
+        removeTooltip = TasklaneBundle.message("dialog.task.tags.remove", tag),
+    ) {
+        chips = chips.filterNot { it == tag }
+        rebuild()
     }
 
     private companion object {
-        const val GAP = 4
         const val PADDING = 3
-        const val CHIP_PADDING = 6
-        const val ARC = 10
         const val COLUMNS = 8
-        const val MIN_EDITOR = 60
-    }
-
-    /**
-     * Coloca las fichas de izquierda a derecha y salta de línea cuando no caben. El
-     * último hijo —el campo de escribir— se queda con lo que sobre de su fila.
-     *
-     * No es `FlowLayout` porque éste no sabe decir cuánto mide envolviendo: preguntado
-     * por su tamaño preferido contesta el de una sola fila, y el campo se quedaría con
-     * la mitad de las fichas fuera en cuanto hubiera unas cuantas.
-     */
-    private class ChipsLayout : LayoutManager {
-
-        override fun addLayoutComponent(name: String?, comp: Component) = Unit
-
-        override fun removeLayoutComponent(comp: Component) = Unit
-
-        override fun preferredLayoutSize(parent: Container): Dimension = measure(parent)
-
-        override fun minimumLayoutSize(parent: Container): Dimension = measure(parent)
-
-        override fun layoutContainer(parent: Container) {
-            val insets = parent.insets
-            val gap = JBUI.scale(GAP)
-            val limit = parent.width - insets.right
-            val children = parent.components.filter { it.isVisible }
-
-            var x = insets.left
-            var y = insets.top
-            var rowHeight = 0
-            children.forEachIndexed { index, child ->
-                val size = child.preferredSize
-                val last = index == children.lastIndex
-                val needed = if (last) JBUI.scale(MIN_EDITOR) else size.width
-                if (x > insets.left && x + needed > limit) {
-                    x = insets.left
-                    y += rowHeight + gap
-                    rowHeight = 0
-                }
-                val width = if (last) (limit - x).coerceAtLeast(JBUI.scale(MIN_EDITOR)) else size.width
-                child.setBounds(x, y, width, size.height)
-                x += width + gap
-                rowHeight = maxOf(rowHeight, size.height)
-            }
-        }
-
-        private fun measure(parent: Container): Dimension {
-            val insets = parent.insets
-            val gap = JBUI.scale(GAP)
-            val children = parent.components.filter { it.isVisible }
-            if (children.isEmpty()) return Dimension(insets.left + insets.right, insets.top + insets.bottom)
-
-            // Sin ancho todavía —la primera medida— se supone una sola fila; cuando el
-            // contenedor ya tiene tamaño, `rebuild` revalida y la cuenta sale bien.
-            val available = (parent.width - insets.left - insets.right).takeIf { it > 0 } ?: Int.MAX_VALUE
-            var x = 0
-            var widest = 0
-            var rows = 1
-            var rowHeight = 0
-            for (child in children) {
-                val size = child.preferredSize
-                if (x > 0 && x + size.width > available) {
-                    widest = maxOf(widest, x - gap)
-                    rows++
-                    x = 0
-                }
-                x += size.width + gap
-                rowHeight = maxOf(rowHeight, size.height)
-            }
-            widest = maxOf(widest, x - gap)
-            return Dimension(
-                minOf(widest, available) + insets.left + insets.right,
-                rows * rowHeight + (rows - 1) * gap + insets.top + insets.bottom,
-            )
-        }
     }
 }

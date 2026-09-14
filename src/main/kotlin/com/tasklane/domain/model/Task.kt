@@ -26,6 +26,13 @@ data class Task(
     val attachments: List<AttachmentRef> = emptyList(),
     val tags: List<String> = emptyList(),
     /**
+     * Los puntos del código de los que habla la tarea. Campo del modelo, como las
+     * etiquetas: no se derivan del cuerpo porque no hay forma de escribir «la línea 42
+     * de este fichero» sin inventarse una sintaxis, y porque el sitio se captura desde
+     * el editor, que es quien lo sabe. Ver [CodeAnchor].
+     */
+    val anchors: List<CodeAnchor> = emptyList(),
+    /**
      * Cuándo vence. Es lo único del modelo que mira al futuro: el resto de fechas
      * registran lo que ya pasó, así que es también lo único que puede estar
      * *vencido* y pintarse en rojo.
@@ -91,16 +98,26 @@ data class Task(
     val hasDetail: Boolean by lazy(LazyThreadSafetyMode.PUBLICATION) { detailLines.isNotEmpty() }
 
     /**
-     * Las líneas del cuerpo que no son el título y dicen algo: ni vacías, ni
-     * compuestas sólo por referencias a imágenes.
+     * El cuerpo bajo el título en el orden en que se lee: los párrafos de texto y las
+     * imágenes, cada una detrás de la línea que la nombra.
      *
-     * Es la base de [hasDetail] y de [description], y se calcula una
-     * sola vez por tarea. Antes cada uno barría el cuerpo por su cuenta y pintar una
-     * fila lo recorría cuatro veces; con la tarjeta de tres líneas —que pide título,
-     * descripción y recuento de la lista para **cada** fila visible— eso dejaba de
-     * ser sostenible.
+     * Es la base de [detailLines], [hasDetail] y [description], y se calcula una sola
+     * vez por tarea. Antes cada uno barría el cuerpo por su cuenta y pintar una fila
+     * lo recorría cuatro veces; con la tarjeta de tres líneas —que pide título,
+     * descripción y recuento de la lista para **cada** fila visible— eso dejaba de ser
+     * sostenible.
+     *
+     * **Por qué bloques y no dos listas.** La tarjeta desplegada pinta el cuerpo entero
+     * igual que el diálogo, y en el diálogo cada vista previa cuelga de la línea que la
+     * nombra. Con el texto por un lado y las imágenes por otro ese orden se perdería y
+     * todas las capturas acabarían amontonadas al final, que es justo lo contrario de
+     * lo que se escribió.
+     *
+     * Las imágenes de la **línea del título** también salen aquí. El título es esa
+     * línea *sin* sus imágenes —ver [titleRange]—, así que si no se recogieran en este
+     * punto no se pintarían en ningún sitio.
      */
-    private val detailLines: List<String> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+    val detailBlocks: List<DetailBlock> by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val title = titleRange
         if (title.isEmpty()) {
             emptyList()
@@ -109,18 +126,35 @@ data class Task(
                 var index = 0
                 while (index < body.length) {
                     val eol = body.indexOf('\n', index).takeIf { it >= 0 } ?: body.length
+                    val raw = body.substring(index, eol)
                     val isTitleLine = title.first >= index && title.last < eol
                     if (!isTitleLine) {
-                        val line = ImageRefParser.strip(body.substring(index, eol)).trim()
-                        if (line.isNotBlank()) add(line)
+                        val line = ImageRefParser.strip(raw).trim()
+                        if (line.isNotBlank()) add(DetailBlock.Text(line))
                     }
+                    // Detrás del texto de su línea, como el inlay del diálogo.
+                    for (ref in ImageRefParser.parse(raw)) add(DetailBlock.Image(ref.id))
                     index = eol + 1
                 }
             }
         }
     }
 
-    /** Una línea de resumen de lo que hay debajo del título, para la tarjeta. */
+    /**
+     * Las líneas del cuerpo que no son el título y dicen algo: ni vacías, ni
+     * compuestas sólo por referencias a imágenes.
+     *
+     * Es pública porque la tarjeta desplegada las pinta **todas**: [description] es el
+     * resumen de una línea, y desplegar es justamente pedir lo que ese resumen esconde.
+     */
+    val detailLines: List<String> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        detailBlocks.filterIsInstance<DetailBlock.Text>().map { it.text }
+    }
+
+    /**
+     * Una línea de resumen de lo que hay debajo del título, para la tarjeta plegada.
+     * Desplegada se pintan todas: ver [detailLines].
+     */
     val description: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
         detailLines.firstOrNull().orEmpty()
     }
@@ -143,6 +177,17 @@ data class Task(
 
     /** Vencida: tiene fecha, ya pasó y la tarea sigue abierta. */
     fun isOverdue(now: Instant): Boolean = completedAt == null && dueDate?.isBefore(now) == true
+}
+
+/**
+ * Un trozo del cuerpo de una tarea por debajo del título: un párrafo de texto o una
+ * imagen. Ver [Task.detailBlocks].
+ */
+sealed interface DetailBlock {
+    /** Ya sin las referencias a imágenes y sin los espacios de los extremos. */
+    class Text(val text: String) : DetailBlock
+
+    class Image(val id: AttachmentId) : DetailBlock
 }
 
 /**

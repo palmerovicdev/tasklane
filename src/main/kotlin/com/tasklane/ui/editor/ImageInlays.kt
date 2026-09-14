@@ -11,20 +11,15 @@ import com.intellij.openapi.editor.event.EditorMouseEvent
 import com.intellij.openapi.editor.event.EditorMouseListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
-import com.intellij.ui.ScreenUtil
 import com.intellij.ui.awt.RelativePoint
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.Alarm
-import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.service.AttachmentService
-import javax.swing.ImageIcon
-import javax.swing.JLabel
+import com.tasklane.ui.common.ImagePreviewPopup
 
 /**
  * Mantiene sincronizado el texto del editor con lo que se ve: cada
@@ -45,7 +40,7 @@ import javax.swing.JLabel
  * con su marcador: el hueco no espera al disco. Ver `docs/architecture.html` §9.
  */
 internal class ImageInlays(
-    project: Project,
+    private val project: Project,
     private val repo: RepoKey,
     private val editor: EditorEx,
     parent: Disposable,
@@ -166,11 +161,8 @@ internal class ImageInlays(
     /**
      * Clic sobre la vista previa: se amplía en un popup.
      *
-     * La arquitectura pedía abrir el fichero con `FileEditorManager` para heredar el
-     * zoom del plugin *Images*, y la implementación lo descartó por una razón de
-     * bulto: este editor vive dentro de un **diálogo modal**, así que el fichero se
-     * abriría detrás y no se podría tocar hasta cerrar la tarea. Un popup sí se ve
-     * encima, y es lo que se pedía de verdad: mirar la captura de cerca.
+     * Quién lo abre es [ImagePreviewPopup], compartido con la tarjeta desplegada de la
+     * lista: ampliar una captura tiene que hacer lo mismo se pulse donde se pulse.
      */
     private fun onClick(event: EditorMouseEvent) {
         val point = event.mouseEvent.point
@@ -178,31 +170,11 @@ internal class ImageInlays(
         val id = byInlay[inlay] ?: return
         if (loaded[id] != true) return
 
-        val screen = ScreenUtil.getScreenRectangle(editor.contentComponent)
-        val image = service.preview(
-            repo,
-            id,
-            (screen.width * SCREEN_SHARE).toInt(),
-            (screen.height * SCREEN_SHARE).toInt(),
-        ) ?: return
-
-        val label = JLabel(ImageIcon(image)).apply { border = JBUI.Borders.empty() }
-        JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(JBScrollPane(label), null)
-            .setResizable(true)
-            .setMovable(true)
-            .setRequestFocus(true)
-            .setTitle(TasklaneBundle.message("editor.image.popup.title"))
-            .createPopup()
-            .show(RelativePoint(event.mouseEvent))
-
+        ImagePreviewPopup.show(project, repo, id, RelativePoint(event.mouseEvent), editor.contentComponent)
         event.consume()
     }
 
     private companion object {
         const val DEBOUNCE_MS = 250
-
-        /** Cuánto de la pantalla puede ocupar la ampliación. */
-        const val SCREEN_SHARE = 0.8
     }
 }

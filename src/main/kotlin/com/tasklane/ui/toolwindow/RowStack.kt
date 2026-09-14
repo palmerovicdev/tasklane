@@ -17,6 +17,22 @@ import java.awt.LayoutManager
  *
  * Los invisibles no ocupan: es lo que permite que una tarea sin descripción ni
  * etiquetas siga midiendo exactamente una línea.
+ *
+ * **La última línea no se cae.** Si la fila resulta ser más corta de lo que pide su
+ * contenido, la de abajo —la de distintivos: prioridad, vencimiento, etiquetas— se queda
+ * con su sitio pegada al fondo, y lo que se va es el renglón de texto que no cabe. La
+ * altura de una fila la mide el árbol una vez y la guarda, mientras que el texto se
+ * envuelve contra el ancho de cada momento: basta con que las dos medidas no coincidan
+ * para que sobre una línea, y la que sobra es siempre la última. Se prefiere perder un
+ * renglón de título —que ya venía recortado con puntos suspensivos, y que además se
+ * lee entero desplegando la tarjeta— antes que la línea que dice de qué va la tarea,
+ * que desaparecía sin dejar ninguna pista de por qué.
+ *
+ * Apilarlas encima no valdría: los hijos se pintan del último al primero, así que la de
+ * abajo quedaría **debajo** del texto, y el *hit testing* encontraría antes la línea de
+ * arriba. Invisible e impulsable, que es de donde se venía.
+ *
+ * Cuando la fila mide lo que tiene que medir, nada de esto cambia un píxel.
  */
 internal class RowStack : LayoutManager {
 
@@ -29,12 +45,34 @@ internal class RowStack : LayoutManager {
     override fun minimumLayoutSize(parent: Container): Dimension = measure(parent)
 
     override fun layoutContainer(parent: Container) {
-        var y = parent.insets.top
-        for (child in parent.components) {
-            if (!child.isVisible) continue
-            val height = child.preferredSize.height
-            child.setBounds(parent.insets.left, y, parent.width - parent.insets.left - parent.insets.right, height)
-            y += height
+        val insets = parent.insets
+        val width = parent.width - insets.left - insets.right
+        val visible = parent.components.filter { it.isVisible }
+        val heights = visible.map { it.preferredSize.height }
+        val room = parent.height - insets.top - insets.bottom
+        val short = heights.sum() > room
+
+        // El hueco que se le guarda a la de abajo cuando la fila viene corta.
+        val reserved = if (short) heights.last() else 0
+
+        var y = insets.top
+        for ((index, child) in visible.withIndex()) {
+            val height = heights[index]
+            when {
+                index == visible.lastIndex -> {
+                    // El tope es el borde de arriba: sacarla por ahí sería mudar de
+                    // sitio el mismo problema.
+                    val top = if (short) (insets.top + room - height).coerceAtLeast(insets.top) else y
+                    child.setBounds(insets.left, top, width, height)
+                }
+
+                short && y + height > insets.top + room - reserved -> child.setBounds(0, 0, 0, 0)
+
+                else -> {
+                    child.setBounds(insets.left, y, width, height)
+                    y += height
+                }
+            }
         }
     }
 

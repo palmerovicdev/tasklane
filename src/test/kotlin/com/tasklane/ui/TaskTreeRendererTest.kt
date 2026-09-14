@@ -1,22 +1,37 @@
 package com.tasklane.ui
 
+import com.intellij.icons.AllIcons
 import com.intellij.ui.CheckedTreeNode
+import com.intellij.util.ui.EmptyIcon
+import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.CodeAnchor
+import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.LinkExtractor
+import com.tasklane.ui.toolwindow.CardImageView
+import com.tasklane.ui.toolwindow.CardPreviews
+import com.tasklane.ui.toolwindow.CardSelection
+import com.tasklane.ui.toolwindow.CardTextSelection
 import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
+import com.tasklane.ui.toolwindow.TextPos
 import com.tasklane.ui.toolwindow.paintedRowBounds
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
 import java.awt.Point
 import java.awt.Rectangle
+import java.awt.image.BufferedImage
 import java.time.Instant
 import javax.swing.JTree
+import javax.swing.plaf.basic.BasicTreeUI
 import javax.swing.tree.DefaultTreeModel
 
 /**
@@ -35,15 +50,23 @@ class TaskTreeRendererTest {
         formatDate = { "13/09/2026" }
     }
 
-    private fun task(body: String) = Task(
+    private fun task(
+        body: String,
+        anchors: List<CodeAnchor> = emptyList(),
+        priority: PriorityId = TasklaneConfig.NORMAL,
+        tags: List<String> = emptyList(),
+    ) = Task(
         id = TaskId.random(),
         repo = RepoKey.ROOT,
         body = body,
         stateId = TasklaneConfig.TODO,
-        priorityId = TasklaneConfig.NORMAL,
+        priorityId = priority,
         createdAt = Instant.EPOCH,
         updatedAt = Instant.EPOCH,
         links = LinkExtractor.extract(body),
+        attachments = ImageRefParser.parse(body),
+        anchors = anchors,
+        tags = tags,
     )
 
     /**
@@ -53,7 +76,7 @@ class TaskTreeRendererTest {
      * instala su speed search y eso sí necesita la `Application`. Para lo que se
      * mide aquí —posiciones y fragmentos— da igual: el renderer es el mismo.
      */
-    private fun treeWith(task: Task): JTree {
+    private fun treeWith(task: Task, width: Int = 600): JTree {
         val root = CheckedTreeNode("root")
         root.add(TaskNode(task, false))
         val tree = JTree(DefaultTreeModel(root))
@@ -61,19 +84,45 @@ class TaskTreeRendererTest {
         tree.isRootVisible = false
         tree.showsRootHandles = false
         tree.rowHeight = 0
-        tree.setSize(600, 200)
+        tree.setSize(width, 400)
         tree.doLayout()
+        // `JTree` mide sus filas en cuanto tiene modelo, y ahí todavía no tiene ancho:
+        // lo mediría todo contra cero. En la tool window es el cambio de tamaño el que
+        // le tira la caché de medidas —ver `TasklanePanel`—, y esto es lo mismo que
+        // hace la plataforma en `TreeUtil.invalidateCacheAndRepaint`.
+        remeasure(tree)
         return tree
+    }
+
+    /**
+     * Le tira al árbol las medidas que tenía guardadas, que es lo que hace la ventana
+     * cada vez que cambia algo que cambia el alto de una fila (`TreeUtil
+     * .invalidateCacheAndRepaint`, ver `TasklanePanel`).
+     */
+    private fun remeasure(tree: JTree) {
+        val ui = tree.ui as BasicTreeUI
+        ui.leftChildIndent = ui.leftChildIndent
     }
 
     /** Los enlaces que devuelve el renderer barriendo una fila de izquierda a derecha. */
     private fun sweep(tree: JTree, row: Int): Map<Int, List<String>> {
         val bounds = painted(tree, row)
         val y = bounds.y + bounds.height / 2
-        return (0 until bounds.width).associateWith { x ->
-            renderer.linksAt(tree, Point(bounds.x + x, y)).map { it.url }
-        }.filterValues { it.isNotEmpty() }
+        return (0 until bounds.width)
+            .associateWith { x -> linksAt(tree, Point(bounds.x + x, y)) }
+            .filterValues { it.isNotEmpty() }
     }
+
+    /**
+     * Lo pulsable se pregunta por donde lo pregunta la lista —[TaskTreeRenderer.hotspotAt]—
+     * y no por un atajo de test: si el camino real dejara de reconocer un enlace, un
+     * ayudante propio lo seguiría reconociendo y el test pasaría con el clic roto.
+     */
+    private fun linksAt(tree: JTree, point: Point): List<String> =
+        (renderer.hotspotAt(tree, point) as? TaskTreeRenderer.Hotspot.Links)?.links?.map { it.url }.orEmpty()
+
+    private fun anchorAt(tree: JTree, point: Point): CodeAnchor? =
+        (renderer.hotspotAt(tree, point) as? TaskTreeRenderer.Hotspot.Anchor)?.anchor
 
     @Test
     fun `el enlace del titulo es clicable y el checkbox no`() {
@@ -87,7 +136,7 @@ class TaskTreeRendererTest {
         // El borde izquierdo de la fila es la franja de prioridad y el checkbox.
         assertTrue(
             "el checkbox no puede abrir el navegador",
-            renderer.linksAt(tree, Point(bounds.x + 1, bounds.y + bounds.height / 2)).isEmpty(),
+            linksAt(tree, Point(bounds.x + 1, bounds.y + bounds.height / 2)).isEmpty(),
         )
     }
 
@@ -104,9 +153,9 @@ class TaskTreeRendererTest {
         // Se barre la fila entera y no una altura concreta: dónde cae exactamente la
         // línea de distintivos depende del relleno de la tarjeta, y lo que se afirma
         // es que **existe** una zona clicable, no en qué píxel está.
-        val hit = scan(tree, bounds) { point -> renderer.linksAt(tree, point).takeIf { it.isNotEmpty() } }
+        val hit = scan(tree, bounds) { point -> linksAt(tree, point).takeIf { it.isNotEmpty() } }
 
-        assertEquals(listOf("https://ejemplo.com/guia"), hit?.map { it.url })
+        assertEquals(listOf("https://ejemplo.com/guia"), hit)
     }
 
     @Test
@@ -180,10 +229,485 @@ class TaskTreeRendererTest {
         )
     }
 
+    /**
+     * El distintivo del ancla es lo que convierte la nota en un salto al código: si no
+     * tiene zona clicable, la función no existe. Se barre la fila entera por lo mismo
+     * que con el indicador de enlaces: se afirma que **hay** zona, no en qué píxel.
+     */
+    @Test
+    fun `el ancla de codigo tiene zona clicable en la fila`() {
+        val anchor = CodeAnchor.of("src/main/kotlin/AuthService.kt", 41, text = "fun login() {")
+        val tree = treeWith(task("Arreglar el login", anchors = listOf(anchor)))
+        val bounds = painted(tree, 0)
+
+        val hit = scan(tree, bounds) { point -> anchorAt(tree, point) }
+
+        assertEquals(anchor, hit)
+    }
+
+    @Test
+    fun `una tarea sin ancla no navega desde ningun punto`() {
+        val tree = treeWith(task("Comprar pan"))
+        val bounds = painted(tree, 0)
+
+        assertTrue(scanAll(tree, bounds) { point -> anchorAt(tree, point) }.isEmpty())
+    }
+
+    /** El ancla y el enlace son distintivos distintos: uno no puede contestar por el otro. */
+    @Test
+    fun `el ancla no se confunde con el enlace del titulo`() {
+        val anchor = CodeAnchor.of("a/Auth.kt", 4, text = "login()")
+        val tree = treeWith(task("Revisar https://ejemplo.com/a", anchors = listOf(anchor)))
+        val bounds = painted(tree, 0)
+
+        val anchors = scanAll(tree, bounds) { point -> anchorAt(tree, point) }
+        val links = scanAll(tree, bounds) { point -> linksAt(tree, point).takeIf { it.isNotEmpty() } }
+
+        assertEquals(setOf(anchor), anchors.toSet())
+        assertTrue("el enlace del titulo sigue teniendo su zona", links.isNotEmpty())
+    }
+
     @Test
     fun `una tarea sin enlaces no responde en ningun punto`() {
         val tree = treeWith(task("Comprar pan"))
         assertTrue(sweep(tree, 0).isEmpty())
+    }
+
+    // ----------------------------------------------------------- la prioridad
+
+    /**
+     * Cambiar la prioridad desde donde se lee. Como con el ancla y el indicador, lo
+     * que se afirma es que **existe** zona pulsable, no en qué píxel está.
+     */
+    @Test
+    fun `el distintivo de prioridad se puede pulsar`() {
+        val task = task("Comprar pan", priority = TasklaneConfig.HIGH)
+        val tree = treeWith(task)
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Priority
+        }
+
+        assertEquals(task.id, hit?.task?.id)
+    }
+
+    /**
+     * La de fábrica también, y es el caso que importa: mientras se callaba, las
+     * tarjetas que nadie había tocado —las más— eran justo las que no tenían por dónde
+     * cambiar de prioridad sin abrir el menú.
+     */
+    @Test
+    fun `la prioridad de fabrica tambien se puede pulsar`() {
+        val task = task("Comprar pan")
+        val tree = treeWith(task)
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Priority
+        }
+
+        assertEquals(task.id, hit?.task?.id)
+    }
+
+    /**
+     * El **punto de color** cuenta como distintivo: es más pequeño que la palabra y es
+     * justo a donde se apunta —el color es lo que identifica una prioridad—, así que
+     * dejarlo fuera dejaba medio control sin responder.
+     *
+     * No se comprueba en qué píxel está el punto, sino que la zona pulsable empieza
+     * donde empieza la tarjeta: el distintivo es el primero de su línea y el icono va
+     * delante de su texto, así que sin el punto la zona arrancaría un icono más allá.
+     */
+    @Test
+    fun `el punto de color de la prioridad tambien se pulsa`() {
+        val tree = treeWith(task("Comprar pan", priority = TasklaneConfig.HIGH))
+        val bounds = painted(tree, 0)
+
+        val chip = firstColumn(tree, bounds) {
+            renderer.hotspotAt(tree, it) is TaskTreeRenderer.Hotspot.Priority
+        }
+        val text = firstColumn(tree, bounds) { renderer.caretAt(tree, it) != null }
+
+        assertNotNull("el distintivo de prioridad tiene que tener zona", chip)
+        assertNotNull("la tarjeta tiene que tener texto", text)
+        assertTrue(
+            "la zona del distintivo empieza en $chip y el texto de la tarjeta en $text",
+            chip!! <= text!! + ICON_SLACK,
+        )
+    }
+
+    /** Lo pulsable se resuelve de una vez, y cada cosa sigue siendo la suya. */
+    @Test
+    fun `el enlace y la prioridad no se confunden entre si`() {
+        val tree = treeWith(task("Revisar https://ejemplo.com/a", priority = TasklaneConfig.HIGH))
+        val bounds = painted(tree, 0)
+
+        val links = scanAll(tree, bounds) { renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Links }
+        val priorities = scanAll(tree, bounds) { renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Priority }
+
+        assertEquals(setOf("https://ejemplo.com/a"), links.flatMap { it.links }.map { it.url }.toSet())
+        assertTrue("el distintivo de prioridad tiene que seguir teniendo su zona", priorities.isNotEmpty())
+    }
+
+    // ------------------------------------------------------ desplegar la tarjeta
+
+    /**
+     * Lo que justifica el botón: plegada la tarjeta resume el cuerpo en una línea, y
+     * lo que no cabe ahí no hay forma de leerlo sin abrir la tarea.
+     */
+    @Test
+    fun `desplegar la tarjeta ensena el cuerpo entero`() {
+        val task = task("Comprar pan\nen la panaderia de la esquina\ny pagar en efectivo")
+        val tree = treeWith(task)
+
+        assertEquals(listOf("Comprar pan", "en la panaderia de la esquina"), renderer.cardText(tree, 0))
+        val folded = cardHeight(tree, 0)
+
+        expand(tree, task)
+
+        assertEquals(
+            listOf("Comprar pan", "en la panaderia de la esquina", "y pagar en efectivo"),
+            renderer.cardText(tree, 0),
+        )
+        assertTrue("la tarjeta desplegada tiene que crecer", cardHeight(tree, 0) > folded)
+    }
+
+    /** Y vuelve a ser la de antes: el botón es un interruptor, no un camino de ida. */
+    @Test
+    fun `volver a pulsar deja la tarjeta como estaba`() {
+        val task = task("Comprar pan\nen la panaderia\ny pagar en efectivo")
+        val tree = treeWith(task)
+        val folded = renderer.cardText(tree, 0)
+
+        expand(tree, task)
+        expand(tree, task)
+
+        assertEquals(folded, renderer.cardText(tree, 0))
+    }
+
+    /**
+     * Un botón que no hace nada es peor que ninguno: una tarjeta que ya se ve entera
+     * no lo enseña, y una desplegada lo enseña aunque el ratón no esté encima —si no,
+     * no habría forma evidente de volver a plegarla—.
+     */
+    @Test
+    fun `el boton de desplegar solo aparece si hay algo escondido`() {
+        val short = task("Comprar pan")
+        val long = task("Comprar pan\nen la panaderia\ny pagar en efectivo")
+
+        val plain = treeWith(short)
+        renderer.hoveredRow = 0
+        assertFalse(
+            "una tarjeta que cabe entera no tiene nada que desplegar",
+            TaskTreeRenderer.RowTarget.EXPAND in scanAll(plain, painted(plain, 0)) { renderer.targetAt(plain, it) },
+        )
+
+        val deep = treeWith(long)
+        renderer.hoveredRow = 0
+        assertTrue(
+            "con cuerpo escondido tiene que haber donde pulsar",
+            TaskTreeRenderer.RowTarget.EXPAND in scanAll(deep, painted(deep, 0)) { renderer.targetAt(deep, it) },
+        )
+
+        renderer.hoveredRow = -1
+        expand(deep, long)
+        assertTrue(
+            "desplegada, el boton de plegar se ve sin el raton encima",
+            TaskTreeRenderer.RowTarget.EXPAND in scanAll(deep, painted(deep, 0)) { renderer.targetAt(deep, it) },
+        )
+    }
+
+    /** El hueco del botón se reserva antes de saber si se usa: los tres iconos miden igual. */
+    @Test
+    fun `los controles de la fila ocupan todos lo mismo`() {
+        assertEquals(EmptyIcon.ICON_16.iconWidth, AllIcons.General.ArrowDown.iconWidth)
+        assertEquals(EmptyIcon.ICON_16.iconWidth, AllIcons.General.ArrowUp.iconWidth)
+    }
+
+    // -------------------------------------------------------- imagenes de la tarjeta
+
+    /**
+     * Desplegar enseña también las capturas, que es lo que el contador «1 img» sólo
+     * podía anunciar. Se mide por la altura y no por píxeles concretos: lo que importa
+     * es que la imagen **ocupa sitio** en la tarjeta.
+     */
+    @Test
+    fun `la tarjeta desplegada pinta sus imagenes`() {
+        val task = task("Comprar pan\n![](tasklane:$SHA)")
+        renderer.images = previewsOf(AttachmentId(SHA) to square(90))
+        val tree = treeWith(task)
+
+        val folded = cardHeight(tree, 0)
+        expand(tree, task)
+
+        assertTrue("la imagen tiene que crecer la tarjeta", cardHeight(tree, 0) >= folded + 90)
+    }
+
+    /**
+     * Plegada no. La tarjeta mide tres o cuatro líneas para que quepan muchas a la
+     * vista; una captura dentro dejaría dos tareas por pantalla.
+     */
+    @Test
+    fun `plegada la tarjeta no pinta imagenes`() {
+        val withImage = task("Comprar pan\n![](tasklane:$SHA)")
+        renderer.images = previewsOf(AttachmentId(SHA) to square(90))
+
+        val tree = treeWith(withImage)
+        val plain = treeWith(task("Comprar pan"))
+
+        assertEquals(cardHeight(plain, 0), cardHeight(tree, 0))
+    }
+
+    /** Una captura encogida no se lee: tiene que poder ampliarse de un clic. */
+    @Test
+    fun `la imagen de la tarjeta se amplia de un clic`() {
+        val task = task("Comprar pan\n![](tasklane:$SHA)")
+        renderer.images = previewsOf(AttachmentId(SHA) to square(90))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Image
+        }
+
+        assertEquals(AttachmentId(SHA), hit?.id)
+    }
+
+    /** Un marcador de carga no lleva a ningún sitio, así que ahí no hay nada que pulsar. */
+    @Test
+    fun `una imagen que no esta no se puede ampliar`() {
+        val task = task("Comprar pan\n![](tasklane:$SHA)")
+        renderer.images = previewsOf()
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        assertTrue(
+            scanAll(tree, painted(tree, 0)) {
+                renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Image
+            }.isEmpty(),
+        )
+    }
+
+    /** Una tarea con capturas esconde algo aunque su texto quepa entero. */
+    @Test
+    fun `una tarea con imagenes se puede desplegar`() {
+        val task = task("Comprar pan\n![](tasklane:$SHA)")
+        renderer.images = previewsOf(AttachmentId(SHA) to square(90))
+        val tree = treeWith(task)
+        renderer.hoveredRow = 0
+
+        assertTrue(
+            TaskTreeRenderer.RowTarget.EXPAND in
+                scanAll(tree, painted(tree, 0)) { renderer.targetAt(tree, it) },
+        )
+    }
+
+    /**
+     * Las imágenes que se le dan por listas; el resto, ausentes. Sin esto haría falta
+     * la `Application` del IDE, que es lo que este test evita.
+     */
+    private fun previewsOf(vararg ready: Pair<AttachmentId, BufferedImage>) = object : CardPreviews {
+        private val images = ready.toMap()
+
+        override fun stateOf(repo: RepoKey, id: AttachmentId): CardImageView.State =
+            if (id in images) CardImageView.State.READY else CardImageView.State.MISSING
+
+        override fun preview(repo: RepoKey, id: AttachmentId, maxWidth: Int, maxHeight: Int): BufferedImage? =
+            images[id]
+
+    }
+
+    private fun square(side: Int) = BufferedImage(side, side, BufferedImage.TYPE_INT_ARGB)
+
+    // ------------------------------------------------------- seleccionar el texto
+
+    /**
+     * Que el texto de la tarjeta se pueda marcar con el ratón. Lo que se comprueba no
+     * es en qué píxel cae cada letra —eso depende de la fuente— sino que barriendo la
+     * tarjeta de izquierda a derecha el cursor recorre el título de punta a punta.
+     */
+    @Test
+    fun `el raton recorre el texto de la tarjeta de principio a fin`() {
+        val task = task("Comprar pan")
+        val tree = treeWith(task)
+
+        val carets = scanAll(tree, painted(tree, 0)) { renderer.caretAt(tree, it)?.pos }
+
+        assertTrue("tiene que haber texto que marcar", carets.isNotEmpty())
+        assertEquals("el titulo es la primera linea", setOf(0), carets.map { it.line }.toSet())
+        assertEquals(0, carets.minOf { it.offset })
+        assertEquals("Comprar pan".length, carets.maxOf { it.offset })
+    }
+
+    /**
+     * Que el cursor caiga **donde caen las letras**, y no unos píxeles a un lado.
+     *
+     * Se cruza con el *hit testing* de los enlaces, que es la única referencia exacta
+     * que hay a mano: la plataforma sabe decir en qué píxeles se pintó el fragmento
+     * del enlace, así que al principio de ese tramo el cursor tiene que valer cero y
+     * justo detrás, el largo del texto. Es lo que se rompería si el relleno que
+     * `SimpleColoredComponent` pone por delante dejara de ser el que se cree.
+     */
+    @Test
+    fun `el cursor de texto cae donde caen las letras`() {
+        val tree = treeWith(task("https://ejemplo.com/a"))
+        val bounds = painted(tree, 0)
+        // La altura del título, no la del centro de la tarjeta: debajo está la línea
+        // de distintivos, y su indicador contesta por todos los enlaces de la tarea.
+        val y = bounds.y + (0 until bounds.height)
+            .first { renderer.caretAt(tree, Point(bounds.x + bounds.width / 2, bounds.y + it)) != null }
+
+        val xs = (0 until bounds.width)
+            .filter { linksAt(tree, Point(bounds.x + it, y)).isNotEmpty() }
+        assertTrue("sin enlace no hay con que cruzar", xs.isNotEmpty())
+        val painted = renderer.cardText(tree, 0).first()
+
+        assertEquals(0, renderer.caretAt(tree, Point(bounds.x + xs.min(), y))?.pos?.offset)
+        assertEquals(painted.length, renderer.caretAt(tree, Point(bounds.x + xs.max() + 1, y))?.pos?.offset)
+    }
+
+    /** Fuera del texto no hay cursor: ni la línea de distintivos ni el hueco cuentan. */
+    @Test
+    fun `la cabecera de la fila no tiene texto que marcar`() {
+        val tree = treeWith(task("Comprar pan"))
+        val bounds = painted(tree, 0)
+
+        assertNotNull(scan(tree, bounds) { renderer.caretAt(tree, it) })
+        assertEquals(null, renderer.caretAt(tree, Point(bounds.x + 1, bounds.y - 100)))
+    }
+
+    /** Lo que se copia es lo que se marcó, contado sobre las líneas de la pantalla. */
+    @Test
+    fun `se copia el tramo marcado y nada mas`() {
+        val task = task("Comprar pan\nen la panaderia")
+        val tree = treeWith(task)
+
+        renderer.selection = CardSelection(task.id, TextPos(0, 0), TextPos(0, 7))
+        assertEquals("Comprar", CardTextSelection.selectedText(tree, renderer))
+
+        // Cruzando líneas se copia con el salto de línea puesto.
+        renderer.selection = CardSelection(task.id, TextPos(0, 8), TextPos(1, 2))
+        assertEquals("pan\nen", CardTextSelection.selectedText(tree, renderer))
+
+        // Un clic sin arrastrar no es una selección: no hay nada que copiar.
+        renderer.selection = CardSelection(task.id, TextPos(0, 3), TextPos(0, 3))
+        assertEquals(null, CardTextSelection.selectedText(tree, renderer))
+    }
+
+    /**
+     * Los distintivos se ven **siempre**, aunque la fila se haya medido a otro ancho.
+     *
+     * El árbol mide el alto de cada fila una vez y lo guarda, mientras que el título se
+     * envuelve contra el ancho de cada momento: estrechar la ventana parte el título en
+     * una línea más de las que se midieron, y la que sobra por abajo es justo la de
+     * prioridad, vencimiento y etiquetas. Desaparecían sin dejar rastro —había tarjetas
+     * con ellas y tarjetas sin ellas— y nada explicaba la diferencia.
+     *
+     * La ventana ya no deja que las dos medidas se separen (`TasklanePanel`), pero el
+     * sitio donde eso **no puede** doler es éste: la última línea se pega al fondo del
+     * hueco que haya en vez de caerse fuera. Ver [com.tasklane.ui.toolwindow.RowStack].
+     */
+    @Test
+    fun `los distintivos se ven aunque la fila se haya medido mas ancha`() {
+        val task = task("ver lo de los endpoints de configuracion de brand de company\nGET /api/brand")
+        val tree = treeWith(task)
+        // Medida a 600 y pintada a 300, que es lo que pasaba al aparecer la barra de
+        // desplazamiento: el alto sigue siendo el de dos líneas y el título ya pide tres.
+        tree.setSize(300, 400)
+        tree.doLayout()
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Priority
+        }
+
+        assertEquals(task.id, hit?.task?.id)
+    }
+
+    // ------------------------------------------------------ el ancho de la fila
+
+    /**
+     * La tarjeta no se sale del hueco visible por muchos distintivos que lleve.
+     *
+     * La línea de distintivos pide el ancho de todos los suyos aunque luego deje
+     * fuera los que no caben, y el árbol crece hasta la fila más ancha que tenga. Con
+     * la tool window estrecha eso daba por recortadas todas las tarjetas: la
+     * plataforma sacaba al pasar el ratón su ventanita de «fila completa» fuera del
+     * panel, y dentro iban los botones de la derecha — que se cerraba antes de que el
+     * ratón llegara a ellos.
+     */
+    @Test
+    fun `la tarjeta no se sale del ancho visible`() {
+        val tree = treeWith(
+            task(
+                "Comprar pan",
+                tags = listOf("planificacion", "pendiente", "compras", "semana", "casa", "cocina"),
+            ),
+        )
+
+        val bounds = tree.getRowBounds(0)
+
+        assertTrue(
+            "la fila acaba en ${bounds.x + bounds.width} sobre un arbol de ${tree.width}",
+            bounds.x + bounds.width <= tree.width,
+        )
+    }
+
+    /**
+     * El resalte se pinta partiendo los tramos y dándole fondo al de en medio, así que
+     * lo que no puede pasar es que marcar cambie una sola letra de la fila.
+     */
+    @Test
+    fun `marcar texto no cambia lo que se pinta`() {
+        val task = task("Comprar pan")
+        val tree = treeWith(task)
+        renderer.selection = CardSelection(task.id, TextPos(0, 2), TextPos(0, 5))
+
+        val node = tree.getPathForRow(0).lastPathComponent
+        renderer.getTreeCellRendererComponent(tree, node, false, false, true, 0, false)
+
+        assertEquals("Comprar pan", renderer.textRenderer.getCharSequence(false).toString())
+    }
+
+    /**
+     * Que la lista **se pinte**, con todo encendido a la vez: la tarjeta desplegada
+     * —que crea líneas y vistas previas nuevas dentro del propio pintado—, una imagen,
+     * un tramo de texto marcado —que parte los tramos y les pone fondo— y el ratón
+     * encima.
+     *
+     * Es el test que faltaba cuando la fila se quedó en blanco al poner el nombre
+     * accesible de una pestaña: ninguno montaba de verdad el pintado, así que una
+     * excepción ahí dentro no la veía nadie hasta abrir el IDE.
+     */
+    @Test
+    fun `la lista se pinta con la tarjeta desplegada y texto marcado`() {
+        val task = task(
+            "Comprar pan https://ejemplo.com/a\nen la panaderia\n![](tasklane:$SHA)\ny pagar en efectivo",
+            priority = TasklaneConfig.HIGH,
+        )
+        renderer.images = previewsOf(AttachmentId(SHA) to square(60))
+        val tree = treeWith(task)
+        expand(tree, task)
+        renderer.selection = CardSelection(task.id, TextPos(0, 2), TextPos(2, 3))
+        renderer.hoveredRow = 0
+
+        val image = BufferedImage(600, 400, BufferedImage.TYPE_INT_ARGB)
+        val graphics = image.createGraphics()
+        try {
+            tree.paint(graphics)
+        } finally {
+            graphics.dispose()
+        }
+
+        // Y que haya pintado algo: un lienzo en blanco pasaría el test sin haber
+        // llegado nunca al renderer, que es justo lo que se quiere comprobar.
+        val painted = (0 until image.height).any { y -> (0 until image.width).any { x -> image.getRGB(x, y) != 0 } }
+        assertTrue("el arbol tiene que haber pintado la tarjeta", painted)
+    }
+
+    /** La altura de la tarjeta según el propio renderer, sin depender de la caché del árbol. */
+    private fun cardHeight(tree: JTree, row: Int): Int {
+        val node = tree.getPathForRow(row).lastPathComponent
+        return renderer.getTreeCellRendererComponent(tree, node, false, false, true, row, false)
+            .preferredSize.height
     }
 
     /**
@@ -194,9 +718,26 @@ class TaskTreeRendererTest {
      */
     private fun painted(tree: JTree, row: Int) = paintedRowBounds(tree, row)!!
 
+    /**
+     * Desplegar una tarjeta **como lo hace la ventana**: cambia lo que mide la fila, y
+     * el árbol guarda esas medidas, así que hay que tirárselas. Sin esto la fila se
+     * queda con el alto de la tarjeta plegada y lo que se mide encima es un estado que
+     * en el plugin no existe — ver `TasklanePanel.toggleExpanded`.
+     */
+    private fun expand(tree: JTree, task: Task) {
+        renderer.toggleExpanded(task)
+        remeasure(tree)
+    }
+
     /** El primer punto de la fila donde [probe] contesta algo. Rejilla de 2 px. */
     private fun <T : Any> scan(tree: JTree, bounds: Rectangle, probe: (Point) -> T?): T? =
         scanAll(tree, bounds, probe).firstOrNull()
+
+    /** La primera columna de la fila en la que [probe] dice que sí. */
+    private fun firstColumn(tree: JTree, bounds: Rectangle, probe: (Point) -> Boolean): Int? =
+        (0 until bounds.width).firstOrNull { x ->
+            (0 until bounds.height step 2).any { y -> probe(Point(bounds.x + x, bounds.y + y)) }
+        }
 
     private fun <T : Any> scanAll(tree: JTree, bounds: Rectangle, probe: (Point) -> T?): List<T> =
         (0 until bounds.height step 2).flatMap { y ->
@@ -204,6 +745,16 @@ class TaskTreeRendererTest {
         }
 
     companion object {
+        /**
+         * Holgura de la comprobación del punto de color: el icono mide ocho píxeles y
+         * detrás va el hueco hasta el texto, así que sin él la zona del distintivo
+         * empezaría bastante más de esto a la derecha.
+         */
+        const val ICON_SLACK = 4
+
+        /** Un SHA-256 de mentira, con la longitud exacta que exige `ImageRefParser`. */
+        const val SHA = "abc123def456abc123def456abc123def456abc123def456abc123def4561234"
+
         @BeforeClass
         @JvmStatic
         fun headless() {

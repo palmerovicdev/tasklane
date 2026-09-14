@@ -18,6 +18,7 @@ import com.tasklane.data.store.alert
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.repo.RepositoryRegistry
@@ -63,11 +64,19 @@ class TaskService(
     val snapshot: StateFlow<TasklaneSnapshot> = _snapshot.asStateFlow()
 
     /**
-     * Petición de «enséñame estas tareas». La emite la acción de una notificación y
-     * la atiende la pestaña que las contenga. Va por flow y no por llamada directa
-     * porque el servicio no conoce la UI ni debe conocerla.
+     * Petición de «enséñame estas tareas». La emiten la acción de una notificación y el
+     * clic sobre una marca del editor, y la atiende la pestaña que las contenga. Va por
+     * flow y no por llamada directa porque el servicio no conoce la UI ni debe conocerla.
+     *
+     * **`replay = 1` porque la ventana puede no existir todavía.** Sus pestañas se
+     * construyen al abrirla por primera vez y se suscriben desde una corrutina, así que
+     * una petición hecha justo al abrirla —que es lo que hace el clic de una marca— se
+     * perdería entre la construcción y la suscripción. Con el replay, la pestaña recién
+     * nacida la recibe igual. Lo que puede resucitar es la última petición cuando se crea
+     * una pestaña nueva por haber añadido un estado en *Settings*; ahí la tarea no es de
+     * ese estado y la pestaña la ignora, que es lo que ya hacía con las ajenas.
      */
-    private val _reveal = MutableSharedFlow<Set<TaskId>>(extraBufferCapacity = 8)
+    private val _reveal = MutableSharedFlow<Set<TaskId>>(replay = 1, extraBufferCapacity = 8)
     val reveal: SharedFlow<Set<TaskId>> = _reveal.asSharedFlow()
 
     /** Repos con cambios sin volcar. Se acumulan aquí y el debounce solo da la señal. */
@@ -145,6 +154,23 @@ class TaskService(
 
     fun requestReveal(ids: Set<TaskId>) {
         if (ids.isNotEmpty()) _reveal.tryEmit(ids)
+    }
+
+    /**
+     * «Llévame a estas tareas», con el repositorio ya puesto.
+     *
+     * Es lo que pide una marca del editor al pulsarla: el fichero no sabe de
+     * repositorios, así que la tarea que cuelga de él puede ser de una lista que ni
+     * siquiera está abierta, y una petición de enseñar que cae en un repositorio
+     * inactivo no la atiende nadie. Se cambia sólo si **ninguna** de las tareas está en
+     * el activo: con una que lo esté, cambiar sería llevarse al usuario de su lista para
+     * enseñarle algo que ya podía ver.
+     */
+    fun revealTasks(tasks: List<Task>) {
+        if (tasks.isEmpty()) return
+        val active = _snapshot.value.activeRepo
+        if (tasks.none { it.repo == active }) selectRepo(tasks.first().repo)
+        requestReveal(tasks.map { it.id }.toSet())
     }
 
     /**

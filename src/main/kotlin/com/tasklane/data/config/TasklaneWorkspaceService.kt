@@ -9,12 +9,13 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.util.xmlb.annotations.Attribute
 import com.tasklane.domain.export.ExportFormat
+import com.tasklane.domain.model.AnchorMarkerStyle
 import com.tasklane.domain.model.TaskFilter
 
 /**
  * Estado de UI del proyecto: qué repositorio y qué estado estaban seleccionados, si
- * la búsqueda miraba a todos los repositorios, qué filtro de vista estaba puesto y en
- * qué formato se exporta.
+ * la búsqueda miraba a todos los repositorios, qué filtro de vista estaba puesto, en
+ * qué formato se exporta y cómo se marcan las anclas en el editor.
  *
  * Va a `workspace.xml` y no a `tasklane.xml` porque no es una decisión que se
  * comparta con el equipo, sino dónde estaba mirando **esta** persona en **esta**
@@ -48,6 +49,9 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
 
         @Attribute
         var selectedState: String? = null
+
+        @Attribute
+        var anchorMarker: String? = null
     }
 
     private var state = WorkspaceState()
@@ -85,6 +89,20 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
         get() = TaskFilter.entries.firstOrNull { it.name == state.viewFilter } ?: TaskFilter.ALL
         set(value) {
             state.viewFilter = value.name
+        }
+
+    /**
+     * Cómo se marcan en el editor las líneas con tareas. Ver [AnchorMarkerStyle].
+     *
+     * Aquí y no en `tasklane.xml` porque no es una decisión del proyecto: no cambia
+     * nada de lo que se guarda ni de lo que ve el equipo, sólo qué dibuja **esta**
+     * instalación encima del código. Compartirla obligaría a que todo el equipo mirara
+     * el margen igual.
+     */
+    var anchorMarker: AnchorMarkerStyle
+        get() = AnchorMarkerStyle.entries.firstOrNull { it.name == state.anchorMarker } ?: AnchorMarkerStyle.GUTTER
+        set(value) {
+            state.anchorMarker = value.name
         }
 
     /** Formato del portapapeles. Markdown por defecto: es lo que entiende el destino habitual. */

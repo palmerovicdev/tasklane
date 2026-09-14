@@ -39,6 +39,17 @@ internal object TitleWrap {
     const val ELLIPSIS = "…"
 
     /**
+     * El resultado del troceado: las líneas y si hubo que **dejarse algo fuera**.
+     *
+     * Lo segundo no se deduce mirando las líneas. Mirar si la última acaba en
+     * puntos suspensivos confundiría un recorte con un título que termina en «…»
+     * escrito a mano, y contar líneas tampoco sirve: un texto puede caber justo en
+     * el máximo. Quien trocea es el único que lo sabe de verdad, así que lo dice.
+     * Es lo que decide si la tarjeta enseña el botón de desplegar.
+     */
+    class Fit(val lines: List<List<Run>>, val clipped: Boolean)
+
+    /**
      * @param available ancho útil en píxeles. Si no es positivo no se envuelve: el
      *   árbol todavía no tiene tamaño y adivinar daría un corte que habría que
      *   rehacer en el primer `doLayout`.
@@ -48,9 +59,17 @@ internal object TitleWrap {
         available: Int,
         maxLines: Int,
         width: (String, SimpleTextAttributes) -> Int,
-    ): List<List<Run>> {
-        if (runs.isEmpty()) return emptyList()
-        if (available <= 0 || maxLines <= 1) return listOf(runs)
+    ): List<List<Run>> = fit(runs, available, maxLines, width).lines
+
+    /** Como [wrap], y además si algo se quedó fuera. Ver [Fit]. */
+    fun fit(
+        runs: List<Run>,
+        available: Int,
+        maxLines: Int,
+        width: (String, SimpleTextAttributes) -> Int,
+    ): Fit {
+        if (runs.isEmpty()) return Fit(emptyList(), false)
+        if (available <= 0 || maxLines <= 1) return Fit(listOf(runs), false)
 
         val lines = mutableListOf<MutableList<Piece>>(mutableListOf())
         var used = 0
@@ -85,11 +104,11 @@ internal object TitleWrap {
         available: Int,
         width: (String, SimpleTextAttributes) -> Int,
         overflowed: Boolean,
-    ): List<List<Run>> {
+    ): Fit {
         val trimmed = lines.filter { it.isNotEmpty() }
-        if (trimmed.isEmpty()) return emptyList()
+        if (trimmed.isEmpty()) return Fit(emptyList(), false)
         if (overflowed) truncate(trimmed.last(), available, width)
-        return trimmed.map(::merge)
+        return Fit(trimmed.map(::merge), overflowed)
     }
 
     /**

@@ -103,17 +103,71 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
-            <h3>1.0.0 &mdash; the eight phases are done</h3>
+            <h3>1.3.0 &mdash; cards you can read and act on</h3>
             <ul>
-              <li>Task cards now render the Markdown of the body instead of showing the
-                  markers: bold, italics, inline code and strikethrough.</li>
-              <li>The whole card reacts to the mouse, not only the part with text.</li>
-              <li>Group headers show a chevron and fold with a click; the "Group by"
-                  drop-down now keeps its tick on the grouping actually in use.</li>
-              <li>Keyboard navigation reaches the state tabs, and the tree, the search
-                  field and the dialog fields report proper names to screen readers.</li>
-              <li>An unreadable task file is quarantined, recovered from its backup and
-                  reported; a file written by a newer version opens read-only.</li>
+              <li><b>Card text is selectable.</b> Drag across a card to select its text
+                  and press <code>Cmd/Ctrl+C</code> to copy it. <code>Escape</code>
+                  clears the selection.</li>
+              <li><b>Expand a card</b> with the new chevron on its right to read the
+                  whole task in place &mdash; the title without the three-line cap and
+                  every line of the body, not just the first one. Click it again to fold
+                  it back. It only shows up when the card is actually hiding something.</li>
+              <li><b>Images show up in an expanded card</b>, scaled, with the same
+                  border and the same loading marker as in the dialog, each one right
+                  after the line that references it. Click one to see it full size. A
+                  folded card still shows the <code>1 img</code> counter instead.</li>
+              <li><b>Change the priority without opening the dialog.</b> Click the
+                  priority badge on a card for a list of priorities with their colours,
+                  or use the new <i>Priority</i> submenu in the context menu to change
+                  every selected task at once. Every card carries the badge now, the
+                  default priority included &mdash; it is the button, and the cards
+                  nobody has touched yet are the ones whose priority changes most.</li>
+              <li>Fixed: with a narrow tool window, a card with a few tags asked for more
+                  width than there was, and the platform popped the rest of the row
+                  outside the panel on hover &mdash; with the buttons on its right inside.
+                  Reaching for them closed it. A card never asks for more than it can
+                  show now.</li>
+              <li>Fixed: cards in a narrow tool window could lose their bottom line
+                  &mdash; priority, date and tags gone, with no hint why. The tree kept a
+                  width of its own and stopped following the panel, so a card was
+                  measured at one width and painted at another. It follows the panel now,
+                  and the window itself will not go below 300px wide.</li>
+            </ul>
+
+            <h3>1.2.1</h3>
+            <ul>
+              <li>Fixed: the inline mark's popup vanished after a fraction of a second, with
+                  the mouse still on it. It now stays for as long as you hover it.</li>
+            </ul>
+
+            <h3>1.2.0 &mdash; and the code points back</h3>
+            <ul>
+              <li><b>Anchored lines are marked in the editor</b>, in the colour of the
+                  task's priority. Hover the mark to read the task, click it to open it in
+                  the tool window.</li>
+              <li>Only tasks that are still open get a mark: a task in a done state is
+                  history, not a note about the code.</li>
+              <li>Choose the mark in <i>Settings &rarr; Tools &rarr; Tasklane</i>: a gutter
+                  icon, or an inline chip on the exact character the task was about. The
+                  choice is yours alone &mdash; it is not shared with the project.</li>
+              <li>An anchor now remembers the column too, so it takes you back to the
+                  character and not just to the line.</li>
+            </ul>
+
+            <h3>1.1.0 &mdash; tasks that point at the code</h3>
+            <ul>
+              <li><b>New Tasklane Task from Here</b> in the editor's context menu creates a
+                  task anchored to the file and line you are looking at, with the selected
+                  text as its body. The card shows a <code>Auth.kt:42</code> badge that
+                  jumps straight back there.</li>
+              <li>An anchor survives edits above it: the line is found again by its text,
+                  not by its number.</li>
+              <li>New search operators: <code>file:</code> and <code>has:code</code>.</li>
+              <li><b>Move To</b> sends the selected tasks to another state without opening
+                  the dialog, with <code>Shift+Alt+Left/Right</code> to move them one tab
+                  at a time. <code>Alt+Left/Right</code> switches state tabs again.</li>
+              <li>Fixed: group headers would not fold. The platform silently refuses to
+                  collapse a top-level node in a tree without root handles.</li>
             </ul>
             """.trimIndent()
         }

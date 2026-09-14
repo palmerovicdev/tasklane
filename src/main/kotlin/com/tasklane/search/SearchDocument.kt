@@ -13,20 +13,26 @@ import com.tasklane.domain.text.TextNormalizer
  */
 internal class SearchDocument(
     val title: String,
-    /** Cuerpo completo más las etiquetas: lo que recorre el texto libre. */
+    /** Cuerpo completo, más las etiquetas y las rutas ancladas: lo que recorre el texto libre. */
     val haystack: String,
     val tags: List<String>,
+    /** Las rutas de las anclas, normalizadas. Es lo que evalúa `file:`. */
+    val files: List<String>,
 ) {
     companion object {
         fun of(task: Task): SearchDocument {
             val tags = task.tags.map(TextNormalizer::normalize)
+            val files = task.anchors.map { TextNormalizer.normalize(it.path) }
             val body = TextNormalizer.normalize(task.body)
             return SearchDocument(
                 title = TextNormalizer.normalize(task.title),
-                // Las etiquetas entran también en el texto libre: buscar `api` debe
-                // encontrar una tarea etiquetada `api` aunque no lo diga el cuerpo.
-                haystack = if (tags.isEmpty()) body else tags.joinToString(" ", prefix = "$body "),
+                // Las etiquetas y las rutas entran también en el texto libre: buscar
+                // `api` debe encontrar una tarea etiquetada `api` aunque no lo diga el
+                // cuerpo, y escribir `AuthService` debe encontrar lo que apunta a ese
+                // fichero aunque la nota lo llame de otra manera.
+                haystack = (listOf(body) + tags + files).joinToString(" "),
                 tags = tags,
+                files = files,
             )
         }
     }

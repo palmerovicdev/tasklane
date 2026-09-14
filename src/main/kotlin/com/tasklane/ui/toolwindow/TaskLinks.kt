@@ -9,57 +9,21 @@ import com.intellij.ui.awt.RelativePoint
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.TaskLink
 import com.tasklane.domain.text.UrlShortener
-import java.awt.Cursor
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import javax.swing.Icon
-import javax.swing.JTree
 
 /**
  * Abrir un enlace **desde la fila**, sin entrar a editar la tarea. Es el criterio de
  * aceptación de la Fase 5 y la razón de que los enlaces se extraigan al escribir.
  *
  * Un clic basta: con un solo enlace se abre, con varios sale un `ListPopup` con las
- * URLs acortadas. El doble clic sigue siendo «editar», así que el gesto de editar no
- * se pierde en las filas que tienen enlaces —sólo deja de dispararse justo encima de
- * uno—.
+ * URLs acortadas. Quien atiende ese clic es [RowClicks], que es el que sabe si el ratón
+ * está sobre un enlace o sobre otra cosa de la fila; aquí queda sólo lo que hay que
+ * hacer una vez que se sabe.
  */
 internal object TaskLinks {
 
     /** Presupuesto de acortado del popup: cabe más que en una fila del árbol. */
     private const val POPUP_MAX = 72
-
-    fun install(tree: JTree, renderer: TaskTreeRenderer) {
-        val mouse = object : MouseAdapter() {
-            override fun mouseMoved(e: MouseEvent) {
-                val links = renderer.linksAt(tree, e.point)
-                tree.cursor = if (links.isEmpty()) {
-                    Cursor.getDefaultCursor()
-                } else {
-                    Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                }
-                // La URL completa vive en el modelo y en el tooltip; lo que se pinta
-                // es la acortada. Con varios enlaces no se enseña ninguno: el popup
-                // los lista todos.
-                tree.toolTipText = links.singleOrNull()?.url
-            }
-
-            override fun mouseExited(e: MouseEvent) {
-                tree.cursor = Cursor.getDefaultCursor()
-                tree.toolTipText = null
-            }
-
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount != 1 || e.button != MouseEvent.BUTTON1 || e.isPopupTrigger) return
-                val links = renderer.linksAt(tree, e.point)
-                if (links.isEmpty()) return
-                e.consume()
-                open(links, RelativePoint(e))
-            }
-        }
-        tree.addMouseListener(mouse)
-        tree.addMouseMotionListener(mouse)
-    }
 
     fun open(links: List<TaskLink>, at: RelativePoint) {
         // El mismo enlace repetido en el cuerpo es un enlace: el popup preguntaría

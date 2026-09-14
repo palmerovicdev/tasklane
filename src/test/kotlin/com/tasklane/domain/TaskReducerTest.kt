@@ -3,6 +3,7 @@ package com.tasklane.domain
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
@@ -95,6 +96,42 @@ class TaskReducerTest {
             .activeTasks.single()
 
         assertEquals(listOf("api", "docs"), conTags.tags)
+    }
+
+    @Test
+    fun `crear desde el editor guarda el ancla`() {
+        val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {")
+        val task = reducer
+            .reduce(empty, TaskCommand.Create(repo, "Arreglar el login", anchors = listOf(anchor, anchor)))
+            .activeTasks.single()
+
+        // Repetida una sola vez: anclar dos veces el mismo sitio es anclarlo una.
+        assertEquals(listOf(anchor), task.anchors)
+    }
+
+    @Test
+    fun `quitar un ancla cuenta como edicion`() {
+        val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {")
+        val creada = reducer.reduce(empty, TaskCommand.Create(repo, "Arreglar", anchors = listOf(anchor)))
+        val id = creada.activeTasks.single().id
+        val antes = creada.activeTasks.single().updatedAt
+
+        val despues = TaskReducer(Clock.fixed(t0.plusSeconds(60), ZoneOffset.UTC))
+            .reduce(creada, TaskCommand.SetAnchors(repo, id, emptyList()))
+            .activeTasks.single()
+
+        assertEquals(emptyList<CodeAnchor>(), despues.anchors)
+        assertTrue("quitar un ancla tiene que tocar updatedAt", despues.updatedAt.isAfter(antes))
+    }
+
+    /** Fijar lo mismo que ya había no es una edición: no puede mover la tarea de grupo. */
+    @Test
+    fun `fijar las mismas anclas no toca nada`() {
+        val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {")
+        val creada = reducer.reduce(empty, TaskCommand.Create(repo, "Arreglar", anchors = listOf(anchor)))
+        val id = creada.activeTasks.single().id
+
+        assertSame(creada, reducer.reduce(creada, TaskCommand.SetAnchors(repo, id, listOf(anchor))))
     }
 
     @Test

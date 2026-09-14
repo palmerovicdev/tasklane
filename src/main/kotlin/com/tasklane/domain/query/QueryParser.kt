@@ -27,6 +27,7 @@ object QueryParser {
         val priorities = mutableSetOf<String>()
         val repos = mutableSetOf<String>()
         val tags = mutableSetOf<String>()
+        val files = mutableSetOf<String>()
         val has = mutableSetOf<TaskQuery.Facet>()
         var done: Boolean? = null
 
@@ -50,6 +51,7 @@ object QueryParser {
                 "state" -> states += value
                 "p", "priority" -> priorities += value
                 "repo" -> repos += value
+                "file" -> files += value
                 "is" -> when (value) {
                     "done", "closed" -> done = true
                     "open", "todo" -> done = false
@@ -59,6 +61,7 @@ object QueryParser {
                 "has" -> when (value) {
                     "link", "links" -> has += TaskQuery.Facet.LINK
                     "image", "images" -> has += TaskQuery.Facet.IMAGE
+                    "code", "anchor" -> has += TaskQuery.Facet.CODE
                     else -> terms += TextNormalizer.normalize(token)
                 }
 
@@ -72,6 +75,7 @@ object QueryParser {
             priorities = priorities,
             repos = repos,
             tags = tags,
+            files = files,
             done = done,
             has = has,
         )
@@ -102,5 +106,5 @@ object QueryParser {
     }
 
     private const val TAG = "#"
-    private val KEYS = setOf("state", "p", "priority", "repo", "is", "has")
+    private val KEYS = setOf("state", "p", "priority", "repo", "file", "is", "has")
 }

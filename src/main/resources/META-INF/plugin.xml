@@ -31,6 +31,27 @@
             <li><b>States as tabs</b>, each with its live count. Both the states and the
                 priorities are configurable per project — name, order, colour and the
                 typing shortcut that selects them.</li>
+            <li><b>Tasks that point at the code.</b> Create one straight from the editor's
+                context menu and it remembers the file, the line and the character you were
+                on &mdash; the card shows an <code>Auth.kt:42</code> badge that jumps back
+                there with a click, and the anchor keeps working after the file changes
+                above it.</li>
+            <li><b>And the code points back.</b> A line with a task on it is marked right in
+                the editor, in the colour of the task's priority. Hover the mark and the
+                task is there &mdash; title, state, priority, due date and tags; click it and
+                the tool window opens with that task selected, switching repository if the
+                task belongs to another one. Several tasks on one line share a single mark
+                and the tooltip lists them.</li>
+            <li><b>Only what is still open gets marked.</b> A task in a done state is
+                history, not a note about the code, so its mark goes away the moment you
+                move it &mdash; the gutter never turns into a graveyard.</li>
+            <li><b>Two marks, and you pick.</b> A gutter icon, which never moves your code by
+                a single pixel, or an inline <code>TODO</code> chip sitting on the exact
+                character the task was about &mdash; because
+                <code>cache.get(key) ?: load(key)</code> is two things in the same place. The
+                chip is labelled with the task's own state, so a task in <i>Doing</i> reads
+                <code>DOING</code> and never lies to you. Or neither mark, if you prefer. It
+                is your own setting: it is not shared with the project.</li>
             <li><b>Group by</b> date, priority or tag, and collapse the groups you are not
                 looking at. The choice is remembered per state.</li>
             <li><b>Search that understands operators</b> and looks inside the body, not just
@@ -41,6 +62,8 @@
                 window and each keeps its own tasks, with a selector to switch between them.</li>
             <li><b>Quick add from anywhere</b> in the IDE with <code>⌘⌥R</code> /
                 <code>Ctrl+Alt+R</code>, without opening the tool window.</li>
+            <li><b>Move tasks between states</b> from the context menu or with
+                <code>Shift+Alt+Left/Right</code>, without opening a dialog.</li>
             <li><b>Copy to clipboard</b> as Markdown or plain text — one state, one group or
                 just the selection.</li>
         </ul>
@@ -93,6 +116,11 @@
              leidas: sin eso no sabria que esta referenciado. -->
         <postStartupActivity implementation="com.tasklane.startup.AttachmentGcActivity"/>
 
+        <!-- Enciende las marcas de las anclas sobre el codigo. Es solo el empujon: el
+             servicio se suscribe al modelo y se pinta solo. Sin esto no existiria
+             hasta que alguien abriera la tool window. -->
+        <postStartupActivity implementation="com.tasklane.startup.AnchorMarkerActivity"/>
+
         <!-- Los servicios de configuracion son light services (@Service + @State),
              asi que no se declaran aqui: la plataforma los descubre al usarlos. -->
         <projectConfigurable
@@ -121,6 +149,16 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
 
+        <!-- Crear apuntando al codigo. Sin atajo por defecto: vive en el menu
+             contextual del editor, que es donde se esta mirando cuando hace falta, y
+             quien lo use a diario le asigna uno desde el Keymap. -->
+        <action id="Tasklane.NewTaskFromCode"
+                class="com.tasklane.ui.quickadd.NewTaskFromCodeAction"
+                icon="AllIcons.General.Add">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
         <!-- Acotadas a la tool window. Sin atajo por defecto a proposito: Enter,
              Delete y ⌘K solo tienen sentido dentro de la pestana, y se instalan alli
              con registerCustomShortcutSet. Declararlas igualmente es lo que las hace
@@ -146,6 +184,31 @@
         <action id="Tasklane.ToggleBookmark"
                 class="com.tasklane.ui.actions.ToggleBookmarkAction"
                 icon="AllIcons.Nodes.Bookmark"/>
+
+        <!-- Mover de estado sin pasar por el dialogo. El submenu esta en el menu
+             contextual y en el menu de la fila; los dos de vecindad los instala
+             TasklanePanel con ⇧⌥←/→ sobre su lista, y se declaran aqui para que sean
+             reasignables desde el Keymap. -->
+        <group id="Tasklane.MoveToState" popup="true"
+               class="com.tasklane.ui.actions.MoveToStateActionGroup"
+               icon="AllIcons.Actions.MoveTo2"/>
+        <!-- Prioridad: mismo argumento que Move To. El icono del grupo son dos barras
+             de color apiladas -el de "ordenar por severidad" de la plataforma-, que es
+             lo mas parecido que hay en AllIcons a "niveles"; sin el, Priority era la
+             unica entrada del menu sin icono y su fila se leia hundida respecto a las
+             de al lado. Cada entrada de dentro sigue llevando su propio color, que es
+             lo que identifica una prioridad. -->
+        <group id="Tasklane.SetPriority" popup="true"
+               class="com.tasklane.ui.actions.SetPriorityActionGroup"
+               icon="AllIcons.Nodes.SortBySeverity"/>
+        <action id="Tasklane.MoveToNextState"
+                class="com.tasklane.ui.actions.MoveToNextStateAction"/>
+        <action id="Tasklane.MoveToPreviousState"
+                class="com.tasklane.ui.actions.MoveToPreviousStateAction"/>
+        <action id="Tasklane.SelectNextState"
+                class="com.tasklane.ui.actions.SelectNextStateAction"/>
+        <action id="Tasklane.SelectPreviousState"
+                class="com.tasklane.ui.actions.SelectPreviousStateAction"/>
         <action id="Tasklane.FocusSearch"
                 class="com.tasklane.ui.actions.FocusSearchAction"
                 icon="AllIcons.Actions.Find"/>
@@ -209,6 +272,8 @@
             <reference ref="Tasklane.EditTask"/>
             <reference ref="Tasklane.ToggleComplete"/>
             <reference ref="Tasklane.ToggleBookmark"/>
+            <reference ref="Tasklane.MoveToState"/>
+            <reference ref="Tasklane.SetPriority"/>
             <separator/>
             <reference ref="Tasklane.Export"/>
             <separator/>

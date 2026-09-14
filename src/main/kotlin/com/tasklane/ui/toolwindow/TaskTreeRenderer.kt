@@ -12,31 +12,40 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.render.RenderingUtil
 import com.intellij.ui.speedSearch.SpeedSearchUtil
 import com.intellij.util.text.DateFormatUtil
-import com.intellij.util.ui.ColorIcon
 import com.intellij.util.ui.EmptyIcon
 import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
+import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.CodeAnchor
+import com.tasklane.domain.model.DetailBlock
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
+import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskLink
+import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.InlineMarkdown
 import com.tasklane.ui.common.GroupLabels
+import com.tasklane.ui.common.PriorityDot
 import com.tasklane.ui.common.TasklaneIcons
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Container
+import java.awt.Dimension
 import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Point
+import java.awt.Rectangle
 import java.awt.geom.RoundRectangle2D
 import java.time.Instant
+import java.util.IdentityHashMap
 import javax.swing.JPanel
 import javax.swing.JTree
+import javax.swing.JViewport
 import javax.swing.plaf.basic.BasicTreeUI
 
 /**
@@ -64,6 +73,20 @@ import javax.swing.plaf.basic.BasicTreeUI
  * de distintivos —vencimiento, etiquetas, enlaces—. Cada
  * línea que sobra se oculta, así que una tarea de una frase sigue midiendo una
  * línea. El árbol necesita para esto `rowHeight = 0`: la altura la fija cada fila.
+ *
+ * **Desplegada** la tarjeta deja de resumir: el título se envuelve sin tope, debajo
+ * van *todas* las líneas del cuerpo —no sólo la primera recortada— y **las imágenes**,
+ * escaladas y cada una detrás de la línea que la nombra, igual que el diálogo. Es un interruptor
+ * por tarea —[toggleExpanded]— y el botón que lo acciona sólo se enciende cuando hay
+ * algo escondido, que es lo que sabe decir [TitleWrap.Fit]. Que el número de líneas
+ * deje de tener tope es lo que obliga a que [extraLines] sea un pozo que crece y no
+ * una lista de dos.
+ *
+ * **El texto se puede seleccionar y copiar.** Lo lleva [CardTextSelection], que
+ * traduce el ratón a [TextPos] con la misma aritmética del *hit testing* de los
+ * enlaces; aquí sólo se pinta, y se pinta como fondo de los caracteres elegidos
+ * —igual que el de los tramos de código— para que no haya geometría que se pueda
+ * desalinear del texto.
  *
  * **Por qué el título se envuelve aquí y no en un `JTextArea`.** Envolviéndolo a
  * mano se conserva lo que hace falta para lo demás: los fragmentos etiquetados con
@@ -114,21 +137,62 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     var now: () -> Instant = Instant::now
 
     /**
+     * De dónde salen las vistas previas de las tarjetas desplegadas. Lo pone
+     * [TasklanePanel] con un [CardImages]; sin él —en un test— la tarjeta se pinta sin
+     * imágenes, que es exactamente lo que hacía antes.
+     */
+    var images: CardPreviews? = null
+
+    /**
      * La fila bajo el ratón, o `-1`. La mantiene [TaskRowActions] y decide si se ven
      * el marcador y el menú: enseñarlos en todas las filas llenaría la lista de
      * controles que casi nunca se usan.
      */
     var hoveredRow: Int = -1
 
+    /**
+     * El texto seleccionado a mano, o `null`. Lo mantiene [CardTextSelection]; aquí
+     * sólo se pinta —ver [highlighted]— y se mide —ver [caretAt]—.
+     */
+    var selection: CardSelection? = null
+
+    /**
+     * Las tarjetas desplegadas. Por [TaskId] y no por fila porque cualquier cambio en
+     * cualquier tarea reconstruye el árbol entero, y por índice el despliegue se
+     * habría mudado a la tarjeta de al lado en el primer repintado.
+     *
+     * No se persiste: desplegar es mirar algo un momento, no configurar la lista.
+     */
+    private val expanded = mutableSetOf<TaskId>()
+
+    /** Si la tarjeta de [task] está desplegada ahora mismo. */
+    fun isExpanded(task: Task): Boolean = task.id in expanded
+
+    fun toggleExpanded(task: Task) {
+        if (!expanded.remove(task.id)) expanded += task.id
+    }
+
+    /**
+     * Olvida las tarjetas que ya no están en la lista. Lo llama [TasklanePanel] en
+     * cada repintado: sin esto, borrar una tarea desplegada dejaría su ID dentro para
+     * siempre, y con él el despliegue esperando a una tarea que no va a volver.
+     */
+    fun retainExpanded(ids: Set<TaskId>) {
+        expanded.retainAll(ids)
+    }
+
     // ------------------------------------------------------------- componentes
 
     /**
-     * Lo que se pinta en las líneas que no son la primera, preparado antes de que la
-     * plataforma pida cada una. No se puede pintar en el momento de calcularlo
-     * porque cada línea se limpia al pedirle su componente.
+     * El texto de la tarjeta que se está pintando, línea a línea: la primera va al
+     * `textRenderer` de la plataforma y las demás al pozo de [extraLines]. Se calcula
+     * entero de una vez porque cada línea se limpia al pedirle su componente, así que
+     * no hay dónde ir apuntándolo por el camino.
+     *
+     * Es además sobre lo que se mide la selección de texto y lo que se copia:
+     * [caretAt] y [cardText] preparan la fila y leen esto.
      */
-    private var pendingTitle: List<List<Run>> = emptyList()
-    private var pendingDescription: List<Run> = emptyList()
+    private var pendingCard: List<List<Run>> = emptyList()
     private var pendingTask: Task? = null
 
     /** Lo que hace falta en el momento de pintar, cuando ya no hay nodo a mano. */
@@ -140,15 +204,29 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Fondo de los tramos de código del cuerpo. Nulo = sin recuadro. Ver [emphasize]. */
     private var codeColor: Color? = null
 
-    /** Líneas 2 y 3 del título. La primera es el `textRenderer` de la plataforma. */
-    private val titleOverflow = List(MAX_TITLE_LINES - 1) { index ->
-        line { tree, selected -> appendRuns(tree, this, pendingTitle.getOrNull(index).orEmpty(), selected) }
-    }
+    /**
+     * Las líneas de texto que no son la primera, creadas según hacen falta.
+     *
+     * Es un pozo que crece y no una lista fija porque desde que la tarjeta se
+     * despliega no hay número que valga: plegada son hasta tres de título y una de
+     * resumen, desplegada son las que pida el cuerpo. Crece y no encoge —el tope es
+     * [MAX_CARD_LINES]—: el renderer pinta todas las filas, y tirar los componentes
+     * para volver a crearlos en la siguiente sería basura en cada repintado.
+     */
+    private val extraLines = mutableListOf<ColoredTreeCellRenderer>()
 
-    /** Resumen de lo que hay bajo el título. Oculta cuando la tarea es sólo el título. */
-    private val description = line { tree, selected ->
-        appendRuns(tree, this, pendingDescription, selected)
-    }
+    /**
+     * Las vistas previas, con el mismo criterio de pozo que [extraLines]: crecen según
+     * hacen falta y no se devuelven. Van **después** de las líneas de texto y antes de
+     * la de distintivos, que es el orden en que [RowStack] las apila.
+     */
+    private val imageViews = mutableListOf<CardImageView>()
+
+    /** Si la fila que se está montando enseña sus imágenes. Ver [renderDetail]. */
+    private var pendingImagesShown = false
+
+    /** Lo que se ve de ancho la última vez que se montó una fila. Ver [getPreferredSize]. */
+    private var widthLimit = 0
 
     /** Enlaces e imágenes. Es el único distintivo con contador clicable. */
     private val detail = line { _, _ -> pendingTask?.let(::renderDetail) }
@@ -163,9 +241,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private val bookmark = icon()
     private val more = icon()
 
+    /** Desplegar y volver a plegar la tarjeta. Ver [showExpandIcon]. */
+    private val expand = icon()
+
     /** Si cada control se puede pulsar ahora mismo. Ver [renderActions]. */
     private var bookmarkActive = false
     private var menuActive = false
+    private var expandActive = false
 
     private val actions = JPanel(ChipRow()).apply { isOpaque = false }
 
@@ -178,15 +260,43 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // centro. Se sustituye el centro por la pila de líneas.
         remove(textRenderer)
         lines.add(textRenderer)
-        titleOverflow.forEach(lines::add)
-        lines.add(description)
         meta.add(detail)
         chips.forEach(meta::add)
         lines.add(meta)
         add(lines, BorderLayout.CENTER)
+        actions.add(expand)
         actions.add(bookmark)
         actions.add(more)
         add(actions, BorderLayout.EAST)
+    }
+
+    /**
+     * Deja el pozo con al menos [count] líneas.
+     *
+     * Las nuevas se insertan **antes** de la de distintivos, que es la última de la
+     * pila: el orden de los componentes es el orden en que [RowStack] los apila, así
+     * que añadirlas al final metería el cuerpo de la tarea por debajo de las fechas.
+     */
+    private fun ensureLines(count: Int) {
+        while (extraLines.size < count) {
+            val index = extraLines.size
+            val extra = line { tree, selected ->
+                appendRuns(tree, this, pendingCard.getOrNull(index + 1).orEmpty(), selected)
+            }
+            // Detrás de la primera línea y de las que ya hay, delante de las
+            // imágenes y de los distintivos.
+            lines.add(extra, 1 + extraLines.size)
+            extraLines += extra
+        }
+    }
+
+    /** Lo mismo para las vistas previas, que van justo antes de la de distintivos. */
+    private fun ensureImages(count: Int) {
+        while (imageViews.size < count) {
+            val view = CardImageView()
+            lines.add(view, lines.componentCount - 1)
+            imageViews += view
+        }
     }
 
     override fun customizeRenderer(
@@ -199,6 +309,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         hasFocus: Boolean,
     ) {
         pendingSelected = selected
+        widthLimit = visibleWidth(tree)
         when (value) {
             is GroupNode -> {
                 hideExtras()
@@ -220,7 +331,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 // la que las limpia, y saltarse las ocultas dejaría dentro los
                 // fragmentos de la fila anterior esperando a que a alguna le tocara
                 // volver a verse.
-                for (extra in titleOverflow + description + detail) {
+                for (extra in extraLines + detail) {
                     extra.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
                 }
                 renderChips(tree, value.task, selected)
@@ -230,14 +341,17 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
     private fun hideExtras() {
         pendingTask = null
+        pendingCard = emptyList()
         cardColor = null
         stripeColor = null
         codeColor = null
         pendingHovered = false
         bookmarkActive = false
         menuActive = false
-        titleOverflow.forEach { it.isVisible = false }
-        description.isVisible = false
+        expandActive = false
+        extraLines.forEach { it.isVisible = false }
+        imageViews.forEach { it.isVisible = false }
+        pendingImagesShown = false
         detail.isVisible = false
         chips.forEach { it.isVisible = false }
         meta.isVisible = false
@@ -290,17 +404,111 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         pendingTask = task
         val available = availableWidth(tree, node)
-        val wrapped = TitleWrap.wrap(titleRuns(task, titleStyle), available, MAX_TITLE_LINES, ::measure)
+        val open = task.id in expanded
+        // Desplegada el tope existe igual, sólo que muy lejos: es un seguro contra una
+        // tarea pegada de un fichero entero, que crearía un componente por línea.
+        val room = if (open) MAX_CARD_LINES else MAX_TITLE_LINES
+        val title = TitleWrap.fit(titleRuns(task, titleStyle), available, room, ::measure)
+        val body = bodyLines(task, available, room - title.lines.size, open)
 
-        appendRuns(tree, textRenderer, wrapped.firstOrNull().orEmpty(), selected)
-        pendingTitle = wrapped.drop(1)
-        titleOverflow.forEachIndexed { index, extra -> extra.isVisible = index < pendingTitle.size }
+        pendingCard = highlighted(tree, task, title.lines + body.lines, selected)
+        ensureLines(pendingCard.size - 1)
+        extraLines.forEachIndexed { index, extra -> extra.isVisible = index < pendingCard.size - 1 }
+        appendRuns(tree, textRenderer, pendingCard.firstOrNull().orEmpty(), selected)
 
-        pendingDescription = ellipsize(
-            markdownRuns(task.description, SimpleTextAttributes.GRAYED_ATTRIBUTES),
-            available,
+        pendingImagesShown = renderImages(task, available, open)
+
+        // Después de envolver y no antes: hasta aquí no se sabe si sobró algo, que es
+        // lo único que justifica enseñar el botón.
+        showExpandIcon(
+            open,
+            // Una captura que sólo se ve desplegando la tarjeta es tanto «hay algo
+            // escondido» como una frase que no cupo.
+            hidden = title.clipped || body.clipped || task.attachments.isNotEmpty(),
+            hovered = pendingHovered,
         )
-        description.isVisible = pendingDescription.isNotEmpty()
+    }
+
+    /**
+     * Las vistas previas de la tarjeta, y si se está enseñando alguna.
+     *
+     * **Sólo desplegada.** Plegada, la tarjeta mide tres o cuatro líneas y su trabajo
+     * es que quepan muchas a la vista; una captura de 280 px dentro convertiría la
+     * lista en una galería y dejaría dos tareas por pantalla. Plegada lo que hay es el
+     * contador de la línea de distintivos, que para eso está.
+     *
+     * Ni lee disco ni escala: eso es cosa de [CardImages]. Aquí sólo se pregunta en qué
+     * estado está cada imagen y se reparte lo que haya por el pozo de vistas.
+     */
+    private fun renderImages(task: Task, available: Int, open: Boolean): Boolean {
+        val previews = images
+        val refs = if (open && previews != null && available > 0) {
+            task.detailBlocks.filterIsInstance<DetailBlock.Image>().take(MAX_CARD_IMAGES)
+        } else {
+            emptyList()
+        }
+        ensureImages(refs.size)
+
+        imageViews.forEachIndexed { index, view ->
+            val ref = refs.getOrNull(index)
+            view.isVisible = ref != null
+            view.id = ref?.id
+            if (ref == null || previews == null) {
+                view.image = null
+                return@forEachIndexed
+            }
+            view.state = previews.stateOf(task.repo, ref.id)
+            view.image = if (view.state == CardImageView.State.READY) {
+                previews.preview(
+                    task.repo,
+                    ref.id,
+                    CardImageView.contentWidth(available),
+                    CardImageView.contentHeight(),
+                )
+            } else {
+                null
+            }
+            // Cargó, pero el blob se fue entre medias: sin imagen no hay nada que
+            // pintar, y el marcador de ausente dice lo que pasa.
+            if (view.image == null) view.state = CardImageView.State.MISSING
+        }
+        return refs.isNotEmpty()
+    }
+
+    /**
+     * Lo que va bajo el título.
+     *
+     * Plegada, la tarjeta **resume**: una sola línea, recortada si no cabe, y del
+     * resto del cuerpo no se pinta nada. Desplegada se pintan todas las líneas del
+     * cuerpo, cada una envuelta con el mismo troceado que el título.
+     *
+     * Devuelve también si se quedó algo fuera, y ahí entra lo que no se ve por ancho
+     * **y** lo que no se ve por número de líneas: una tarea con tres párrafos cabe
+     * perfectamente en una línea de resumen y aun así esconde dos.
+     */
+    private fun bodyLines(task: Task, available: Int, room: Int, open: Boolean): TitleWrap.Fit {
+        val gray = SimpleTextAttributes.GRAYED_ATTRIBUTES
+        if (!open) {
+            val one = ellipsize(markdownRuns(task.description, gray), available)
+            return TitleWrap.Fit(one.lines, one.clipped || task.detailLines.size > 1)
+        }
+
+        val out = mutableListOf<List<Run>>()
+        var clipped = false
+        for (paragraph in task.detailLines) {
+            val budget = room - out.size
+            if (budget <= 0) {
+                clipped = true
+                break
+            }
+            val runs = markdownRuns(paragraph, gray)
+            // Con una línea de margen no hay nada que envolver: lo que no quepa se
+            // recorta, que es lo que hace `wrap` cuando se queda sin líneas.
+            val fit = if (budget == 1) ellipsize(runs, available) else TitleWrap.fit(runs, available, budget, ::measure)
+            out += fit.lines
+            clipped = clipped || fit.clipped
+        }
+        return TitleWrap.Fit(out, clipped)
     }
 
     /**
@@ -434,6 +642,84 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         }
     }
 
+    // --------------------------------------------------- selección de texto: pintado
+
+    /**
+     * La tarjeta con el tramo seleccionado marcado, si la selección es de esta tarea.
+     *
+     * El resalte se pinta como **fondo de los caracteres**, partiendo los tramos por
+     * los bordes de la selección, y no como un rectángulo encima. Es el mismo truco
+     * del fondo de los tramos de código, y tiene la misma ventaja: quien coloca los
+     * píxeles es el componente que pinta las letras, así que el resalte no se puede
+     * desalinear del texto por mucho que cambien la fuente o el tema.
+     *
+     * El color sale de la **letra** y no de una constante: así contrasta tanto sobre
+     * la tarjeta como sobre una fila seleccionada, que ya trae su propio fondo. Es
+     * translúcido, de modo que lo que se lee debajo sigue siendo el texto.
+     *
+     * Los límites se recortan a lo que hay: entre el arrastre y el repintado la tarea
+     * puede haber cambiado de texto, y una posición vieja no debe tirar la fila.
+     */
+    private fun highlighted(
+        tree: JTree,
+        task: Task,
+        card: List<List<Run>>,
+        selected: Boolean,
+    ): List<List<Run>> {
+        val text = selection?.takeIf { it.id == task.id && !it.isEmpty } ?: return card
+        val from = text.from
+        val to = text.to
+        val background = ColorUtil.withAlpha(RenderingUtil.getForeground(tree, selected), SELECTION_ALPHA)
+        return card.mapIndexed { index, runs ->
+            if (index < from.line || index > to.line) {
+                runs
+            } else {
+                select(
+                    runs,
+                    if (index == from.line) from.offset else 0,
+                    if (index == to.line) to.offset else Int.MAX_VALUE,
+                    background,
+                )
+            }
+        }
+    }
+
+    /**
+     * Parte [runs] por los caracteres [start] y [end] y pinta el trozo de en medio
+     * sobre [background].
+     *
+     * El trozo seleccionado sale del resaltado de la búsqueda —`matched = false`—: el
+     * resaltado de la plataforma pone su propio fondo y se comería el de la selección,
+     * y dentro de lo que el usuario acaba de marcar el subrayado ya no dice nada.
+     */
+    private fun select(runs: List<Run>, start: Int, end: Int, background: Color): List<Run> {
+        val out = mutableListOf<Run>()
+        var at = 0
+        for (run in runs) {
+            val text = run.text
+            val from = (start - at).coerceIn(0, text.length)
+            val to = (end - at).coerceIn(0, text.length)
+            at += text.length
+            if (from >= to) {
+                out += run
+                continue
+            }
+            if (from > 0) out += run.withText(text.substring(0, from))
+            out += Run(text.substring(from, to), selectedStyle(run.style, background), run.link)
+            if (to < text.length) out += run.withText(text.substring(to))
+        }
+        return out
+    }
+
+    /** El estilo del tramo con el fondo de la selección encima. Conserva el resto. */
+    private fun selectedStyle(base: SimpleTextAttributes, background: Color): SimpleTextAttributes =
+        SimpleTextAttributes(
+            background,
+            base.fgColor,
+            base.waveColor,
+            base.style or SimpleTextAttributes.STYLE_OPAQUE,
+        )
+
     /** Un enlace en una tarea cerrada sigue tachado: el estilo de enlace no lo reabre. */
     private fun linkStyle(base: SimpleTextAttributes): SimpleTextAttributes =
         if (base.style and SimpleTextAttributes.STYLE_STRIKEOUT == 0) {
@@ -459,21 +745,39 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private fun renderChips(tree: JTree, task: Task, selected: Boolean) {
         val foreground = RenderingUtil.getForeground(tree, selected)
         var next = 0
-        fun chip(text: String, icon: javax.swing.Icon?, attributes: SimpleTextAttributes) {
+        fun chip(
+            text: String,
+            icon: javax.swing.Icon?,
+            attributes: SimpleTextAttributes,
+            /** Sólo los distintivos que se pueden pulsar la llevan. Ver [hotspotAt]. */
+            tag: Any? = null,
+        ) {
             val chip = chips.getOrNull(next++) ?: return
             chip.clear()
             chip.icon = icon
             chip.foreground = foreground
-            chip.append(text, attributes)
+            chip.append(text, attributes, tag)
             chip.isVisible = true
         }
 
-        // La prioridad por defecto no se anuncia: sería el mismo distintivo en todas
-        // las filas. La franja de la izquierda ya la lleva, y para las demás el color
-        // suelto no dice cuál es, así que el nombre va al lado.
-        config.priorityOrDefault(task.priorityId).takeIf { !it.isDefault }?.let { priority ->
-            val color = JBColor(priority.colorLight, priority.colorDark)
-            chip(priority.name, ColorIcon(JBUI.scale(DOT), color), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+        // La prioridad va en **todas** las tarjetas, también en las de la de fábrica.
+        // Mientras fue un distintivo de sólo lectura, la de fábrica se callaba: sería
+        // la misma palabra repetida en toda la lista y la franja de la izquierda ya
+        // lleva el color. Desde que **se pulsa** —abre la lista de prioridades—
+        // callarla es esconder el control, y justo en las tarjetas que nadie ha tocado
+        // todavía, que son las que más se cambian de prioridad.
+        //
+        // La etiqueta es la prioridad misma, igual que la del ancla es su
+        // [CodeAnchor]; quien atiende el clic la reconoce en [hotspotAt].
+        config.priorityOrDefault(task.priorityId).let { priority ->
+            chip(priority.name, PriorityDot.chip(priority), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, priority)
+        }
+
+        // El sitio del código va delante de todo lo demás: es lo que dice de qué habla
+        // la tarea, y de los distintivos es el único que además lleva a algún sitio. Se
+        // pinta con el color de enlace por eso mismo —lo que parece pulsable, lo es—.
+        for (anchor in task.anchors) {
+            chip(anchor.label, AllIcons.FileTypes.Any_type, ANCHOR_STYLE, anchor)
         }
 
         // El vencimiento lleva calendario propio: `AllIcons` no trae ninguno, y sin él
@@ -526,7 +830,30 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             else -> EmptyIcon.ICON_16
         }
         more.icon = if (hovered) AllIcons.Actions.More else EmptyIcon.ICON_16
+        // El hueco del desplegable se reserva ya, aunque quién lo enciende sea
+        // [showExpandIcon] más tarde: el ancho que le queda al texto se mide con esta
+        // fila puesta, y decidirlo después de envolver cambiaría el resultado de la
+        // medida que lo decidió.
+        expandActive = false
+        expand.icon = EmptyIcon.ICON_16
         actions.isVisible = true
+    }
+
+    /**
+     * El botón de desplegar la tarjeta.
+     *
+     * Desplegada se ve **siempre**: es estado, y esconderlo dejaría una tarjeta larga
+     * sin forma evidente de volver a cerrarla. Plegada aparece sólo bajo el ratón,
+     * como el menú, y sólo si [hidden] —una tarjeta que ya se ve entera no tiene nada
+     * que desplegar, y un botón que no hace nada es peor que ninguno—.
+     */
+    private fun showExpandIcon(open: Boolean, hidden: Boolean, hovered: Boolean) {
+        expandActive = open || (hidden && hovered)
+        expand.icon = when {
+            !expandActive -> EmptyIcon.ICON_16
+            open -> AllIcons.General.ArrowUp
+            else -> AllIcons.General.ArrowDown
+        }
     }
 
     /**
@@ -536,7 +863,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      */
     private fun renderDetail(task: Task) {
         val hasLinks = task.links.isNotEmpty()
-        val images = task.attachments.size
+        // Desplegada, las capturas están ahí abajo a la vista: repetir «3 img» justo
+        // encima de ellas no cuenta nada que no se esté viendo ya.
+        val images = if (pendingImagesShown) 0 else task.attachments.size
         detail.isVisible = hasLinks || images > 0
         if (!detail.isVisible) return
 
@@ -556,6 +885,31 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             detail.append(text, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
     }
+
+    // ------------------------------------------------------------------ medida de la fila
+
+    /**
+     * Nunca más ancha que el hueco visible.
+     *
+     * La tarjeta se mide por trozos y uno de ellos no sabe encogerse: la línea de
+     * distintivos pide el ancho de **todos** los suyos aunque al colocarlos vaya a
+     * dejar fuera los que no quepan. Con unas cuantas etiquetas eso devolvía una fila
+     * más ancha que la tool window, y el árbol crece hasta la fila más ancha que
+     * tenga: la plataforma daba entonces por recortadas todas las tarjetas y al pasar
+     * el ratón sacaba su ventanita de «fila completa» por fuera del panel, con los
+     * botones de la derecha dentro. Ir a pulsarlos sacaba el ratón de la fila y la
+     * ventanita se cerraba antes de llegar.
+     *
+     * El tope se pone aquí y no en cada trozo porque la regla es una sola —la tarjeta
+     * ocupa lo que se ve— y así vale también para el trozo que pida de más mañana.
+     * Recortada la medida, el que sobra se queda fuera por su cuenta: [ChipRow] ya
+     * deja de colocar lo que no cabe, y lo hace por orden de importancia.
+     */
+    override fun getPreferredSize(): Dimension {
+        val size = super.getPreferredSize()
+        return if (widthLimit in 1 until size.width) Dimension(widthLimit, size.height) else size
+    }
+
 
     // ------------------------------------------------------------------ pintado
 
@@ -633,8 +987,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * filas devuelve el resultado anterior o ninguno.
      */
     private fun availableWidth(tree: JTree, node: TaskNode): Int {
-        val viewport = (tree.parent as? javax.swing.JViewport)?.width?.takeIf { it > 0 }
-        val total = viewport ?: tree.width
+        val total = visibleWidth(tree)
         if (total <= 0) return 0
 
         val ui = tree.ui as? BasicTreeUI
@@ -648,6 +1001,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val right = (insets?.right ?: 0) + if (actions.isVisible) actions.preferredSize.width else 0
         return total - indent - stripe - box - right - JBUI.scale(MARGIN)
     }
+
+    /**
+     * El hueco que se ve del árbol: el del viewport si está dentro de uno, y si no el
+     * suyo. Contra el viewport y no contra el árbol porque el árbol crece hasta la
+     * fila más ancha, y medir contra lo que ya ha crecido nunca dejaría de crecer.
+     */
+    private fun visibleWidth(tree: JTree): Int =
+        (tree.parent as? JViewport)?.width?.takeIf { it > 0 } ?: tree.width
 
     /**
      * El ancho de un tramo con la fuente que le tocará al pintarlo.
@@ -672,8 +1033,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * midiéndolo todo con la fuente base cortaría donde no toca en cuanto hubiera
      * una palabra en negrita.
      */
-    private fun ellipsize(runs: List<Run>, available: Int): List<Run> {
-        if (runs.isEmpty() || available <= 0) return runs
+    private fun ellipsize(runs: List<Run>, available: Int): TitleWrap.Fit {
+        if (runs.isEmpty()) return TitleWrap.Fit(emptyList(), false)
+        if (available <= 0) return TitleWrap.Fit(listOf(runs), false)
 
         var used = 0
         val out = mutableListOf<Run>()
@@ -689,67 +1051,112 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             var end = run.text.length
             while (end > 0 && used + measure(run.text.substring(0, end), run.style) + dots > available) end--
             out += run.withText(run.text.substring(0, end).trimEnd() + TitleWrap.ELLIPSIS)
-            return out
+            return TitleWrap.Fit(listOf(out), true)
         }
-        return out
+        return TitleWrap.Fit(listOf(out), false)
     }
 
     // ------------------------------------------------------------ hit testing
 
     /**
-     * Qué enlaces hay bajo [point]: uno si el ratón está sobre un fragmento del
-     * título, todos los de la tarea si está sobre el indicador, y ninguno en
-     * cualquier otro sitio.
+     * Lo que hay bajo [point] y responde a **un** clic: el enlace —uno si el ratón
+     * está sobre un fragmento del título, todos los de la tarea si está sobre el
+     * indicador—, el ancla de código o el distintivo de prioridad.
      *
-     * Hay que preparar el renderer para esa fila antes de preguntarle: es **el
-     * mismo objeto** el que pinta todas, así que sus fragmentos son los de la última
-     * que se pintó. Primero se descarta por modelo —una tarea sin enlaces no llega a
-     * medirse—, que es lo que permite llamar a esto en cada movimiento del ratón.
+     * Es **una** consulta y no una por tipo porque resolverlo obliga a montar y medir
+     * la fila, y esto corre en cada píxel que recorre el ratón. Medir la fila es
+     * trabajo de [tagAt]; aquí sólo se traduce la etiqueta.
+     *
+     * Hubo aquí un descarte por modelo que se saltaba la medida en las tarjetas sin
+     * nada pulsable. Ya no queda ninguna: **toda** tarea enseña su distintivo de
+     * prioridad y toda tarea lo puede pulsar. Tampoco se echa de menos, porque el
+     * mismo movimiento del ratón mide la fila de todas formas para el cursor de texto
+     * —ver [caretAt] y [RowClicks]—.
      */
-    fun linksAt(tree: JTree, point: Point): List<TaskLink> {
-        val row = rowAtHeight(tree, point.y)
-        if (row < 0) return emptyList()
-        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
-        if (node.task.links.isEmpty()) return emptyList()
+    fun hotspotAt(tree: JTree, point: Point): Hotspot? {
+        val hit = taskAt(tree, point) ?: return null
+        val task = hit.node.task
+        return when (val tag = tagAt(tree, hit, point)) {
+            LINKS -> Hotspot.Links(task.links)
+            is TaskLink -> Hotspot.Links(listOf(tag))
+            is CodeAnchor -> Hotspot.Anchor(tag)
+            is TaskPriority -> Hotspot.Priority(task)
+            is AttachmentId -> Hotspot.Image(task.repo, tag)
+            else -> null
+        }
+    }
 
-        val bounds = paintedRowBounds(tree, row) ?: return emptyList()
-        getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
-        setBounds(0, 0, bounds.width, bounds.height)
-        doLayout()
-        lines.doLayout()
+    /** Lo pulsable de una fila. Ver [hotspotAt]. */
+    sealed interface Hotspot {
+        class Links(val links: List<TaskLink>) : Hotspot
+        class Anchor(val anchor: CodeAnchor) : Hotspot
+        class Priority(val task: Task) : Hotspot
+        class Image(val repo: RepoKey, val id: AttachmentId) : Hotspot
+    }
+
+    /** Una fila de tarea resuelta: el nodo y su fila, que hacen falta los dos para medirla. */
+    private class Hit(val node: TaskNode, val row: Int)
+
+    private fun taskAt(tree: JTree, point: Point): Hit? {
+        val row = rowAtHeight(tree, point.y)
+        if (row < 0) return null
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return null
+        return Hit(node, row)
+    }
+
+    /**
+     * La etiqueta del fragmento que hay bajo [point]: es lo que identifica qué parte
+     * de la fila se ha pulsado sin volver a medir texto a mano.
+     *
+     * Hay que preparar el renderer para esa fila antes de preguntarle: es **el mismo
+     * objeto** el que pinta todas, así que sus fragmentos son los de la última que se
+     * pintó.
+     */
+    private fun tagAt(tree: JTree, hit: Hit, point: Point): Any? {
+        val bounds = paintedRowBounds(tree, hit.row) ?: return null
+        prepare(tree, hit.node, hit.row, bounds)
 
         var x = point.x - bounds.x - lines.x
         var y = point.y - bounds.y - lines.y
-        var line = childAt(lines, x, y) ?: return emptyList()
+        var line = childAt(lines, x, y) ?: return null
+        // Una vista previa no lleva fragmentos: su «etiqueta» es la imagen misma, y
+        // sólo cuando de verdad se está viendo — un marcador de carga no amplía nada.
+        if (line is CardImageView) return line.attachment
         // La línea de distintivos es a su vez una fila de componentes, así que hay
         // que bajar un nivel más para dar con el que está bajo el ratón.
         if (line === meta) {
             meta.doLayout()
             x -= meta.x
             y -= meta.y
-            line = childAt(meta, x, y) ?: return emptyList()
+            line = childAt(meta, x, y) ?: return null
         }
-        val target = line as? SimpleColoredComponent ?: return emptyList()
+        val target = line as? SimpleColoredComponent ?: return null
 
         val local = x - target.x
-        return when {
-            local < 0 -> emptyList()
-            target.getFragmentTagAt(local) === LINKS -> node.task.links
-            // El icono no es un fragmento con etiqueta, pero es la mitad visible del
-            // indicador: dejarlo fuera haría que medio control no respondiera.
-            target === detail && target.findFragmentAt(local) == SimpleColoredComponent.FRAGMENT_ICON ->
-                node.task.links
-
-            else -> listOfNotNull(target.getFragmentTagAt(local) as? TaskLink)
+        if (local < 0) return null
+        // El icono no es un fragmento con etiqueta, pero es la mitad visible de un
+        // distintivo pequeño, y muchas veces la mitad a la que se apunta: el punto de
+        // color **es** la prioridad, y el indicador de enlaces es icono y contador.
+        // Dejarlo fuera dejaba medio control sin responder.
+        if (target.findFragmentAt(local) == SimpleColoredComponent.FRAGMENT_ICON) {
+            return if (target === detail) LINKS else target.firstTag()
         }
+        return target.getFragmentTagAt(local)
     }
 
     /**
+     * La etiqueta del primer tramo que lleve una: es la del distintivo entero, porque
+     * cada uno es un componente con un solo tramo. Ver [renderChips].
+     */
+    private fun SimpleColoredComponent.firstTag(): Any? =
+        (0 until fragmentCount).firstNotNullOfOrNull { getFragmentTag(it) }
+
+    /**
      * Qué control de la fila hay bajo [point], si hay alguno. Mismo truco que
-     * [linksAt]: se prepara el renderer para esa fila y se pregunta al panel de la
-     * derecha, que es donde viven los dos.
+     * [hotspotAt]: se prepara el renderer para esa fila y se pregunta al panel de la
+     * derecha, que es donde viven los tres.
      *
-     * Se pregunta por lo que está **pintado**, no por lo que podría estarlo: los dos
+     * Se pregunta por lo que está **pintado**, no por lo que podría estarlo: los
      * controles dependen de [hoveredRow] y preparar la fila los deja visibles o no
      * exactamente igual que al pintarla. Sin eso, un clic acertaría en un menú que
      * nadie está viendo.
@@ -768,6 +1175,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         val child = childAt(actions, point.x - bounds.x - actions.x, point.y - bounds.y - actions.y)
         return when {
+            child === expand && expandActive -> RowTarget.EXPAND
             child === bookmark && bookmarkActive -> RowTarget.BOOKMARK
             child === more && menuActive -> RowTarget.MENU
             else -> null
@@ -797,6 +1205,151 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val box = threeStateCheckBox
         return box.isVisible && point.x - bounds.x < box.x + box.width
     }
+
+    // ------------------------------------------- selección de texto: medida
+
+    /**
+     * El punto del texto que hay bajo [point], o `null` si ahí no hay texto de una
+     * tarjeta —una cabecera, la línea de distintivos, el hueco de los controles—.
+     *
+     * Es el mismo procedimiento que [tagAt]: se prepara el renderer para esa fila
+     * —es el mismo objeto el que pinta todas— y se mide sobre lo que acaba de quedar
+     * montado. La diferencia es la resolución: aquí no basta con saber qué fragmento
+     * hay debajo, hace falta el carácter.
+     */
+    fun caretAt(tree: JTree, point: Point): TextCaret? {
+        val hit = taskAt(tree, point) ?: return null
+        val bounds = paintedRowBounds(tree, hit.row) ?: return null
+        prepare(tree, hit.node, hit.row, bounds)
+
+        val x = point.x - bounds.x - lines.x
+        val y = point.y - bounds.y - lines.y
+        val components = textComponents()
+        val index = components.indexOfFirst { y >= it.y && y < it.y + it.height }
+        if (index < 0) return null
+        // Los bordes de la línea cuentan: a su derecha empieza el hueco de los
+        // controles, y un cursor de texto allí prometería marcar lo que no se puede.
+        val component = components[index]
+        if (x < component.x || x >= component.x + component.width) return null
+        return TextCaret(hit.node.task.id, hit.row, TextPos(index, offsetAt(index, component, x)))
+    }
+
+    /**
+     * El punto del texto de la fila [row] al que apunta [point], **pegado** a esa
+     * tarjeta: por encima de su primera línea es el principio y por debajo de la
+     * última es el final.
+     *
+     * Es lo que hace que arrastrar fuera de la tarjeta no se lleve la lista entera
+     * por delante, y de paso lo que permite marcar hasta el final del cuerpo sin
+     * tener que soltar justo detrás de la última letra.
+     */
+    fun caretTowards(tree: JTree, row: Int, point: Point): TextPos? {
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return null
+        val bounds = paintedRowBounds(tree, row) ?: return null
+        prepare(tree, node, row, bounds)
+
+        val components = textComponents()
+        if (components.isEmpty()) return null
+        val last = components.size - 1
+        val x = point.x - bounds.x - lines.x
+        val y = point.y - bounds.y - lines.y
+
+        if (y < components.first().y) return TextPos(0, 0)
+        if (y >= components[last].y + components[last].height) return TextPos(last, lengthOf(last))
+
+        val index = components.indexOfFirst { y >= it.y && y < it.y + it.height }.coerceAtLeast(0)
+        return TextPos(index, offsetAt(index, components[index], x))
+    }
+
+    /**
+     * El texto de la tarjeta [row], línea a línea y tal y como se está pintando. Es
+     * lo que se copia: las líneas son las de la pantalla, así que lo que se pega es
+     * exactamente lo que se marcó.
+     */
+    fun cardText(tree: JTree, row: Int): List<String> {
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
+        val bounds = paintedRowBounds(tree, row) ?: return emptyList()
+        prepare(tree, node, row, bounds)
+        return pendingCard.map { runs -> runs.joinToString("") { it.text } }
+    }
+
+    /** Deja el renderer montado y medido para la fila [row], que es el único estado que tiene. */
+    private fun prepare(tree: JTree, node: TaskNode, row: Int, bounds: Rectangle) {
+        getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
+        setBounds(0, 0, bounds.width, bounds.height)
+        doLayout()
+        lines.doLayout()
+    }
+
+    /** Las líneas de texto de la tarjeta montada, en el orden en que se leen. */
+    private fun textComponents(): List<ColoredTreeCellRenderer> =
+        (listOf(textRenderer) + extraLines).take(pendingCard.size)
+
+    private fun lengthOf(line: Int): Int =
+        pendingCard.getOrNull(line).orEmpty().sumOf { it.text.length }
+
+    /**
+     * El carácter de la línea [line] que hay a [x] píxeles del borde izquierdo de la
+     * pila de líneas.
+     *
+     * Se mide con la misma función que envuelve el texto, así que el corte cae donde
+     * cayeron las letras. Lo único que no se puede calcular es dónde empieza el texto
+     * dentro del componente: eso lo pone la plataforma y lo contesta [textInset].
+     */
+    private fun offsetAt(line: Int, component: ColoredTreeCellRenderer, x: Int): Int {
+        val runs = pendingCard.getOrNull(line).orEmpty()
+        if (runs.isEmpty()) return 0
+        val target = x - component.x - textInset(component)
+        if (target <= 0) return 0
+
+        var consumed = 0
+        var offset = 0
+        for (run in runs) {
+            val width = measure(run.text, run.style)
+            if (target > consumed + width) {
+                consumed += width
+                offset += run.text.length
+                continue
+            }
+            return offset + nearestChar(run, target - consumed)
+        }
+        return offset
+    }
+
+    /** El borde entre caracteres de [run] más cercano a [x] píxeles de su principio. */
+    private fun nearestChar(run: Run, x: Int): Int {
+        var previous = 0
+        for (index in 1..run.text.length) {
+            val width = measure(run.text.substring(0, index), run.style)
+            if (width >= x) return if (x - previous <= width - x) index - 1 else index
+            previous = width
+        }
+        return run.text.length
+    }
+
+    /**
+     * Dónde empieza el texto dentro de una línea: el relleno que `SimpleColoredComponent`
+     * le pone por delante.
+     *
+     * Se **pregunta** en vez de calcularse, barriendo con `findFragmentAt` —la única
+     * API pública que lo sabe— hasta dar con el primer fragmento. Reconstruirlo
+     * sumando borde y relleno sería copiar las interioridades del componente, que es
+     * justo lo que se rompe al actualizar la plataforma. El barrido cuesta, así que el
+     * resultado se guarda por componente: sólo depende del borde y del relleno, no del
+     * texto, y esos no cambian en la vida de la fila.
+     */
+    private fun textInset(component: SimpleColoredComponent): Int {
+        insets[component]?.let { return it }
+        for (x in 0..MAX_TEXT_INSET) {
+            if (component.findFragmentAt(x) == 0) {
+                insets[component] = x
+                return x
+            }
+        }
+        return 0
+    }
+
+    private val insets = IdentityHashMap<SimpleColoredComponent, Int>()
 
     private fun childAt(parent: Container, x: Int, y: Int): java.awt.Component? =
         parent.components.firstOrNull {
@@ -831,24 +1384,29 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     /** Los controles de una fila, para quien resuelve el clic. */
-    enum class RowTarget { BOOKMARK, MENU }
+    enum class RowTarget { EXPAND, BOOKMARK, MENU }
 
     private companion object {
         /** Etiqueta del contador del indicador: representa *todos* los enlaces de la fila. */
         val LINKS = Any()
 
+        /** El distintivo del ancla se pinta como enlace porque se pulsa como un enlace. */
+        val ANCHOR_STYLE = SimpleTextAttributes(
+            SimpleTextAttributes.STYLE_SMALLER,
+            SimpleTextAttributes.LINK_ATTRIBUTES.fgColor,
+        )
+
         /** Apagado es el mismo icono translúcido: la plataforma no trae variante hueca. */
         val BOOKMARK_ON = AllIcons.Nodes.Bookmark
         val BOOKMARK_OFF = IconLoader.getTransparentIcon(AllIcons.Nodes.Bookmark, 0.35f)
 
-        /** Separación entre tarjetas, redondeo, franja y punto de color del distintivo. */
+        /** Separación entre tarjetas, redondeo y franja. El punto de color, en [PriorityDot]. */
         const val CARD_GAP = 2
         const val CARD_ARC = 10
         const val STRIPE = 3
         const val STRIPE_GAP = 5
         const val PAD_V = 3
         const val PAD_H = 4
-        const val DOT = 8
         const val ICON_PAD = 2
 
         /** Deja sitio a la franja y separa las tarjetas. El fondo lo pinta el renderer. */
@@ -865,11 +1423,39 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         const val MAX_TITLE_LINES = 3
 
         /**
+         * Tope de líneas de una tarjeta desplegada. No es un límite de diseño sino un
+         * seguro: una tarea con un fichero entero pegado dentro crearía un componente
+         * por línea, y a partir de cierto punto lo que hace falta es abrirla, no
+         * desplegarla.
+         */
+        const val MAX_CARD_LINES = 120
+
+        /**
+         * Tope de vistas previas por tarjeta, y el mismo seguro que [MAX_CARD_LINES]:
+         * una tarea con veinte capturas dentro no se lee desplegando la tarjeta, se
+         * abre.
+         */
+        const val MAX_CARD_IMAGES = 20
+
+        /**
+         * Cuánto tiñe el fondo de la selección de texto. Bastante para verse sobre la
+         * tarjeta y sobre una fila ya seleccionada, poco para no tapar la letra.
+         */
+        const val SELECTION_ALPHA = 0.28
+
+        /** Hasta dónde se busca el principio del texto de una línea. Ver [textInset]. */
+        const val MAX_TEXT_INSET = 48
+
+        /**
          * Distintivos reutilizables. Se crean una vez y se muestran u ocultan: el
          * renderer pinta todas las filas, así que crear componentes por fila sería
          * basura en cada repintado.
+         *
+         * Nueve desde que la prioridad se enseña siempre: con ocho, la tarjeta de
+         * fábrica con cuatro etiquetas perdía el último —el estado— sólo por haber
+         * ganado el distintivo que antes se callaba.
          */
-        const val MAX_CHIPS = 8
+        const val MAX_CHIPS = 9
 
         /** Holgura para la barra de desplazamiento y el borde derecho. */
         const val MARGIN = 12

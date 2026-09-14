@@ -2,6 +2,7 @@ package com.tasklane.search
 
 import com.intellij.psi.codeStyle.MinusculeMatcher
 import com.intellij.psi.codeStyle.NameUtil
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
@@ -26,7 +27,12 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class LinearScanIndex : TaskSearchIndex {
 
-    private class Entry(val body: String, val tags: List<String>, val document: SearchDocument)
+    private class Entry(
+        val body: String,
+        val tags: List<String>,
+        val anchors: List<CodeAnchor>,
+        val document: SearchDocument,
+    )
 
     /**
      * `Concurrent` y `@Volatile` no porque haya paralelismo real —`flatMapLatest`
@@ -92,9 +98,15 @@ class LinearScanIndex : TaskSearchIndex {
      */
     private fun documentOf(task: Task): SearchDocument {
         val cached = documents[task.id]
-        if (cached != null && cached.body == task.body && cached.tags == task.tags) return cached.document
+        if (cached != null &&
+            cached.body == task.body &&
+            cached.tags == task.tags &&
+            cached.anchors == task.anchors
+        ) {
+            return cached.document
+        }
         val document = SearchDocument.of(task)
-        documents[task.id] = Entry(task.body, task.tags, document)
+        documents[task.id] = Entry(task.body, task.tags, task.anchors, document)
         return document
     }
 
@@ -129,12 +141,18 @@ class LinearScanIndex : TaskSearchIndex {
             val name = repoNames[task.repo].orEmpty()
             if (query.repos.none { name.startsWith(it) }) return false
         }
+        // Contiene y no empieza por: se teclea el nombre del fichero y la ruta guardada
+        // lleva sus directorios delante.
+        for (file in query.files) {
+            if (document.files.none { it.contains(file) }) return false
+        }
         if (query.done != null && state.terminal != query.done) return false
 
         for (facet in query.has) {
             val present = when (facet) {
                 TaskQuery.Facet.LINK -> task.links.isNotEmpty()
                 TaskQuery.Facet.IMAGE -> task.attachments.isNotEmpty()
+                TaskQuery.Facet.CODE -> task.anchors.isNotEmpty()
             }
             if (!present) return false
         }

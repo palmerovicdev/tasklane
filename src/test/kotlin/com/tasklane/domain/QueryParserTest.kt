@@ -24,11 +24,27 @@ class QueryParserTest {
     }
 
     @Test
+    fun `file acota a las tareas ancladas a un fichero`() {
+        val query = QueryParser.parse("file:AuthService.kt fallo")
+
+        assertEquals(setOf("authservice.kt"), query.files)
+        assertEquals(listOf("fallo"), query.terms)
+    }
+
+    /** A medio escribir no filtra, como el resto de operadores. */
+    @Test
+    fun `file sin valor se ignora`() {
+        assertTrue(QueryParser.parse("file:").files.isEmpty())
+        assertTrue(QueryParser.parse("file:").isEmpty)
+    }
+
+    @Test
     fun `is y has se traducen a sus facetas`() {
         assertEquals(true, QueryParser.parse("is:done").done)
         assertEquals(false, QueryParser.parse("is:open").done)
         assertEquals(setOf(TaskQuery.Facet.LINK), QueryParser.parse("has:link").has)
         assertEquals(setOf(TaskQuery.Facet.IMAGE), QueryParser.parse("has:image").has)
+        assertEquals(setOf(TaskQuery.Facet.CODE), QueryParser.parse("has:code").has)
     }
 
     @Test
