@@ -48,7 +48,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-1.3.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-1.4.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -395,7 +395,7 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-1.3.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-1.4.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -452,7 +452,10 @@ código** y *Move To*, y arregla que las cabeceras de grupo no se plegaran. La `
 cierra el viaje de vuelta: el código **enseña sus tareas** en el editor. La `1.3.0`
 vuelve sobre la tarjeta: su texto se **selecciona y se copia**, un botón la **despliega**
 para leerla entera —con sus **capturas** dentro—, y la **prioridad se cambia** desde su
-distintivo.
+distintivo. La `1.4.0` la deja **entera y en su sitio** con la ventana estrecha: el
+distintivo de prioridad en todas las tarjetas, la fila midiendo exactamente lo que se ve
+—ni los distintivos se caen por abajo ni los botones dejan de caer donde se ven— y un
+suelo de 300 px de ancho para la ventana.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -491,7 +494,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v1.3.0 && git push origin v1.3.0
+git tag v1.4.0 && git push origin v1.4.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no
@@ -502,7 +505,7 @@ tocan el repositorio:
 | `CERTIFICATE_CHAIN`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSWORD` | Firma del plugin. Se generan una vez siguiendo [*Plugin Signing*](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) |
 | `PUBLISH_TOKEN` | Token del perfil del Marketplace |
 
-**Una versión con sufijo va a su propio canal:** `1.3.0-beta.1` se publica en `beta`,
+**Una versión con sufijo va a su propio canal:** `1.4.0-beta.1` se publica en `beta`,
 no en el estable, y sólo la ve quien haya añadido ese canal en el IDE. El canal sale
 del propio número de versión, así que no hay un segundo sitio que pueda discrepar.
 

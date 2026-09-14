@@ -103,6 +103,30 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>1.4.0 &mdash; the whole card, where you can reach it</h3>
+            <ul>
+              <li><b>Every card shows its priority badge now</b>, the default priority
+                  included. It used to stay quiet &mdash; it would be the same word on
+                  every row &mdash; but since the badge became the button that changes
+                  the priority, staying quiet hid the control on exactly the cards nobody
+                  has touched yet. The colour dot is part of the button too.</li>
+              <li>The <i>Priority</i> submenu has an icon: it was the only entry in the
+                  context menu without one.</li>
+              <li>Fixed: with a narrow tool window, a card with a few tags asked for more
+                  width than there was, and the platform popped the rest of the row
+                  outside the panel on hover &mdash; with the buttons on its right inside.
+                  Reaching for them closed it.</li>
+              <li>Fixed: cards could lose their bottom line &mdash; priority, date and
+                  tags gone, with no hint why. The tree kept a width of its own and
+                  stopped following the panel, so a card was measured at one width and
+                  painted at another. It follows the panel now, and the window will not go
+                  below 300px wide.</li>
+              <li>Fixed: a word with no spaces in it &mdash; a long identifier, an
+                  unshortened URL &mdash; used to stretch the whole row, and the buttons
+                  on the right stopped landing where they are drawn: clicking the bookmark
+                  folded the card. Those lines are cut with an ellipsis now.</li>
+            </ul>
+
             <h3>1.3.0 &mdash; cards you can read and act on</h3>
             <ul>
               <li><b>Card text is selectable.</b> Drag across a card to select its text
@@ -119,19 +143,7 @@ intellijPlatform {
               <li><b>Change the priority without opening the dialog.</b> Click the
                   priority badge on a card for a list of priorities with their colours,
                   or use the new <i>Priority</i> submenu in the context menu to change
-                  every selected task at once. Every card carries the badge now, the
-                  default priority included &mdash; it is the button, and the cards
-                  nobody has touched yet are the ones whose priority changes most.</li>
-              <li>Fixed: with a narrow tool window, a card with a few tags asked for more
-                  width than there was, and the platform popped the rest of the row
-                  outside the panel on hover &mdash; with the buttons on its right inside.
-                  Reaching for them closed it. A card never asks for more than it can
-                  show now.</li>
-              <li>Fixed: cards in a narrow tool window could lose their bottom line
-                  &mdash; priority, date and tags gone, with no hint why. The tree kept a
-                  width of its own and stopped following the panel, so a card was
-                  measured at one width and painted at another. It follows the panel now,
-                  and the window itself will not go below 300px wide.</li>
+                  every selected task at once.</li>
             </ul>
 
             <h3>1.2.1</h3>

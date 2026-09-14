@@ -46,6 +46,7 @@ import java.util.IdentityHashMap
 import javax.swing.JPanel
 import javax.swing.JTree
 import javax.swing.JViewport
+import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.plaf.basic.BasicTreeUI
 
 /**
@@ -309,7 +310,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         hasFocus: Boolean,
     ) {
         pendingSelected = selected
-        widthLimit = visibleWidth(tree)
+        // La sangría cuenta: una fila de un grupo empieza a la derecha del borde, y lo
+        // que le queda de sitio es lo que se ve **menos** esa sangría. Sin descontarla,
+        // el tope dejaba la fila asomando por la derecha justo esos píxeles, y con ella
+        // los botones — que se pintan donde acaba la fila, pero se buscaban donde el
+        // *hit testing* rehace la cuenta. Pulsar el marcador plegaba la tarjeta.
+        widthLimit = visibleWidth(tree) - indentOf(tree, value as? DefaultMutableTreeNode)
         when (value) {
             is GroupNode -> {
                 hideExtras()
@@ -990,16 +996,25 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val total = visibleWidth(tree)
         if (total <= 0) return 0
 
-        val ui = tree.ui as? BasicTreeUI
-        val step = (ui?.leftChildIndent ?: 0) + (ui?.rightChildIndent ?: 0)
-        // `depthOffset` de `BasicTreeUI` con raíz oculta y sin manecillas: la sangría
-        // de un nodo de nivel 1 es cero.
-        val indent = step * (node.level - 1).coerceAtLeast(0)
+        val indent = indentOf(tree, node)
         val insets = border?.getBorderInsets(this)
         val stripe = insets?.left ?: 0
         val box = if (checkbox.isVisible) checkbox.preferredSize.width else 0
         val right = (insets?.right ?: 0) + if (actions.isVisible) actions.preferredSize.width else 0
         return total - indent - stripe - box - right - JBUI.scale(MARGIN)
+    }
+
+    /**
+     * Lo que el árbol sangra a [node] por su nivel.
+     *
+     * `depthOffset` de `BasicTreeUI` con raíz oculta y sin manecillas: la sangría de un
+     * nodo de nivel 1 es cero, y la de una tarea dentro de una cabecera de grupo, un
+     * escalón.
+     */
+    private fun indentOf(tree: JTree, node: DefaultMutableTreeNode?): Int {
+        val ui = tree.ui as? BasicTreeUI
+        val step = (ui?.leftChildIndent ?: 0) + (ui?.rightChildIndent ?: 0)
+        return step * ((node?.level ?: 1) - 1).coerceAtLeast(0)
     }
 
     /**

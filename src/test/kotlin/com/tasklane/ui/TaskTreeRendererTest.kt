@@ -2,6 +2,8 @@ package com.tasklane.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.ui.CheckedTreeNode
+import com.tasklane.domain.model.DateGroup
+import com.tasklane.domain.model.GroupKey
 import com.intellij.util.ui.EmptyIcon
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
@@ -16,6 +18,7 @@ import com.tasklane.ui.toolwindow.CardImageView
 import com.tasklane.ui.toolwindow.CardPreviews
 import com.tasklane.ui.toolwindow.CardSelection
 import com.tasklane.ui.toolwindow.CardTextSelection
+import com.tasklane.ui.toolwindow.GroupNode
 import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
 import com.tasklane.ui.toolwindow.TextPos
@@ -625,6 +628,57 @@ class TaskTreeRendererTest {
     // ------------------------------------------------------ el ancho de la fila
 
     /**
+     * Una palabra que no cabe ni partiéndola por espacios se **corta**, y la fila sigue
+     * acabando donde acaba el hueco.
+     *
+     * Es el caso que descolocaba los botones. La tarjeta pasaba a medir lo que esa
+     * palabra; el árbol pinta la fila hasta el borde visible, pero el *hit testing*
+     * rehace la cuenta sobre lo que la fila dice que mide, así que los dos números
+     * dejaban de ser el mismo y los botones se buscaban un escalón a la derecha de
+     * donde se veían: pulsar el marcador plegaba la tarjeta.
+     *
+     * Con la tarea **dentro de un grupo**, que es donde de verdad aparecía: la sangría
+     * de la fila es ancho que la tarjeta no tiene, y era justo lo que faltaba descontar.
+     */
+    @Test
+    fun `una palabra sin cortes no descoloca los botones de la fila`() {
+        val long = task("ajkhbasjgabsldgasdksbfknsabfkasnbdgkjhbasdkjbasdkjbaskdjb\nfasd\ngsa")
+        val tree = treeWithGroup(long)
+        renderer.hoveredRow = 1
+
+        val bounds = tree.getRowBounds(1)
+
+        assertTrue("la fila de un grupo va sangrada", bounds.x > 0)
+        assertTrue(
+            "la fila acaba en ${bounds.x + bounds.width} sobre un arbol de ${tree.width}",
+            bounds.x + bounds.width <= tree.width,
+        )
+    }
+
+    /**
+     * Y con la sangría descontada: el tope de ancho se pone sobre lo que le queda a
+     * **esa** fila, no sobre lo que se ve del árbol entero. Con distintivos de sobra
+     * —que es cuando el tope entra en juego— la fila de un grupo se pasaba justo la
+     * sangría, y los botones se iban con ella.
+     */
+    @Test
+    fun `la tarjeta de un grupo tampoco se sale por la sangria`() {
+        val tree = treeWithGroup(
+            task(
+                "Comprar pan",
+                tags = listOf("planificacion", "pendiente", "compras", "semana", "casa", "cocina"),
+            ),
+        )
+
+        val bounds = tree.getRowBounds(1)
+
+        assertTrue(
+            "la fila acaba en ${bounds.x + bounds.width} sobre un arbol de ${tree.width}",
+            bounds.x + bounds.width <= tree.width,
+        )
+    }
+
+    /**
      * La tarjeta no se sale del hueco visible por muchos distintivos que lleve.
      *
      * La línea de distintivos pide el ancho de todos los suyos aunque luego deje
@@ -727,6 +781,28 @@ class TaskTreeRendererTest {
     private fun expand(tree: JTree, task: Task) {
         renderer.toggleExpanded(task)
         remeasure(tree)
+    }
+
+    /**
+     * Un árbol con una cabecera de grupo y la tarea **dentro**, que es como se ve en la
+     * ventana en cuanto el estado agrupa por algo. Importa porque una fila de un grupo
+     * va sangrada, y la sangría es ancho que la tarjeta no tiene.
+     */
+    private fun treeWithGroup(task: Task, width: Int = 420): JTree {
+        val root = CheckedTreeNode("root")
+        val group = GroupNode(GroupKey.OfDate(DateGroup.Today), 1)
+        group.add(TaskNode(task, false))
+        root.add(group)
+        val tree = JTree(DefaultTreeModel(root))
+        tree.cellRenderer = renderer
+        tree.isRootVisible = false
+        tree.showsRootHandles = false
+        tree.rowHeight = 0
+        tree.setSize(width, 400)
+        tree.doLayout()
+        tree.expandRow(0)
+        remeasure(tree)
+        return tree
     }
 
     /** El primer punto de la fila donde [probe] contesta algo. Rejilla de 2 px. */

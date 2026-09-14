@@ -63,9 +63,13 @@ class TitleWrapTest {
     }
 
     @Test
-    fun `una palabra mas larga que la linea no se pierde`() {
-        // No se parte por caracteres: se prefiere que se salga a que desaparezca.
-        assertEquals(listOf("supercalifragilistico"), wrap("supercalifragilistico", 5, maxLines = 3))
+    fun `una palabra mas larga que la linea se corta por caracteres`() {
+        // Antes se dejaba salir entera: se prefería eso a que desapareciera. Y se salía
+        // de verdad —la fila pasaba a medir lo que la palabra—, con lo que los botones
+        // de la derecha, que se colocan contra esa medida, dejaban de caer donde se
+        // ven: pulsar el marcador plegaba la tarjeta. Cortarla es lo que ya hacía la
+        // descripción, y los puntos suspensivos dicen que hay más.
+        assertEquals(listOf("supe…"), wrap("supercalifragilistico", 5, maxLines = 3))
     }
 
     @Test

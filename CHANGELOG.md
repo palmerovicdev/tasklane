@@ -9,6 +9,52 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [1.4.0] — La tarjeta, entera y en su sitio
+
+Lo que salió de usar la `1.3.0` con la tool window estrecha: distintivos que no se veían,
+tarjetas asomando por fuera del panel y botones que no hacían lo que se ve debajo del
+ratón. Todo lo de esta versión es la misma historia contada por sitios distintos —la fila
+se medía de una forma y se pintaba de otra— más el remate de la prioridad.
+
+### Añadido
+- **El distintivo de prioridad va en todas las tarjetas**, también en las de la
+  prioridad de fábrica. Mientras sólo se leía, ésa se callaba —sería la misma palabra
+  repetida en toda la lista, y el color ya lo lleva la franja—; desde la `1.3.0` el
+  distintivo **es el botón** que cambia la prioridad, así que callarlo escondía el
+  control justo en las tarjetas que nadie ha tocado, que son las que más se cambian.
+- **El punto de color también se pulsa.** Es más pequeño que la palabra y es a donde se
+  apunta —el color es lo que identifica una prioridad—, y era la mitad del distintivo
+  que no respondía.
+- **El submenú *Priority* lleva icono**: dos barras de color apiladas, el de «ordenar
+  por severidad» de la plataforma, que es lo más parecido a «niveles» que hay en
+  `AllIcons`. Era la única entrada del menú sin icono y su fila se leía hundida.
+- **La ventana no baja de 300 px de ancho.** Por debajo, el título se parte en líneas de
+  dos palabras y los distintivos empiezan a caerse por la derecha; de ahí para arriba la
+  tarjeta se defiende sola.
+
+### Corregido
+- **La tarjeta ya no se sale de la tool window.** Con la ventana estrecha y unas cuantas
+  etiquetas, la fila pedía más ancho del que se veía —la línea de distintivos pide el de
+  todos los suyos aunque luego deje fuera los que no caben—, y el árbol crece hasta la
+  fila más ancha: la plataforma daba por recortadas todas las tarjetas y al pasar el
+  ratón sacaba media tarjeta flotando por fuera del panel, con los botones de la derecha
+  dentro. Acercarse a pulsarlos la cerraba antes de llegar. Ahora la fila nunca pide más
+  de lo que se ve y ese trozo flotante está apagado.
+- **La línea de distintivos ya no se cae de la tarjeta.** Era el otro lado de lo mismo:
+  el árbol se quedaba más ancho que el hueco y dejaba de seguirlo, así que la tarjeta se
+  medía a un ancho y se pintaba a otro. El título se partía en una línea más de las que
+  se habían medido y lo que sobraba por abajo —prioridad, fecha, etiquetas— se quedaba
+  fuera del alto de la fila: había tarjetas con distintivos y tarjetas sin ellos, y nada
+  explicaba la diferencia. Ahora la ventana no deja que las dos medidas se separen, y si
+  aun así una fila viniera corta, la línea de abajo se queda con su sitio y lo que se va
+  es el renglón de texto que sobra —que ya venía recortado, y que se lee entero
+  desplegando la tarjeta—.
+- **Una palabra sin espacios ya no descoloca los botones de la fila.** Un identificador
+  largo o una URL sin acortar no tiene por dónde partirse, así que se quedaba entera y la
+  fila pasaba a medir lo que ella. Los botones de la derecha se colocan contra esa
+  medida, y dejaban de caer donde se ven: pulsar el marcador plegaba la tarjeta. Ahora
+  esas líneas se cortan con puntos suspensivos, como ya hacía la descripción.
+
 ## [1.3.0] — Tarjetas que se leen y se tocan
 
 Tres cosas que la tarjeta pedía desde el rediseño: que su texto se pueda coger, que se
@@ -32,13 +78,9 @@ pueda leer entera sin abrir la tarea, y que la prioridad se cambie desde donde s
   amplía. Plegada la tarjeta siguen sin verse —una captura dentro de una fila de tres
   líneas dejaría dos tareas por pantalla—: ahí está el contador «1 img», que desaparece
   cuando las imágenes ya están a la vista.
-- **La prioridad se cambia desde la propia tarjeta**: un clic en su distintivo —el punto
-  de color incluido, que es a donde se apunta— abre la lista de prioridades con sus
-  colores. Actúa sobre la tarjeta pulsada, como el
-  marcador, sin tener que seleccionarla antes. El distintivo lo llevan **todas** las
-  tarjetas, también las de la prioridad de fábrica: mientras sólo se leía, ésa se
-  callaba —sería la misma palabra en toda la lista—, pero ahora es el botón, y las
-  tarjetas que nadie ha tocado son las que más se cambian de prioridad.
+- **La prioridad se cambia desde la propia tarjeta**: un clic en su distintivo abre la
+  lista de prioridades con sus colores. Actúa sobre la tarjeta pulsada, como el
+  marcador, sin tener que seleccionarla antes.
 - **Submenú *Priority*** en el menú contextual, al lado de *Move To*, para cambiar la de
   toda la selección de una vez.
 
@@ -52,26 +94,6 @@ pueda leer entera sin abrir la tarea, y que la prioridad se cambie desde donde s
 - El despliegue de una tarjeta se recuerda por tarea mientras dure la sesión, así que
   una búsqueda que la esconda un rato no lo deshace. No se persiste: desplegar es mirar
   algo un momento, no configurar la lista.
-
-### Corregido
-- **La tarjeta ya no se sale de la tool window.** Con la ventana estrecha y unas cuantas
-  etiquetas, la fila pedía más ancho del que se veía —la línea de distintivos pide el de
-  todos los suyos aunque luego deje fuera los que no caben—, y el árbol crece hasta la
-  fila más ancha: la plataforma daba por recortadas todas las tarjetas y al pasar el
-  ratón sacaba media tarjeta flotando por fuera del panel, con los botones de la derecha
-  dentro. Acercarse a pulsarlos la cerraba antes de llegar. Ahora la fila nunca pide más
-  de lo que se ve y ese trozo flotante está apagado.
-- **La línea de distintivos ya no se cae de la tarjeta.** Era el otro lado de lo mismo:
-  el árbol se quedaba más ancho que el hueco y dejaba de seguirlo, así que la tarjeta se
-  medía a un ancho y se pintaba a otro. El título se partía en una línea más de las que
-  se habían medido y lo que sobraba por abajo —prioridad, fecha, etiquetas— se quedaba
-  fuera del alto de la fila: había tarjetas sin nada de eso y ninguna pista de por qué.
-  Ahora la ventana no deja que las dos medidas se separen, y si aun así una fila viniera
-  corta, la línea de abajo se queda con su sitio y lo que se va es el renglón de texto
-  que sobra —que ya venía recortado, y que se lee entero desplegando la tarjeta—.
-- **La ventana no baja de 300 px de ancho.** Por debajo, el título se parte en líneas de
-  dos palabras y los distintivos empiezan a caerse por la derecha; de ahí para arriba la
-  tarjeta se defiende sola.
 
 ## [1.2.1]
 

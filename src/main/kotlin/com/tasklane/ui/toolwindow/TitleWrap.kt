@@ -108,28 +108,49 @@ internal object TitleWrap {
         val trimmed = lines.filter { it.isNotEmpty() }
         if (trimmed.isEmpty()) return Fit(emptyList(), false)
         if (overflowed) truncate(trimmed.last(), available, width)
+        // Y la que **aun así** se pasa: una palabra sola más ancha que el hueco —un
+        // identificador largo, una URL sin acortar— no tiene espacios por donde
+        // partirse, así que se queda entera y se lleva la fila por delante. Se corta
+        // por letras. Que la fila no pueda ser más ancha que su sitio no es cosmética:
+        // los botones de la derecha se colocan contra ese ancho, y con la fila
+        // desbordada dejaban de caer donde se ven.
+        //
+        // No cuenta como `clipped`: lo que decide eso es si **desplegar** enseña algo
+        // más, y aquí desplegar cortaría la misma palabra por el mismo sitio.
+        for (line in trimmed) {
+            if (measureLine(line, width) > available) truncate(line, available, width)
+        }
         return Fit(trimmed.map(::merge), overflowed)
     }
 
+    private fun measureLine(line: List<Piece>, width: (String, SimpleTextAttributes) -> Int): Int =
+        line.sumOf { width(it.text.trimEnd(), it.run.style) }
+
     /**
-     * Mete los puntos suspensivos al final de la última línea, quitando palabras
-     * hasta que quepan. Si no cabe ni una palabra con ellos se quedan solos: es
-     * preferible a una línea que se sale del panel.
+     * Mete los puntos suspensivos al final de la línea, quitando palabras hasta que
+     * quepan. Cuando ya no queda ninguna que quitar —queda una sola y sigue sin
+     * caber— se corta **por letras**: es la única forma de que una palabra más larga
+     * que el hueco deje de salirse de la fila.
      */
     private fun truncate(
         line: MutableList<Piece>,
         available: Int,
         width: (String, SimpleTextAttributes) -> Int,
     ) {
-        val style = line.last().run.style
-        val dots = width(ELLIPSIS, style)
-        while (line.isNotEmpty()) {
-            val used = line.sumOf { width(it.text.trimEnd(), it.run.style) }
-            if (used + dots <= available || line.size == 1) break
+        val dots = width(ELLIPSIS, line.last().run.style)
+        while (line.size > 1 && measureLine(line, width) + dots > available) {
             line.removeAt(line.size - 1)
         }
         val last = line.last()
-        line[line.size - 1] = Piece(last.text.trimEnd() + ELLIPSIS, last.run)
+        val head = measureLine(line.dropLast(1), width)
+        var text = last.text.trimEnd()
+        // Letra a letra y no por proporción: los tramos pueden ir en negrita o en
+        // cursiva, y cada fuente mide lo suyo. Se puede quedar en nada, que es
+        // preferible a una línea que se sale del panel.
+        while (text.isNotEmpty() && head + width(text, last.run.style) + dots > available) {
+            text = text.dropLast(1)
+        }
+        line[line.size - 1] = Piece(text + ELLIPSIS, last.run)
     }
 
     /**
