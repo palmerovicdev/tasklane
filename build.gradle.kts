@@ -55,6 +55,10 @@ tasks.withType<JavaCompile>().configureEach {
 val localIde: String? = providers.gradleProperty("localIdePath").orNull?.takeIf(String::isNotBlank)
 
 dependencies {
+    // SQLite empaquetado (Fase 6). Hasta la 2.3 se usaba el de la plataforma
+    // —bundledModule("intellij.platform.sqlite")—, y el Marketplace lo rechaza: su paquete
+    // lleva @ApiStatus.Internal. Mismo fichero y mismo esquema; ver el KDoc de Sql.kt.
+    implementation("org.xerial:sqlite-jdbc:3.53.4.0")
     testImplementation("junit:junit:4.13.2")
 
     intellijPlatform {
@@ -66,8 +70,6 @@ dependencies {
         // esos modulos de la plataforma no entran solos en el classpath.
         bundledModule("intellij.platform.vcs.dvcs")
         bundledModule("intellij.platform.vcs.dvcs.impl")
-        // SPIKE Fase 0: SQLite de la plataforma.
-        bundledModule("intellij.platform.sqlite")
 
         if (localIde != null) {
             // Descarga cero: se compila contra el IDE ya instalado.

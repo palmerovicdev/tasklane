@@ -1,9 +1,5 @@
 package com.tasklane.startup
 
-import com.intellij.ide.actions.RevealFileAction
-import com.intellij.notification.NotificationAction
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -16,9 +12,6 @@ import com.tasklane.service.AttachmentService
 import com.tasklane.service.TaskService
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
-import java.nio.file.Files
-import java.text.DateFormat
-import java.util.Date
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -30,7 +23,7 @@ import kotlin.time.Duration.Companion.seconds
  *
  * 1. **Comprobar la integridad**, sólo si la sesión anterior no cerró la base —ver
  *    `TaskDb.dirty`—. Va primero porque lo que decide depende de ello: una base con
- *    daños no se copia.
+ *    daños no se copia, y desde la Fase 6 deja de escribirse y se recupera al reabrir.
  * 2. **Copiar la base** a `tasklane.db.backup`, como mucho una vez al día y sólo si
  *    cambió. Es el sustituto del `.bak` que se escribía en cada guardado.
  * 3. **Trasladar** lo que quede en el directorio plano de adjuntos al árbol fragmentado
@@ -114,39 +107,17 @@ internal class MaintenanceActivity : ProjectActivity {
     }
 
     /**
-     * Lo que dijo la comprobación. Sana, al registro y nada más: el usuario no pidió
-     * nada y no hay nada que contarle. Con daños, **se avisa**, con los primeros problemas
-     * y con dónde está la última copia buena — que es lo único útil que se puede hacer
-     * con esa noticia hasta que la recuperación de la Fase 6 lo haga sola.
+     * Lo que dijo la comprobación. Sana, al registro y nada más: el usuario no pidió nada y
+     * no hay nada que contarle. Con daños **ya se ocupó el servicio** —desde la Fase 6 deja de
+     * escribir, apunta la recuperación y ofrece reabrir—, así que aquí sólo se anota.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun report(project: Project, tasks: TaskService, result: TaskService.Integrity) {
         if (result.problems.isEmpty()) {
             thisLogger().info("Tasklane: la base se comprobó tras un cierre sucio y está sana")
-            return
+        } else {
+            thisLogger().warn("Tasklane: la base tiene daños: ${result.problems.joinToString(" | ")}")
         }
-        thisLogger().warn("Tasklane: la base tiene daños: ${result.problems.joinToString(" | ")}")
-
-        val backup = tasks.backupFile()?.takeIf { Files.exists(it) }
-        val where = backup?.let {
-            val at = DateFormat.getDateTimeInstance().format(Date(Files.getLastModifiedTime(it).toMillis()))
-            TasklaneBundle.message("notification.integrity.backup", it, at)
-        } ?: TasklaneBundle.message("notification.integrity.noBackup")
-
-        NotificationGroupManager.getInstance()
-            .getNotificationGroup(TaskService.NOTIFICATION_GROUP)
-            .createNotification(
-                TasklaneBundle.message("notification.integrity.title"),
-                TasklaneBundle.message("notification.integrity.content", result.problems.first(), where),
-                NotificationType.ERROR,
-            )
-            .apply {
-                if (backup != null) {
-                    addAction(NotificationAction.createSimple(RevealFileAction.getActionName()) {
-                        RevealFileAction.openFile(backup)
-                    })
-                }
-            }
-            .notify(project)
     }
 
     private companion object {

@@ -11,7 +11,6 @@ import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.LinkExtractor
 import com.tasklane.domain.text.TextNormalizer
-import org.jetbrains.sqlite.SqliteResultSet
 import java.time.Instant
 
 /**
@@ -115,7 +114,7 @@ internal object TaskRows {
      * La tarea de una fila, **sin etiquetas ni anclas**: ésas viven en sus tablas y las
      * pone [TaskStore] de una sola consulta para toda la página, no una por tarea.
      */
-    fun read(rows: SqliteResultSet): Task {
+    fun read(rows: Sql.Row): Task {
         val body = rows.getString(3).orEmpty()
         return Task(
             id = TaskId(rows.getString(1).orEmpty()),
@@ -136,7 +135,7 @@ internal object TaskRows {
     }
 
     /** El `seq` de la fila que [read] acaba de leer. Lo necesita quien borra del FTS. */
-    fun seqOf(rows: SqliteResultSet): Long = rows.getLong(0)
+    fun seqOf(rows: Sql.Row): Long = rows.getLong(0)
 
     // ------------------------------------------------------------------ derivados
 
@@ -246,7 +245,7 @@ internal object TaskRows {
 
     // ------------------------------------------------------------------- anclas
 
-    fun anchorOf(rows: SqliteResultSet): CodeAnchor = CodeAnchor(
+    fun anchorOf(rows: Sql.Row): CodeAnchor = CodeAnchor(
         path = rows.getString(1).orEmpty(),
         line = rows.getInt(2),
         column = rows.getInt(3),

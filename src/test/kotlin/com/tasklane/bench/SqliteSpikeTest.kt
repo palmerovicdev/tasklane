@@ -1,61 +1,34 @@
 package com.tasklane.bench
 
-import org.jetbrains.sqlite.EmptyBinder
-import org.jetbrains.sqlite.ObjectBinder
-import org.jetbrains.sqlite.SqliteConnection
-import org.jetbrains.sqlite.SqlitePreparedStatement
+import com.tasklane.data.sqlite.Sql
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
 
 /**
- * El spike de la Fase 0 (`docs/plan-escala.md` §0.5, riesgo nº1): ¿se puede usar
- * SQLite desde un plugin de JetBrains?
+ * El spike de la Fase 0 (`docs/plan-escala.md` §0.5, riesgo nº1): ¿se puede usar SQLite
+ * desde un plugin de JetBrains, **con lo que el almacén necesita**?
  *
- * **La respuesta cambió la decisión del §2.3.** El plan daba por hecho que había que
- * empaquetar `org.xerial:sqlite-jdbc` —~12 MB de nativas, extraídas a un temporal en
- * el primer uso, dentro del classloader aislado del plugin— y ponía justo ahí el
- * riesgo alto. No hace falta: la plataforma **ya trae** SQLite.
+ * **Dos respuestas en la vida del plugin.** La Fase 0 encontró que la plataforma ya traía
+ * SQLite (`org.jetbrains.sqlite`) y lo usó para no empaquetar nada. La Fase 6 lo tuvo que
+ * deshacer: el Marketplace rechaza el plugin porque ese paquete es API interna
+ * (`@ApiStatus.Internal` en su `package-info`), así que desde entonces se empaqueta
+ * `org.xerial:sqlite-jdbc` —que es lo que el §2.3 del plan proponía desde el principio—.
  *
- *     lib/intellij.platform.sqlite.jar        org.jetbrains.sqlite, visibility="public"
- *     lib/native/<os>-<arch>/libsqliteij.*    las seis combinaciones que soporta el IDE
+ * Esta clase fija, contra el driver que de verdad se empaqueta, lo que el almacén de la
+ * Fase 3 necesita y que **no** es evidente desde fuera: que la nativa lleva FTS5
+ * compilado, que admite WAL, que `unicode61 remove_diacritics 2` y `bm25()` se comportan
+ * y que la paginación por *keyset* va por índice. Si una versión nueva del driver se
+ * compilara sin `SQLITE_ENABLE_FTS5`, este test es lo que lo diría.
  *
- * Con `bundledModule("intellij.platform.sqlite")` entra en el classpath como ya
- * entraban `intellij.platform.vcs.dvcs` y compañía, y en runtime lo carga el
- * classloader de la plataforma, no el nuestro. Eso borra los tres costes que el plan
- * aceptaba a regañadientes:
- *
- * - **Cero bytes empaquetados.** El `.zip` del Marketplace no crece.
- * - **Cero riesgo de classloader.** Es el problema que ya nos hizo descartar
- *   `kotlinx-serialization` (ver `gradle.properties`), y aquí no se plantea: la
- *   nativa la carga la plataforma una vez para todo el IDE.
- * - **Cero problema de firma o de sandbox.** La nativa va dentro del IDE, firmada
- *   por JetBrains, y ya está cargada antes de que el plugin exista.
- *
- * Esta clase fija lo que el almacén de la Fase 3 necesita y que **no** es evidente
- * desde fuera: que la nativa de JetBrains lleva FTS5 compilado, que admite WAL, y
- * que `bm25()` y la paginación por keyset se comportan. Si JetBrains recompilara su
- * nativa sin `SQLITE_ENABLE_FTS5`, este test es lo que lo diría.
- *
- * **Dos trampas del módulo, anotadas aquí porque la Fase 3 las va a pisar.**
- *
- * 1. **Nada de `ObjectBinderFactory.createN()`.** Son `inline` con parámetros
- *    reificados, así que su cuerpo se copia en quien las llama; compiladas contra el
- *    IDE local (2026.2, JVM 25) no caben en nuestro bytecode 21 y el compilador lo
- *    rechaza con «Cannot inline bytecode built with JVM target 25». El constructor de
- *    [ObjectBinder] no es inline y hace lo mismo, así que se usa ése. Por lo mismo
- *    conviene no llamar a ninguna otra `inline` de este módulo.
- * 2. **Nada de `AutoCloseable.use`**, por la misma razón: es `inline` y en el stdlib
- *    del IDE viene a JVM 25. `Closeable.use` —la vieja— sí vale y es la que usa el
- *    código de producción, pero `SqliteStatement` sólo es `AutoCloseable`. Aquí se
- *    cierra con `try/finally`.
+ * Va sobre [Sql] y no sobre JDBC a pelo: lo que se prueba es lo que usa producción.
  */
 class SqliteSpikeTest {
 
-    private fun <T> withDb(block: (SqliteConnection) -> T): T {
+    private fun <T> withDb(block: (Sql) -> T): T {
         val dir = Files.createTempDirectory("tasklane-spike")
-        val db = SqliteConnection(dir.resolve("tasklane.db"), false)
+        val db = Sql(dir.resolve("tasklane.db"))
         return try {
             block(db)
         } finally {
@@ -64,60 +37,42 @@ class SqliteSpikeTest {
         }
     }
 
-    private fun <T> SqlitePreparedStatement<*>.closing(block: (SqlitePreparedStatement<*>) -> T): T =
-        try {
-            block(this)
-        } finally {
-            close()
-        }
-
-    /** Las columnas de texto de una consulta, fila a fila. */
-    private fun SqliteConnection.textRows(sql: String, columns: Int = 1): List<List<String?>> =
-        prepareStatement(sql, EmptyBinder).closing { statement ->
-            buildList {
-                val rows = statement.executeQuery()
-                while (rows.next()) add((0 until columns).map(rows::getString))
-            }
-        }
+    private fun Sql.text(sql: String): String? = first(sql) { it.getString(0).orEmpty() }
 
     /**
      * Que la nativa cargue y responda. Es el test que falla primero —y con un
-     * `UnsatisfiedLinkError` bien visible— si el módulo deja de estar en el
-     * classpath o si la plataforma cambia de nombre.
+     * `UnsatisfiedLinkError` bien visible— si el driver deja de encontrar su nativa en
+     * algún sistema.
      */
     @Test
-    fun `la nativa de la plataforma carga y ejecuta SQL`() = withDb { db ->
+    fun `la nativa carga y ejecuta SQL`() = withDb { db ->
         db.execute("CREATE TABLE t (a TEXT)")
         db.execute("INSERT INTO t VALUES ('hola')")
-        assertEquals("hola", db.selectString("SELECT a FROM t"))
+        assertEquals("hola", db.text("SELECT a FROM t"))
     }
 
     /**
-     * WAL es el §2.4: lectores y escritor sin bloquearse, y atomicidad sin el `.bak`
-     * que hoy se copia en cada volcado. `journal_mode` devuelve el modo que quedó
-     * puesto, así que el `PRAGMA` se comprueba solo.
+     * WAL es el §2.4: lectores y escritor sin bloquearse. `journal_mode` devuelve el modo
+     * que quedó puesto, así que el `PRAGMA` se comprueba solo.
      */
     @Test
     fun `admite WAL y las pragmas del esquema`() = withDb { db ->
-        assertEquals("wal", db.textRows("PRAGMA journal_mode = WAL").single().single()?.lowercase())
+        assertEquals("wal", db.text("PRAGMA journal_mode = WAL")?.lowercase())
         db.execute("PRAGMA synchronous = NORMAL")
         db.execute("PRAGMA foreign_keys = ON")
         db.execute("PRAGMA user_version = 1")
-        assertEquals(1, db.selectInt("PRAGMA user_version"))
-        assertEquals(1, db.selectInt("PRAGMA foreign_keys"))
+        assertEquals(1, db.count("PRAGMA user_version"))
+        assertEquals(1, db.count("PRAGMA foreign_keys"))
     }
 
     /**
-     * **El test que decide el plan.** FTS5 es una opción de compilación
-     * (`SQLITE_ENABLE_FTS5`), no algo que SQLite traiga siempre; sin él, §3.5 hay que
-     * escribirlo a mano y la Fase 3 crece las tres semanas que el plan reservaba
-     * para el plan B.
-     *
-     * Se prueba además `remove_diacritics 2`, que es lo que sustituye a
+     * **El test que decide el plan.** FTS5 es una opción de compilación, no algo que SQLite
+     * traiga siempre. Se prueba además `remove_diacritics 2`, que es lo que sustituye a
      * `TextNormalizer`: buscar `revision` tiene que encontrar `revisión`.
      */
     @Test
     fun `FTS5 esta compilado y quita diacriticos`() = withDb { db ->
+        assertEquals(1, db.count("SELECT sqlite_compileoption_used('ENABLE_FTS5')"))
         db.execute(
             """
             CREATE VIRTUAL TABLE task_fts USING fts5(
@@ -129,19 +84,17 @@ class SqliteSpikeTest {
         db.execute("INSERT INTO task_fts VALUES ('Revisión del login', 'Mirar el token caducado')")
         db.execute("INSERT INTO task_fts VALUES ('Pulir la tarjeta', 'Sin nada que ver')")
 
-        assertEquals(1, db.selectInt("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'revision'"))
-        assertEquals(1, db.selectInt("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'revisión'"))
-        assertEquals(1, db.selectInt("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'TOKEN'"))
-        assertEquals(0, db.selectInt("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'inexistente'"))
+        assertEquals(1, db.count("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'revision'"))
+        assertEquals(1, db.count("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'revisión'"))
+        assertEquals(1, db.count("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'TOKEN'"))
+        assertEquals(0, db.count("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'inexistente'"))
     }
 
     /**
      * `bm25()` con peso en la columna del título es lo que sustituye al
-     * `TITLE_WEIGHT = 1_000_000` de `LinearScanIndex.score()` (§2.4). Lo que hay que
-     * fijar es el **sentido**: bm25 devuelve valores negativos y más negativo es
-     * mejor, así que el orden ascendente ya pone primero lo que mejor casa —y un peso
-     * de 10 en `title` basta para que un acierto en el título gane a uno en el
-     * cuerpo, que es la jerarquía que hoy se consigue apilando escalones—.
+     * `TITLE_WEIGHT = 1_000_000` de `LinearScanIndex.score()` (§2.4). bm25 devuelve valores
+     * negativos y más negativo es mejor, así que el orden ascendente ya pone primero lo que
+     * mejor casa.
      */
     @Test
     fun `bm25 pondera el titulo por encima del cuerpo`() = withDb { db ->
@@ -149,23 +102,16 @@ class SqliteSpikeTest {
         db.execute("INSERT INTO task_fts VALUES ('Nota suelta', 'algo sobre el login y su token')")
         db.execute("INSERT INTO task_fts VALUES ('Arreglar el login', 'nada que anadir')")
 
-        val ranked = db
-            .textRows("SELECT title FROM task_fts WHERE task_fts MATCH 'login' ORDER BY bm25(task_fts, 10.0, 1.0)")
-            .map { it.single() }
-
+        val ranked = db.rows("SELECT title FROM task_fts WHERE task_fts MATCH 'login' ORDER BY bm25(task_fts, 10.0, 1.0)") {
+            it.getString(0).orEmpty()
+        }
         assertEquals(listOf("Arreglar el login", "Nota suelta"), ranked)
     }
 
     /**
-     * La paginación por keyset del §2.4 —«jamás `OFFSET`»— sobre el índice compuesto
-     * que sostiene la lista. Lo que se comprueba es que la tupla del cursor
-     * `(bookmarked, priority_rank, updated_at, id)` parte la lista sin repetir ni
-     * saltarse nada, que es justo lo que `OFFSET` sí garantiza y por lo que resulta
-     * tentador.
-     *
-     * Las fechas van repetidas a propósito —cinco filas por valor—: sin el `id` como
-     * último componente de la tupla, dos filas con la misma marca de tiempo quedarían
-     * una a cada lado del corte y una de ellas no saldría en ninguna página.
+     * La paginación por *keyset* del §2.4 —«jamás `OFFSET`»— sobre el índice compuesto que
+     * sostiene la lista: la tupla del cursor parte la lista sin repetir ni saltarse nada,
+     * con fechas repetidas a propósito.
      */
     @Test
     fun `la paginacion por keyset no repite ni pierde filas`() = withDb { db ->
@@ -180,21 +126,13 @@ class SqliteSpikeTest {
         db.execute("CREATE INDEX task_board ON task(bookmarked DESC, priority_rank DESC, updated_at DESC, id DESC)")
 
         val total = 250
-        db.beginTransaction()
-        val insert = db.prepareStatement(
-            "INSERT INTO task VALUES (?, ?, ?, ?)",
-            ObjectBinder(paramCount = 4),
-        )
-        try {
-            for (i in 0 until total) {
-                insert.binder.bind("t-%04d".format(i), if (i % 7 == 0) 1 else 0, i % 3, (i / 5).toLong())
-                insert.binder.addBatch()
-            }
-            insert.executeBatch()
-        } finally {
-            insert.close()
+        db.transaction {
+            db.batch(
+                "INSERT INTO task VALUES (?, ?, ?, ?)",
+                4,
+                (0 until total).asSequence().map { i -> arrayOf<Any>("t-%04d".format(i), if (i % 7 == 0) 1 else 0, i % 3, (i / 5).toLong()) },
+            )
         }
-        db.commit()
 
         data class Cursor(val id: String, val bookmarked: Int, val rank: Int, val updatedAt: Long)
 
@@ -205,29 +143,23 @@ class SqliteSpikeTest {
 
         while (true) {
             val here = cursor
-            val statement = if (here == null) {
-                db.prepareStatement(
-                    "SELECT id, bookmarked, priority_rank, updated_at FROM task $order LIMIT $page",
-                    EmptyBinder,
-                )
+            val rows = if (here == null) {
+                db.rows("SELECT id, bookmarked, priority_rank, updated_at FROM task $order LIMIT $page") {
+                    Cursor(it.getString(0)!!, it.getInt(1), it.getInt(2), it.getLong(3))
+                }
             } else {
-                db.prepareStatement(
+                db.rows(
                     "SELECT id, bookmarked, priority_rank, updated_at FROM task " +
                         "WHERE (bookmarked, priority_rank, updated_at, id) < (?, ?, ?, ?) $order LIMIT $page",
-                    ObjectBinder(paramCount = 4),
-                ).also { it.binder.bind(here.bookmarked, here.rank, here.updatedAt, here.id) }
+                    here.bookmarked,
+                    here.rank,
+                    here.updatedAt,
+                    here.id,
+                ) { Cursor(it.getString(0)!!, it.getInt(1), it.getInt(2), it.getLong(3)) }
             }
-
-            val before = seen.size
-            statement.closing { prepared ->
-                val rows = prepared.executeQuery()
-                while (rows.next()) {
-                    val row = Cursor(rows.getString(0)!!, rows.getInt(1), rows.getInt(2), rows.getLong(3))
-                    cursor = row
-                    seen += row.id
-                }
-            }
-            if (seen.size - before < page) break
+            rows.forEach { seen += it.id }
+            cursor = rows.lastOrNull() ?: cursor
+            if (rows.size < page) break
         }
 
         assertEquals("ninguna fila se repite", seen.size, seen.toSet().size)
@@ -235,12 +167,9 @@ class SqliteSpikeTest {
     }
 
     /**
-     * Lo que la Fase 3 promete: el coste por operación no depende de N. Se mide con
-     * un corpus pequeño para que el test siga siendo un test —el banco de verdad es
-     * el de `ScaleBenchmark`—, pero la forma de la consulta es la del §2.4 y lo que
-     * se comprueba es que el plan la resuelve **por índice** y no con un `SCAN` ni un
-     * `USE TEMP B-TREE FOR ORDER BY`, que es lo que delataría un orden de un millón
-     * de filas escondido detrás de un `LIMIT 100`.
+     * La forma de la consulta del §2.4 se resuelve **por índice** y no con un `SCAN` ni un
+     * `USE TEMP B-TREE FOR ORDER BY`, que es lo que delataría un orden de un millón de filas
+     * escondido detrás de un `LIMIT 100`.
      */
     @Test
     fun `la consulta de la lista se resuelve por indice`() = withDb { db ->
@@ -252,17 +181,35 @@ class SqliteSpikeTest {
             )
             """.trimIndent(),
         )
-        db.execute(
-            "CREATE INDEX task_board ON task(repo, state, bookmarked DESC, priority_rank DESC, updated_at DESC)",
-        )
+        db.execute("CREATE INDEX task_board ON task(repo, state, bookmarked DESC, priority_rank DESC, updated_at DESC)")
 
-        val plan = db.textRows(
+        val plan = db.rows(
             "EXPLAIN QUERY PLAN SELECT id FROM task WHERE repo = 'r' AND state = 's' " +
                 "ORDER BY bookmarked DESC, priority_rank DESC, updated_at DESC LIMIT 100",
-            columns = 4,
-        ).joinToString(" | ") { it[3].orEmpty() }
+        ) { it.getString(3).orEmpty() }.joinToString(" | ")
 
         assertTrue("debe usar task_board, y el plan fue: $plan", plan.contains("task_board"))
         assertTrue("no debe ordenar en memoria, y el plan fue: $plan", !plan.contains("TEMP B-TREE"))
+    }
+
+    /**
+     * Lo que el módulo de la plataforma no tenía y el driver sí: cortar una sentencia en
+     * marcha desde otro hilo (`sqlite3_interrupt`). Es lo que deja cancelar a mitad una copia
+     * o una comprobación de integridad.
+     */
+    @Test
+    fun `una sentencia larga se puede cortar desde otro hilo`() = withDb { db ->
+        val started = System.nanoTime()
+        val cutter = Thread {
+            Thread.sleep(100)
+            db.interrupt()
+        }
+        cutter.start()
+        val outcome = runCatching {
+            db.count("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 2000000000) SELECT count(*) FROM n")
+        }
+        cutter.join()
+        assertTrue("tenía que cortarse: $outcome", outcome.isFailure)
+        assertTrue("y en seguida", (System.nanoTime() - started) / 1_000_000 < 10_000)
     }
 }

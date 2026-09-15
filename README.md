@@ -24,18 +24,34 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 
 | | |
 |---|---|
-| **Una tarjeta por tarea** | Franja de prioridad, casilla, vencimiento, etiquetas y marcador. El cuerpo se pinta en Markdown: negrita, cursiva, `código` y tachado |
-| **Leer y copiar sin abrir** | El texto de la tarjeta se selecciona con el ratón y se copia con `⌘C`, y un botón la despliega para ver el cuerpo entero — capturas incluidas |
-| **Cambiar la prioridad de un clic** | Desde su propio distintivo en la tarjeta, o para toda la selección desde el menú contextual |
-| **Apuntar al código** | Una tarea puede anclarse a un `fichero:línea`. Se crea desde el menú contextual del editor y se vuelve ahí con un clic desde la tarjeta |
-| **Estados como pestañas** | Con su recuento en vivo. Estados y prioridades se configuran por proyecto: nombre, orden, color y el prefijo que los selecciona al escribir |
-| **Agrupar y plegar** | Por fecha, prioridad o etiqueta; los grupos se pliegan con un clic y se recuerda por estado |
-| **Buscar con operadores** | En el cuerpo entero, no sólo en el título, más filtros de abiertas, vencidas y marcadas |
-| **Escribir en Markdown** | Barra de formato, e imágenes que se pegan, se arrastran o se eligen, con vista previa en el propio editor |
-| **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas y un selector para cambiar |
+| **Estados como pestañas** | Con su recuento en vivo, que respeta la búsqueda y el filtro. Cada pestaña recuerda su selección y sus grupos plegados, y la última abierta vuelve al reabrir |
+| **Una tarjeta por tarea** | Franja de prioridad, casilla para completar, título en hasta tres líneas, una línea del cuerpo y distintivos: prioridad, anclas de código, vencimiento, etiquetas, enlaces e imágenes, y fecha |
+| **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas; las tareas cerradas salen tachadas |
+| **Enlaces de un clic** | En el título y en cualquier línea del cuerpo, también en la gris. Acortados al pintarse, enteros al abrirse; el contador los lista todos |
+| **Desplegar la tarjeta** | Para leer el cuerpo entero y ver sus capturas sin salir de la lista; un clic en una captura la amplía |
+| **Seleccionar y copiar** | El texto de la tarjeta se marca con el ratón y se copia con `⌘C` |
+| **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
+| **Mover de estado sin diálogo** | *Move To ▸* o `⇧⌥←/→`, también sobre una selección |
+| **Marcar** | Sube la tarea al principio de su grupo, sea cual sea su prioridad |
+| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
+| **Agrupar y plegar** | Por fecha —hoy y un grupo por día—, por prioridad o por etiqueta, elegido por estado; cada cabecera se pliega |
+| **Filtrar la vista** | Todas, abiertas, vencidas o marcadas, sumado a la búsqueda |
+| **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag` |
+| **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
+| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo. Etiquetas como fichas |
+| **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
+| **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, y la tarjeta lleva de vuelta con un clic |
+| **El código enseña sus tareas** | Una marca en el margen o una pastilla en la línea, con el color de la prioridad, un tooltip con la tarea y un clic que la abre |
+| **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas, un selector, y búsqueda en todos a la vez |
 | **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
-| **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo o sólo la selección |
+| **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo —como parte del día— o sólo la selección |
 | **Guardar y vaciar un repositorio** | Todas sus tareas a un CSV, un Markdown o un texto plano; y, por separado, borrarlas todas |
+| **Exportar a XML y quitar repositorios** | La salida al formato de intercambio, y quitar un repositorio que ya no está en disco comprobando antes que salieron todas |
+| **Imágenes a su tamaño** | Guardadas sin duplicar, con miniaturas en la lista, su peso a la vista, limpieza en un botón y aviso por umbral |
+| **Configurable por proyecto** | Estados y prioridades con nombre, orden arrastrando, colores, triggers y agrupación; plantilla para proyectos nuevos |
+| **Datos a salvo** | Base local, copia diaria, comprobación tras un cierre inesperado y *Tasklane: Diagnostics* |
+| **Teclado y accesibilidad** | La ventana se maneja entera con el teclado, y lista, buscador y diálogo tienen nombre para un lector de pantalla |
+| **Hecho para listas enormes** | Un millón de tareas se abren, se buscan y se recorren sin congelar el IDE |
 
 - **Repositorio:** [palmerovicdev/tasklane](https://github.com/palmerovicdev/tasklane)
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
@@ -49,7 +65,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-1.4.1.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.3.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -62,7 +78,11 @@ Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 | Fichero | Qué hay | VCS |
 |---|---|---|
 | `.idea/tasklane.xml` | estados y prioridades del proyecto | **sí** — compartible con el equipo |
-| `.idea/tasklane/` | las tareas, sus imágenes y el registro de repositorios (`layout.xml`) | no — lleva su propio `.gitignore` con `*` |
+| `.idea/tasklane/tasklane.db` | las tareas, en una base SQLite local | no — la carpeta lleva su propio `.gitignore` con `*` |
+| `.idea/tasklane/tasklane.db.backup` | la copia diaria de la base | no |
+| `.idea/tasklane/repos/<repo>/attachments/` | las imágenes de cada repositorio | no |
+| `.idea/tasklane/layout.xml` | el registro de repositorios | no |
+| `workspace.xml` | tus preferencias: pestaña abierta, filtro, repositorio activo, buscar en todos, formato de copia y marca del editor | no |
 | `tasklane-defaults.xml` (config del IDE) | plantilla para proyectos nuevos | n/a — es lo único que roamea |
 
 Un proyecto sin `.idea/tasklane.xml` se siembra desde la plantilla al abrirse, así que
@@ -110,9 +130,14 @@ que estaba abierto se recuerda al reabrir el proyecto.
 | Control | Qué hace |
 |---|---|
 | *New Task* (botón partido) | El cuerpo crea en la pestaña activa; la flecha deja elegir otro estado destino sin cambiar de pestaña |
-| Filtro de vista | *All tasks* / *Open* / *Overdue* / *Bookmarked*. Es de la ventana entera y se recuerda en `workspace.xml` |
-| Marcador y `⋮` | A la derecha de cada fila. Aparecen con el ratón encima —el marcador, siempre que la tarea lo esté— y el menú es el mismo del clic derecho |
-| *Move To ▸* | En ese menú. Manda la selección a otro estado sin abrir el diálogo; `⇧⌥←/→` hace lo mismo con el teclado |
+| *Edit* / *Delete* | Abren la tarea seleccionada / borran la selección. También con `Enter` y `Supr` |
+| *Group By* | Cómo agrupa esta pestaña: sin agrupar, por fecha, por prioridad o por etiqueta |
+| *Search All Repositories* | Busca en todos los repositorios de la ventana. Sólo aparece si hay más de uno |
+| *Export* | Copiar al portapapeles, guardar el repositorio, exportarlo a XML, vaciarlo y quitar uno ausente. Ver [Exportación](#exportación) |
+| *Settings* | Abre *Settings → Tools → Tasklane* |
+| Selector de repositorio | En la cabecera de la ventana. Con un solo repositorio se esconde y su nombre va al título |
+| Filtro de vista | *All tasks* / *Open* / *Overdue* / *Bookmarked*, en la cabecera. Es de la ventana entera y se recuerda en `workspace.xml` |
+| Marcador y `⋮` | A la derecha de cada fila, junto al botón de desplegar. Aparecen con el ratón encima —el marcador, siempre que la tarea lo esté— y el menú es el mismo del clic derecho |
 
 Los estados estuvieron en la barra de pestañas del IDE hasta la `0.6.1`; se bajaron al
 panel porque en el header competían con el título, el selector de repositorio y el
@@ -122,6 +147,12 @@ El filtro **no** es una consulta: no se escribe, no tiene sintaxis y borrar la b
 no se lo lleva por delante. Son dos cosas que se acumulan —«vencidas» *y* lo que diga
 el campo—, y por eso el desplegable está en la cabecera y no dentro del campo.
 
+**Listas enormes.** La lista se carga a páginas de cincuenta y anuncia lo que queda
+—«4.213 more»—: llegar a esa fila desplazándose, pulsarla o `Enter` sobre ella trae la
+siguiente. Un grupo de más de 500 tareas empieza plegado, y todo lo que crece con el número
+de tareas —contar, agrupar, buscar— ocurre fuera del hilo de interfaz. Con 100.000 tareas,
+la lista de un proyecto se abre en unos 9 ms.
+
 ### La tarjeta
 
 Cada tarea es una tarjeta de altura variable: crece con lo que tenga que decir y una
@@ -130,18 +161,46 @@ tarea de una frase sigue midiendo una línea.
 | Parte | Cuándo aparece |
 |---|---|
 | Franja de color a la izquierda | Siempre — es la prioridad, dentro de la tarjeta y recortada por ella |
-| Título | Hasta **tres** líneas; lo que no cabe se recorta. Doble clic abre la tarea entera |
+| Casilla | Siempre. Marcarla lleva la tarea al estado terminal; desmarcarla, al de por defecto |
+| Título | Hasta **tres** líneas; lo que no cabe se recorta. Una tarea cerrada sale tachada. Doble clic o `Enter` abre la tarea entera |
 | Descripción | Si hay cuerpo bajo el título. Una línea, recortada |
-| Distintivos | Prioridad (si no es la de por defecto), vencimiento, etiquetas, enlaces, imágenes y fecha |
+| Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas**, el contador de **enlaces e imágenes** y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
+| Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas |
+| Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
+
+**Con la ventana estrecha nada importante se cae.** Si el distintivo de prioridad o el de un
+ancla no caben enteros, se quedan en su icono —el punto de color, el icono de fichero—, que
+responde al clic igual. Está garantizado hasta el ancho mínimo de la ventana, 300 px; lo
+que sí se queda fuera cuando no cabe es lo demás, empezando por lo menos importante.
+
+**Desplegada**, la tarjeta deja de resumir: el título entero, todas las líneas del cuerpo y
+sus imágenes, cada una detrás de la línea que la nombra. Un clic en una imagen la abre a
+tamaño de pantalla. El texto de la tarjeta se **selecciona con el ratón** y se copia con
+`⌘C`; `Escape` quita la selección.
 
 El título y la descripción se pintan **en Markdown**: `**negrita**`, `*cursiva*`,
 `` `código` `` y `~~tachado~~` salen con su estilo y sin las marcas. Los guiones bajos
 no son cursiva a propósito —`un_nombre_asi` es identificador mucho más a menudo—, y
 `2 * 3 * 4` sigue siendo una multiplicación.
 
-Los enlaces del título se abren con **un clic** desde la fila, sin entrar a editar; el
-doble clic sigue siendo «abrir la tarea» en todo lo demás. Toda la tarjeta responde al
-ratón, no sólo la parte con letras.
+Los enlaces se abren con **un clic** desde la tarjeta, sin entrar a editar, estén en el
+título o en cualquier línea del cuerpo; el doble clic sigue siendo «abrir la tarea» en todo
+lo demás. Toda la tarjeta responde al ratón, no sólo la parte con letras.
+
+### Trabajar con tareas
+
+El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*, *Edit*,
+*Toggle Completed*, *Bookmark*, *Move To ▸*, *Priority ▸*, *Export* y *Delete*.
+
+- **Todo vale sobre una selección múltiple**: completar, marcar, mover, cambiar la
+  prioridad y borrar. Muchas tareas a la vez son **una** operación y un repintado; por
+  encima de diez va en segundo plano con barra, y **cancelar la deshace entera**.
+- **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`.
+- **Cambiar la prioridad** de la selección con *Priority ▸*, cada entrada con su color.
+- **Borrar** con `Supr` o *Delete*. No pregunta: los datos están en tu disco y la copia
+  diaria de la base es la red.
+- **Entrar en un estado terminal** —*Done* de fábrica— apunta la fecha de cierre, que es
+  la que usa *Done* para agrupar por fecha.
 
 ### Agrupar
 
@@ -151,7 +210,7 @@ Cuatro formas, elegidas en el desplegable de la barra y recordadas **por estado*
 | | |
 |---|---|
 | Sin agrupar | Lo marcado arriba, luego por prioridad, y dentro de cada una lo más reciente |
-| Por fecha | *Hoy · Ayer · Esta semana · días · meses · Sin fecha*, contra la fecha que el estado ancle (creación, modificación o cierre) |
+| Por fecha | *Today* y, debajo, **un grupo por cada día con alguna tarea** —*Sep 14*, *Sep 10, 2025*—, y *No date* al final, contra la fecha que el estado ancle (creación, modificación o cierre) |
 | Por prioridad | De la más alta a la más baja, y sólo las que tengan algo |
 | Por etiqueta | Una tarea con dos etiquetas sale bajo las dos; las que no tienen ninguna, en un grupo al final |
 
@@ -159,20 +218,36 @@ Cada cabecera lleva un chevrón y **se pliega con un clic** —o con `←`/`→`
 teclado—. Lo plegado se recuerda por grupo, no por posición, así que repintar la lista
 no lo pierde.
 
-Agrupando por fecha, **«hoy» se enseña aunque esté vacío**: que no haya nada hoy es
+Agrupando por fecha, **«hoy» se enseña aunque esté vacío** —*No tasks today · You're all
+caught up!*, o *Nothing completed today* en un estado terminal—: que no haya nada hoy es
 justo lo que se viene a mirar. Sólo ése, y sólo si la lista tiene algo más y no hay
 búsqueda ni filtro.
+
+### El diálogo de tarea
+
+**El mismo para crear y para editar**, venga de *New Task*, del doble clic, de Quick Add o
+del editor: una tarea apuntada de prisa no nace distinta de una escrita con calma.
+
+| | |
+|---|---|
+| Cuerpo | Markdown. La primera línea con texto es el título |
+| Barra de formato | Negrita, cursiva, código, enlace, imagen, lista con viñetas y lista numerada |
+| Imágenes | Se pegan, se sueltan en la zona de abajo o se eligen del disco. Ver [Imágenes](#imágenes) |
+| Estado y prioridad | Desplegables; el estado sale de la pestaña desde la que se abrió |
+| Vencimiento | Preajustes o calendario propio |
+| Etiquetas y código | Fichas; las del código son las anclas de la tarea |
+| `Escape` | Cierra el diálogo aunque el cursor esté dentro del cuerpo |
 
 ### Vencimiento, etiquetas y marcadores
 
 Los tres se editan en el diálogo de la tarea y son campos del modelo, no texto del
 cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sintaxis.
 
-- **Vencimiento** por preajustes —hoy, mañana, fin de semana, semana que viene— o
+- **Vencimiento** por preajustes —hoy, mañana, final de la semana, la semana que viene— o
   con una fecha concreta del calendario. Vence al **acabar** el día, así que algo
   puesto para hoy no nace vencido. Pasada la fecha, la tarjeta lo pinta en rojo.
 - **Etiquetas** como fichas: se escriben separadas por coma o espacio y se quitan con
-  su aspa. En el buscador son `#api`.
+  su aspa, o con `Retroceso` desde el campo vacío. En el buscador son `#api`.
 - **Marcador**: sube la tarea al principio de su grupo pase lo que pase, porque
   marcar es precisamente decir «que no se me pierda esto». Se pulsa en la propia fila.
 
@@ -183,13 +258,15 @@ de tareas dentro del IDE y una lista de tareas *del* IDE: hasta la `1.0.0` las t
 vivían junto al código pero no apuntaban a él, y volver a «¿dónde era esto?» era trabajo
 de quien escribió la nota.
 
-*New Tasklane Task from Here*, en el **menú contextual del editor**, abre el diálogo de
-siempre con el sitio ya puesto. Si hay algo seleccionado, ese texto entra como cuerpo.
+*New Tasklane Task from Here*, en el **menú contextual del editor** y en el menú **Tools**,
+abre el diálogo de siempre con el sitio ya puesto. Si hay algo seleccionado, ese texto entra
+como cuerpo. Con un fichero seleccionado en la vista del proyecto en vez de un editor, la
+tarea apunta al fichero.
 
 | | |
 |---|---|
 | Qué se guarda | La ruta **relativa a la raíz del proyecto**, la línea, la columna, y el texto de esa línea |
-| En la tarjeta | Un distintivo `Auth.kt:42` con color de enlace. Un clic abre el fichero por ahí —en la línea y el carácter exactos—; la ruta entera va al tooltip |
+| En la tarjeta | Un distintivo `Auth.kt:42` con color de enlace. Un clic abre el fichero por ahí —en la línea y el carácter exactos—; la ruta entera va al tooltip. Si no cabe entero se queda en su icono, que lleva al mismo sitio |
 | En el editor | La línea marcada, con el color de la prioridad. Ver [La marca en el editor](#la-marca-en-el-editor) |
 | Quitarla | En el diálogo de la tarea, con el aspa de su ficha. No se pueden añadir a mano: un ancla es un sitio del editor, y teclear una ruta y un número es lo que esto viene a evitar |
 | Buscar | `file:AuthService` por un trozo de la ruta, `has:code` por tenerla. La ruta entra además en el texto libre |
@@ -267,7 +344,8 @@ se apagan enteros desde *Settings → Tools → Tasklane*.
 
 `⌘K` lleva el foco al campo, sobre el árbol. Se busca en el cuerpo entero, no sólo en
 la fila, ignorando mayúsculas y acentos en los dos sentidos: *autenticación* encuentra
-*autenticacion* y al revés.
+*autenticacion* y al revés. `Enter` guarda la consulta en el historial del campo y devuelve
+el foco a la lista; `Escape` la borra.
 
 | Operador | Ejemplo |
 |---|---|
@@ -288,9 +366,10 @@ vaciar la lista, y un prefijo desconocido (`https:`) se busca como texto.
 en la barra — que sólo aparece cuando hay más de uno. Las filas de otro repositorio se
 etiquetan con su nombre.
 
-No hay índice invertido: 5.000 tareas normalizadas y cacheadas se recorren en un par
-de milisegundos, fuera del EDT y detrás de un debounce de 120 ms. La interfaz
-`TaskSearchIndex` existe para que esa decisión sea reversible sin tocar la UI.
+**Ordenado por relevancia.** Desde la `2.0.0` el texto va a un índice de texto completo
+(FTS5) dentro de la base, que puntúa más un acierto en el título que en el cuerpo, y la
+lista enseña los **200 mejores**. Sin texto libre —sólo operadores— manda el orden de
+siempre. Todo ocurre fuera del hilo de interfaz y detrás de un *debounce* de 120 ms.
 
 ## Enlaces
 
@@ -301,7 +380,8 @@ sueltas, las que empiezan por `www.` y los enlaces Markdown `[texto](url)`.
 | | |
 |---|---|
 | En el título | El enlace se pinta con el estilo de enlace del IDE y se abre con un clic |
-| En el detalle | El icono de cadena de la segunda línea, con el número; con varios enlaces sale una lista |
+| En el cuerpo | Sobre su propia línea, con el mismo estilo de enlace aunque el texto vaya en gris |
+| Contador | El icono de cadena de la línea de distintivos, con el número; con varios enlaces sale una lista de todos |
 | Acortado | `https://youtrack.jetbrains.com/issue/ABC-123` → `youtrack.jetbrains.com/…/ABC-123` |
 | Tooltip | La URL completa. Lo que se abre es siempre la original, nunca la acortada |
 
@@ -370,7 +450,7 @@ una imagen ni un enlace.
 
 ## Exportación
 
-El botón de copiar de la barra —y el menú contextual— llevan lo que se está viendo al
+El menú *Export* de la barra —y el del clic derecho— llevan lo que se está viendo al
 portapapeles. Con una búsqueda activa se exporta el resultado de la búsqueda: es lo
 único que se puede revisar antes de pegarlo.
 
@@ -426,7 +506,8 @@ su cuenta.
 
 **Exportar el repositorio a XML** devuelve sus tareas al `tasks.xml` de siempre, el
 formato que cualquier versión del plugin sabe leer. Se escribe entero o no se escribe:
-a un temporal que sólo sustituye al fichero cuando está completo.
+a un temporal que sólo sustituye al fichero cuando está completo. Un carácter que XML no
+admite —la salida de una terminal pegada— se sustituye por `U+FFFD` y se dice cuántos.
 
 **Guardar el repositorio en un fichero** (*Export ▸ Save Repository As*): todas las tareas
 del repositorio activo, estado a estado y en el orden de la lista, en uno de tres formatos.
@@ -445,6 +526,48 @@ la base, en todos los estados, después de una pregunta que dice cuántas son. V
 de guardar a propósito —vaciar no obliga a exportar—, y como todo en Tasklane sólo toca el
 **repositorio activo**, que se queda en la lista, vacío. Las capturas que ya no nombra
 ninguna tarea las recoge el mantenimiento de siempre.
+
+## Ajustes
+
+*Settings → Tools → Tasklane*. Todo se escribe al pulsar *Apply*, reasignaciones incluidas
+—*Cancel* deja el proyecto exactamente como estaba—, salvo los dos botones de imágenes, que
+actúan al pulsarlos.
+
+| Grupo | Qué se configura |
+|---|---|
+| **States** | Una tabla: nombre, cuál es el de por defecto para las tareas nuevas, cuáles son terminales (cerrar una tarea), cómo agrupa cada uno y por qué fecha. **El orden es el de las pestañas**: se arrastra la fila por su asa o se usan las flechas |
+| **Priorities** | Otra tabla, **de la más alta a la más baja** como en la ventana: nombre, por defecto, trigger y color para tema claro y oscuro, que se cambia pulsando la muestra. Arrastrar las filas es cambiar el orden de prioridad. Debajo, el interruptor de los triggers |
+| **Repositories** | Hasta qué profundidad se detectan repositorios bajo la raíz. Un filtro de vista, nunca un borrado |
+| **Code anchors** | Marca en el margen, pastilla en la línea o ninguna. Es **tuyo**: va a `workspace.xml` |
+| **Images** | El peso de las imágenes del repositorio activo, *Delete Unused Images*, *Delete All Images…* y el umbral del aviso. Ver [Imágenes](#imágenes) |
+| Enlaces | *Save as template for new projects* y *Configure shortcuts in Keymap* |
+
+- **Borrar un estado o una prioridad con tareas** pregunta adónde van. Siempre queda al
+  menos uno de cada.
+- **Convertir un estado en terminal** ofrece rellenar la fecha de cierre de las tareas
+  que ya tiene con su última modificación: sin eso caerían todas en «sin fecha».
+- **Los errores se marcan antes de aplicar**, con la fila en rojo: un nombre vacío, dos
+  prioridades con el mismo trigger o un trigger con un espacio, que nunca casaría.
+
+## Datos y seguridad
+
+- **Una base local por proyecto**, `.idea/tasklane/tasklane.db` (SQLite), con su propio
+  `.gitignore`: nada entra en el `git status` si no lo pides.
+- **Copia diaria**, `tasklane.db.backup`, en segundo plano y sólo si hubo cambios. Ver
+  [Qué se versiona y qué no](#qué-se-versiona-y-qué-no).
+- **Comprobación tras un cierre inesperado del IDE.** Si la base tiene daños se avisa, con
+  la fecha de la última copia, y se deja de copiar encima de ella.
+- **Cambiar la configuración no pierde tareas.** Las que apuntan a un estado o una
+  prioridad que ya no existe van a la de por defecto, un aviso dice cuántas —con *Show them*
+  para verlas— y **vuelven solas** si el original reaparece.
+- **Migración desde `tasks.xml`** (proyectos anteriores a la `2.0.0`): automática, en
+  segundo plano, con progreso y **reanudable** si el IDE se cierra a medias. El original se
+  queda al lado como `tasks.xml.migrated`, y quitarle el sufijo es la vuelta atrás.
+- **Un formato del futuro no se toca**: un `tasks.xml` escrito por una versión más nueva se
+  abre en solo lectura, en vez de rebajarlo al guardar.
+- ***Tasklane: Diagnostics*** —en *Search Everywhere*— cuenta tareas e imágenes por
+  repositorio, lo que ocupan en disco, el estado de la copia y de la última comprobación, y
+  las latencias de la última hora, con un botón para copiar el informe.
 
 ## Requisitos
 
@@ -486,7 +609,7 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-1.4.1.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.3.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -498,8 +621,14 @@ cualquier uso accidental de una API posterior.
 |---|---|---|
 | `⌘⌥R` | Quick Add | Global. Choca con *Resume Program* en el keymap de macOS — decisión consciente, reasignable en *Settings → Keymap* |
 | `⌘K` | Foco en la búsqueda | Sólo dentro de la Tool Window, así que no compite con *Commit* |
-| `Enter` | Editar la tarea seleccionada | Dentro del árbol |
+| `Enter` | Editar la tarea seleccionada | Dentro del árbol. Sobre «N more», trae la página siguiente |
 | `Supr` | Borrar las seleccionadas | Dentro del árbol |
+| `←` / `→` | Plegar / desplegar el grupo | Dentro del árbol |
+| `⌘C` / `Escape` | Copiar el texto marcado de la tarjeta / quitar la marca | Sólo con texto marcado |
+| `Enter` / `Escape` | Guardar la búsqueda en el historial / borrarla | En el buscador |
+| `Espacio` / `Enter` | Abrir la pestaña de estado con el foco | En la fila de estados |
+| `Retroceso` | Quitar la última etiqueta | En el campo de etiquetas vacío |
+| `Escape` | Cerrar el diálogo | También con el cursor dentro del cuerpo |
 | `⌥←/→` | Pestaña de estado anterior / siguiente | Dentro del árbol. Es el `Alt+←/→` que ponía el IDE cuando los estados eran pestañas suyas |
 | `⇧⌥←/→` | Mover la selección a esa pestaña | Mismo eje, y `Shift` significa «llévate esto contigo». No da la vuelta al llegar al extremo |
 
@@ -650,7 +779,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.2.0 && git push origin v2.2.0
+git tag v2.3.0 && git push origin v2.3.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

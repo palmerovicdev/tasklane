@@ -48,6 +48,18 @@ object DiagnosticsReport {
                 else -> "ok, checked on ${stamp(store.checkedAt)}"
             },
         )
+        // La recuperación de la Fase 6: si hay una pendiente, si hubo una y si dejó el
+        // recolector de imágenes esperando. Es lo primero que hay que saber antes de tocar
+        // nada a mano en `.idea/tasklane`.
+        if (store.damaged) {
+            appendLine("  Repair           PENDING: tasks are read-only until the project is reopened")
+        }
+        store.recoveredAt?.let {
+            appendLine(
+                "  Last repair      ${stamp(it)}" +
+                    if (store.holdingImages) " (with gaps; damaged copy kept, unused images are not deleted)" else "",
+            )
+        }
         appendLine()
 
         appendLine("Repositories")

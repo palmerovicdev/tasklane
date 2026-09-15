@@ -239,6 +239,12 @@ data class StoreHealth(
     val problems: Long = 0,
     /** Hay una pendiente: la última sesión no cerró la base y todavía no se ha mirado. */
     val pending: Boolean = false,
+    /** Cuándo se recuperó la base por última vez (Fase 6), o `null` si nunca hizo falta. */
+    val recoveredAt: Long? = null,
+    /** La recuperación tuvo huecos y su fichero dañado sigue en disco: el recolector de imágenes espera. */
+    val holdingImages: Boolean = false,
+    /** Hay daño visto y la base no se escribe hasta repararla. */
+    val damaged: Boolean = false,
 )
 
 data class TaskStats(

@@ -109,8 +109,9 @@
                 priority, delete. Many tasks at once are one operation and one repaint; above ten
                 it runs in the background with a progress bar, and <b>cancelling undoes
                 it</b>.</li>
-            <li><b>Entering a terminal state</b> &mdash; <i>Done</i> by default &mdash; stamps the
-                completion date, and leaving it clears the date.</li>
+            <li><b>The checkbox</b> &mdash; or <i>Toggle Completed</i> &mdash; moves a task to the
+                done state and back to the default one. Entering a done state stamps the completion
+                date, which is what grouping <i>Done</i> by date uses.</li>
         </ul>
 
         <h3>The task dialog</h3>
@@ -147,7 +148,8 @@
         <ul>
             <li><b>It reads the whole body</b>, not just the title, and ignores case and accents in
                 both directions: <i>autenticacion</i> finds <i>autenticaci&oacute;n</i>. Results are
-                ranked by relevance, with matches in the title weighing more.</li>
+                ranked by relevance, with matches in the title weighing more, and the list shows
+                the 200 best.</li>
             <li><b>Operators</b>: <code>state:doing</code>, <code>p:high</code>,
                 <code>repo:backend</code>, <code>is:done</code> / <code>is:open</code>,
                 <code>has:link</code>, <code>has:image</code>, <code>has:code</code>,
@@ -217,7 +219,9 @@
                 &hellip;</i>, after a confirmation that says how many. The repository stays,
                 empty.</li>
             <li><b>Export the repository to XML</b>, the <code>tasks.xml</code> interchange format
-                any version of the plugin can read.</li>
+                any version of the plugin can read. Characters XML cannot hold &mdash; pasted
+                terminal output &mdash; are replaced and counted instead of failing the
+                export.</li>
             <li><b>Export and Remove</b> a repository whose folder is gone: every task is exported
                 and counted before anything is deleted.</li>
             <li>Exports run in the background, can be cancelled, capture the list <b>as it was
@@ -253,8 +257,9 @@
                 a colour for light and dark themes picked with the platform colour picker. Drag
                 rows to change the priority order; deleting one asks where its tasks should
                 go.</li>
-            <li>Mistakes are caught before <i>Apply</i>: blank names, two priorities with the same
-                trigger, a trigger with a space. There is always at least one state and one
+            <li>Nothing is written until <i>Apply</i> &mdash; <i>Cancel</i> leaves the project as
+                it was &mdash;, and mistakes are flagged first: blank names, two priorities with the
+                same trigger, a trigger with a space. There is always at least one state and one
                 priority.</li>
             <li><b>Priority triggers</b> can be turned off altogether.</li>
             <li><b>Repository depth</b>: how deep to look for repositories under the project root
@@ -295,7 +300,8 @@
                 them</i> link, and they go back on their own if it reappears.</li>
             <li><b>Projects from before 2.0</b> move their <code>tasks.xml</code> into the database
                 automatically, in the background, resuming if the IDE closes halfway. The original
-                is kept as <code>tasks.xml.migrated</code>.</li>
+                is kept as <code>tasks.xml.migrated</code>. A file written by a newer version of
+                the plugin opens read-only instead of being downgraded.</li>
             <li><b>Tasklane: Diagnostics</b> reports how many tasks and images there are, what they
                 take up on disk, the state of the backup and the recent latencies, ready to copy
                 into a bug report.</li>

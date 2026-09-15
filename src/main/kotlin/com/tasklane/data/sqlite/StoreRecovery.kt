@@ -3,7 +3,7 @@ package com.tasklane.data.sqlite
 import com.intellij.openapi.diagnostic.thisLogger
 import com.tasklane.data.store.LoadAlert
 import com.tasklane.domain.text.ImageRefParser
-import org.jetbrains.sqlite.SqliteException
+import org.sqlite.SQLiteException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -112,7 +112,7 @@ internal object StoreRecovery {
 
     /** ¿Es este fallo una base dañada, y no un disco lleno o un permiso? */
     fun isCorruption(error: Throwable): Boolean = generateSequence(error) { it.cause }.take(8).any { e ->
-        val code = (e as? SqliteException)?.resultCode?.name.orEmpty()
+        val code = (e as? SQLiteException)?.resultCode?.name.orEmpty()
         code.startsWith("SQLITE_CORRUPT") || code == "SQLITE_NOTADB" || code == "SQLITE_IOERR_CORRUPTFS" ||
             e.message.orEmpty().let { it.contains("malformed", ignoreCase = true) || it.contains("not a database", ignoreCase = true) }
     }

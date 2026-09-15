@@ -86,12 +86,16 @@ internal fun showDiagnostics(project: Project) {
                     metrics = metrics,
                     store = service.integrityState().let { (last, pending) ->
                         val backup = service.backupFile()?.takeIf { Files.exists(it) }
+                        val recovery = service.recoveryState()
                         StoreHealth(
                             backupAt = backup?.let { Files.getLastModifiedTime(it).toMillis() },
                             backupBytes = backup?.let(Files::size) ?: 0L,
                             checkedAt = last?.at,
                             problems = last?.n ?: 0L,
                             pending = pending,
+                            recoveredAt = recovery.recoveredAt,
+                            holdingImages = recovery.holdingImages,
+                            damaged = recovery.pending,
                         )
                     },
                 )

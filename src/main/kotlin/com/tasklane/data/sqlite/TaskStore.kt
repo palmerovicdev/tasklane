@@ -1160,7 +1160,7 @@ internal class TaskStore(private val db: TaskDb) {
         n,
     )
 
-    private fun blobRow(row: org.jetbrains.sqlite.SqliteResultSet) = BlobRecord(
+    private fun blobRow(row: Sql.Row) = BlobRecord(
         id = AttachmentId(row.getString(0).orEmpty()),
         bytes = row.getLong(1),
         width = row.getInt(2),
@@ -1187,7 +1187,7 @@ internal class TaskStore(private val db: TaskDb) {
     private fun previous(id: TaskId): Fts? = sql.first("SELECT $FTS_COLUMNS FROM task WHERE id = ?", id.value, read = ::ftsRow)
 
     /** Lo que hace falta de una fila para quitarla del índice de texto y de los contadores. */
-    private fun ftsRow(row: org.jetbrains.sqlite.SqliteResultSet) = Fts(
+    private fun ftsRow(row: Sql.Row) = Fts(
         seq = row.getLong(0),
         title = row.getString(1).orEmpty(),
         body = row.getString(2).orEmpty(),
