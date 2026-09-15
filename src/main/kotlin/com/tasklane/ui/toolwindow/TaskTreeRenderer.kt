@@ -41,6 +41,7 @@ import java.awt.Graphics2D
 import java.awt.Point
 import java.awt.Rectangle
 import java.awt.geom.RoundRectangle2D
+import java.text.NumberFormat
 import java.time.Instant
 import java.util.IdentityHashMap
 import javax.swing.JPanel
@@ -158,28 +159,29 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     var selection: CardSelection? = null
 
     /**
-     * Las tarjetas desplegadas. Por [TaskId] y no por fila porque cualquier cambio en
-     * cualquier tarea reconstruye el árbol entero, y por índice el despliegue se
-     * habría mudado a la tarjeta de al lado en el primer repintado.
+     * Las tarjetas desplegadas. Por [TaskId] y no por fila: reordenar la lista no
+     * puede mudar el despliegue a la tarjeta de al lado.
+     *
+     * **Acotado por número de entradas**, y esa es la diferencia con lo que había
+     * hasta la Fase 2. Antes el panel llamaba en cada repintado a un `retainExpanded`
+     * que recibía los ids de *todas* las tareas del snapshot, y construir ese conjunto
+     * era un recorrido O(n) en el hilo de interfaz —a un millón de tareas, la propia
+     * limpieza costaba más que todo lo que esta fase vino a ahorrar—. Un id de una
+     * tarea borrada no hace daño: los ids no se reciclan, así que nadie hereda un
+     * despliegue ajeno. Lo único que había que evitar era que el conjunto creciera sin
+     * tope, y para eso basta con tirar el más viejo.
      *
      * No se persiste: desplegar es mirar algo un momento, no configurar la lista.
      */
-    private val expanded = mutableSetOf<TaskId>()
+    private val expanded = object : LinkedHashMap<TaskId, Unit>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<TaskId, Unit>): Boolean = size > MAX_EXPANDED
+    }
 
     /** Si la tarjeta de [task] está desplegada ahora mismo. */
     fun isExpanded(task: Task): Boolean = task.id in expanded
 
     fun toggleExpanded(task: Task) {
-        if (!expanded.remove(task.id)) expanded += task.id
-    }
-
-    /**
-     * Olvida las tarjetas que ya no están en la lista. Lo llama [TasklanePanel] en
-     * cada repintado: sin esto, borrar una tarea desplegada dejaría su ID dentro para
-     * siempre, y con él el despliegue esperando a una tarea que no va a volver.
-     */
-    fun retainExpanded(ids: Set<TaskId>) {
-        expanded.retainAll(ids)
+        if (expanded.remove(task.id) == null) expanded[task.id] = Unit
     }
 
     // ------------------------------------------------------------- componentes
@@ -327,6 +329,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 renderEmpty(value)
             }
 
+            is MoreNode -> {
+                hideExtras()
+                renderMore(value)
+            }
+
             is TaskNode -> {
                 renderTask(tree, value, selected, row)
                 // Por el camino de la plataforma y no llamando a los ayudantes
@@ -385,6 +392,27 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         border = emptyGroupBorder
         textRenderer.icon = AllIcons.General.InspectionsOK
         textRenderer.append(node.text, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+    }
+
+    /**
+     * El centinela de la página: «4.213 más».
+     *
+     * Se pinta como un enlace porque se comporta como uno —se pulsa y trae la
+     * siguiente página—, y con la sangría de las tareas y no con la de las cabeceras:
+     * es la última fila de la lista de un grupo, no una cabecera nueva. El número va
+     * formateado con el locale: a esta altura de la lista siempre tiene miles.
+     */
+    private fun renderMore(node: MoreNode) {
+        border = emptyGroupBorder
+        val above = node.direction == MoreNode.Direction.BEFORE
+        textRenderer.icon = if (above) AllIcons.General.ArrowUp else AllIcons.General.ArrowDown
+        textRenderer.append(
+            TasklaneBundle.message(
+                if (above) "tree.more.above" else "tree.more",
+                NumberFormat.getIntegerInstance().format(node.remaining),
+            ),
+            SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES,
+        )
     }
 
     private fun renderTask(tree: JTree, node: TaskNode, selected: Boolean, row: Int) {
@@ -1402,6 +1430,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     enum class RowTarget { EXPAND, BOOKMARK, MENU }
 
     private companion object {
+        /**
+         * Cuántas tarjetas desplegadas se recuerdan. Desplegar es un gesto suelto de
+         * quien mira, así que el número real nunca se acerca a esto: el tope está para
+         * que el conjunto no crezca durante una sesión larga, no para recortar nada
+         * que el usuario vaya a echar de menos.
+         */
+        const val MAX_EXPANDED = 128
+
         /** Etiqueta del contador del indicador: representa *todos* los enlaces de la fila. */
         val LINKS = Any()
 

@@ -34,10 +34,9 @@ import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.export.ExportScope
 import com.tasklane.domain.export.TaskExporter
-import com.tasklane.domain.model.DateGroup
-import com.tasklane.domain.model.DateGrouper
 import com.tasklane.domain.model.GroupKey
 import com.tasklane.domain.model.Grouping
+import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.StateId
@@ -47,6 +46,9 @@ import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.paging.GroupOutline
+import com.tasklane.paging.InMemoryPager
+import com.tasklane.paging.TaskPager
 import com.tasklane.service.SearchResults
 import com.tasklane.service.SearchService
 import com.tasklane.service.TaskService
@@ -74,11 +76,11 @@ import java.awt.event.MouseEvent
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.temporal.WeekFields
-import java.util.Locale
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JScrollPane
 import javax.swing.KeyStroke
+import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.TreeExpansionEvent
 import javax.swing.event.TreeExpansionListener
@@ -178,6 +180,13 @@ internal class TasklanePanel(
     private val cardImages = CardImages(project) { TreeUtil.invalidateCacheAndRepaint(tree.ui) }
 
     /**
+     * El hueco por el que se mira la lista. Es campo y no una variable local de
+     * [buildContent] porque desde la Fase 2 hace falta **escucharlo**: llegar
+     * desplazándose al centinela del final de una página es lo que pide la siguiente.
+     */
+    private val scroll: JScrollPane = ScrollPaneFactory.createScrollPane(tree, true)
+
+    /**
      * El historial se persiste con el nombre de propiedad, así que las consultas
      * recientes sobreviven al reinicio sin que haya que guardarlas a mano.
      */
@@ -195,20 +204,29 @@ internal class TasklanePanel(
     private var snapshot: TasklaneSnapshot = TasklaneSnapshot.EMPTY
 
     /**
-     * Las secciones tal y como se pintaron por última vez. Se guardan porque la
-     * exportación exporta **lo que se ve**: el mismo orden, los mismos grupos y sólo
-     * lo que la búsqueda dejó pasar. Recalcularlas al exportar podría dar otra cosa.
+     * El árbol acotado y su sincronización por diferencias, que es el trabajo de la
+     * Fase 2. Vive fuera del panel porque no necesita un IDE: ahí están las páginas,
+     * los centinelas, el presupuesto de filas y las ventanas cargadas.
      */
-    private var sections: List<Section> = emptyList()
+    private val list = ListSync(tree, stateId)
 
     /**
-     * Grupos que el usuario ha plegado a mano. Se recuerdan por [GroupKey] y no por
-     * fila: repintar reconstruye el árbol entero, y por índice se perdería.
+     * Qué lista describe lo que hay cargado. Cambiar de consulta, de filtro, de
+     * agrupación o de repositorio es empezar **otra** lista, y una lista nueva empieza
+     * por el principio: sin esto, teclear en el buscador obligaría a rehacer las dos
+     * mil filas que el usuario hubiera ido cargando al desplazarse.
      */
-    private val collapsed = mutableSetOf<GroupKey>()
+    private data class ViewKey(
+        val grouping: Grouping,
+        val filter: TaskFilter,
+        val query: String,
+        val repo: RepoKey,
+    )
 
-    /** `reload()` dispara eventos de plegado; sin esta guarda se tomarían por gestos del usuario. */
-    private var rendering = false
+    private var listKey: ViewKey? = null
+
+    /** Una carga de página ya encolada. Ver [loadVisibleSentinel]. */
+    private var loadPending = false
 
     /**
      * Lo que se pidió enseñar y todavía no estaba en el árbol. Ver [reveal].
@@ -269,16 +287,30 @@ internal class TasklanePanel(
                 TreeUtil.invalidateCacheAndRepaint(tree.ui)
             }
         })
+        // Un grupo nace **sin hijos** y aun así tiene que poder desplegarse: es al
+        // desplegarlo cuando se le pide su primera página. `CheckboxTree` monta un
+        // `DefaultTreeModel` de fábrica, que tomaría esa cabecera por una hoja. Ver
+        // [TaskTreeModel].
+        tree.model = TaskTreeModel(root)
         tree.addTreeExpansionListener(object : TreeExpansionListener {
             override fun treeExpanded(event: TreeExpansionEvent) = track(event, expanded = true)
             override fun treeCollapsed(event: TreeExpansionEvent) = track(event, expanded = false)
 
             private fun track(event: TreeExpansionEvent, expanded: Boolean) {
-                if (rendering) return
+                // Los despliegues que hace la propia sincronización no son gestos.
+                if (list.syncing) return
                 val key = (event.path.lastPathComponent as? GroupNode)?.key ?: return
-                if (expanded) collapsed -= key else collapsed += key
+                list.toggled(key, expanded)
+                // El gesto es la mitad del trabajo: abrir un grupo es pedir su primera
+                // página —hasta ahora la cabecera sólo llevaba su número— y cerrarlo es
+                // soltar las filas que tenía. De eso vive el tope del árbol.
+                metrics.time(TasklaneMetrics.Op.RENDER) { resync { list.sync() } }
             }
         })
+        // Llegar al centinela desplazándose pide la siguiente página. Es el mismo
+        // gesto que *Find in Files*, y el motivo de que el árbol no tenga que
+        // contener el grupo entero para que se pueda recorrer.
+        scroll.viewport.addChangeListener { loadVisibleSentinel() }
 
         setContent(buildContent())
         toolbar = buildToolbar()
@@ -296,16 +328,19 @@ internal class TasklanePanel(
                 // crece con el número de tareas. Un solo «ahora» para los dos, o el
                 // contador y la lista podrían discrepar en lo que está vencido.
                 val now = Instant.now()
-                val (sections, counts) = metrics.time(TasklaneMetrics.Op.SECTIONS) {
-                    buildSections(snap, found, filter, now) to
-                        VisibleTasks.countsByState(snap, found, filter, now)
+                val (pager, outline, counts) = metrics.time(TasklaneMetrics.Op.SECTIONS) {
+                    val pager = InMemoryPager(snap, found, filter, now)
+                    // Se calientan aquí a propósito: es donde vive el O(n log n) de
+                    // ordenar y agrupar. Lo que el EDT pida después son sublistas de
+                    // algo ya ordenado y una cuenta ya hecha.
+                    Triple(pager, pager.outline(stateId), pager.counts())
                 }
                 withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
                     // RENDER va aparte de SECTIONS porque es lo unico de los dos que
                     // ocurre en el EDT, y por tanto lo unico que tiene un techo duro
                     // de 16 ms. Mezclarlos daria una cifra que no se puede juzgar.
                     metrics.time(TasklaneMetrics.Op.RENDER) {
-                        render(snap, found, filter, sections, counts)
+                        render(snap, found, filter, pager, outline, counts)
                     }
                 }
             }
@@ -355,7 +390,7 @@ internal class TasklanePanel(
             add(searchField, BorderLayout.CENTER)
         }
         add(header, BorderLayout.NORTH)
-        add(ScrollPaneFactory.createScrollPane(tree, true), BorderLayout.CENTER)
+        add(scroll, BorderLayout.CENTER)
     }
 
     private fun buildToolbar(): JComponent {
@@ -424,7 +459,7 @@ internal class TasklanePanel(
      * sobre una acción del `ActionManager` le cambiaría el atajo a todo el IDE.
      */
     private fun installShortcuts() {
-        localShortcut(ACTION_EDIT, CommonShortcuts.ENTER, tree) { editSelected() }
+        localShortcut(ACTION_EDIT, CommonShortcuts.ENTER, tree) { activateSelected() }
         localShortcut(ACTION_DELETE, CommonShortcuts.getDelete(), tree) { deleteSelected() }
         localShortcut(ACTION_FOCUS_SEARCH, searchShortcut(), this) { focusSearch() }
         // Los cuatro van sobre el **árbol** y no sobre el panel: con el cursor dentro
@@ -492,9 +527,20 @@ internal class TasklanePanel(
                 if (event.clickCount != 1 || event.button != MouseEvent.BUTTON1 || event.isPopupTrigger) return
                 val row = rowAtHeight(tree, event.y)
                 if (row < 0) return
-                if (tree.getPathForRow(row)?.lastPathComponent !is GroupNode) return
-                event.consume()
-                if (tree.isExpanded(row)) tree.collapseRow(row) else tree.expandRow(row)
+                when (val node = tree.getPathForRow(row)?.lastPathComponent) {
+                    // El centinela se pulsa como un enlace, que es como se pinta.
+                    is MoreNode -> {
+                        event.consume()
+                        loadMore(node)
+                    }
+
+                    is GroupNode -> {
+                        event.consume()
+                        if (tree.isExpanded(row)) tree.collapseRow(row) else tree.expandRow(row)
+                    }
+
+                    else -> return
+                }
             }
         })
     }
@@ -528,6 +574,20 @@ internal class TasklanePanel(
                 editSelected()
             }
         })
+    }
+
+    /**
+     * Qué hace `Enter` sobre la fila que está marcada. Sobre una tarea, abrirla; sobre
+     * el centinela de una página, traer la siguiente: es la fila que se alcanza bajando
+     * con el teclado, y no tendría sentido que sólo respondiera al ratón.
+     */
+    private fun activateSelected() {
+        val node = tree.selectionPaths?.singleOrNull()?.lastPathComponent
+        if (node is MoreNode) {
+            loadMore(node)
+            return
+        }
+        editSelected()
     }
 
     private fun moveSelected(delta: Int) {
@@ -574,164 +634,69 @@ internal class TasklanePanel(
         }.registerCustomShortcutSet(shortcuts, component, this)
     }
 
-    // ------------------------------------------------------------- modelo
-
-    /** Un bloque del árbol. [key] nulo == este estado no agrupa. */
-    private class Section(val key: GroupKey?, val tasks: List<Task>)
-
-    private fun buildSections(
-        snap: TasklaneSnapshot,
-        found: SearchResults,
-        filter: TaskFilter,
-        now: Instant,
-    ): List<Section> {
-        val state = snap.config.state(stateId) ?: return emptyList()
-
-        // La misma cuenta que usan los contadores de las pestañas, y por eso vive
-        // fuera: ver [VisibleTasks].
-        val mine = VisibleTasks.of(snap, found, filter, stateId, now)
-
-        // Lo marcado va primero pase lo que pase: marcar es precisamente decir «que
-        // no se me pierda esto». Después la prioridad, que es lo que se mira en una
-        // lista de pendientes, y dentro de la misma prioridad lo más reciente arriba.
-        val natural = compareByDescending<Task> { it.bookmarked }
-            .thenByDescending { snap.config.priorityOrDefault(it.priorityId).order }
-            .thenByDescending { (DateGrouper.anchorOf(it, state.anchor) ?: it.updatedAt).toEpochMilli() }
-        // Buscando, en cambio, lo que manda es lo que mejor casa: el orden normal
-        // enterraría el resultado bueno bajo cualquier tarea de prioridad alta.
-        val order =
-            if (found.active) compareByDescending<Task> { found.scoreOf(it.id) }.then(natural) else natural
-
-        return when (state.grouping) {
-            Grouping.NONE -> listOf(Section(null, mine.sortedWith(order)))
-            // «Hoy» se enseña aunque esté vacío, pero sólo cuando la lista habla de
-            // todo: buscando o con un filtro puesto, un «no queda nada» diría que no
-            // hay tareas hoy cuando lo que pasa es que no casan con lo que se pidió.
-            Grouping.BY_DATE -> byDate(mine, state, order, keepToday = !found.active && filter == TaskFilter.ALL)
-            Grouping.BY_PRIORITY -> byPriority(mine, snap, order)
-            Grouping.BY_TAG -> byTag(mine, order)
-        }
-    }
-
-    /**
-     * Agrupa por fecha y, con [keepToday], se asegura de que «hoy» exista.
-     *
-     * Es el único grupo que vale la pena vacío: que no haya nada hoy es justo lo que
-     * se viene a mirar. Los demás —ayer, esta semana— sólo importan cuando tienen
-     * algo. Y no se añade a una lista vacía del todo: ahí el árbol tiene su propio
-     * «no hay tareas», que además dice cómo crear la primera.
-     */
-    private fun byDate(
-        tasks: List<Task>,
-        state: TaskState,
-        order: Comparator<Task>,
-        keepToday: Boolean,
-    ): List<Section> {
-        val zone = ZoneId.systemDefault()
-        val today = LocalDate.now(zone)
-        val firstDayOfWeek = WeekFields.of(Locale.getDefault()).firstDayOfWeek
-        val sections = tasks
-            .groupBy { DateGrouper.groupOf(DateGrouper.anchorOf(it, state.anchor), today, zone, firstDayOfWeek) }
-            .toSortedMap()
-            .map { (group, group_tasks) -> Section(GroupKey.OfDate(group), group_tasks.sortedWith(order)) }
-
-        val key = GroupKey.OfDate(DateGroup.Today)
-        if (!keepToday || sections.isEmpty() || sections.any { it.key == key }) return sections
-        // Delante: `DateGroup.Today` es el primero del orden, así que es donde habría
-        // caído de tener tareas.
-        return listOf(Section(key, emptyList())) + sections
-    }
-
-    /**
-     * De la prioridad más alta a la más baja, y sólo con las que tienen algo: una
-     * cabecera vacía por cada prioridad configurada convertiría la lista en un índice.
-     */
-    private fun byPriority(
-        tasks: List<Task>,
-        snap: TasklaneSnapshot,
-        order: Comparator<Task>,
-    ): List<Section> = tasks
-        .groupBy { snap.config.priorityOrDefault(it.priorityId).id }
-        .toList()
-        .sortedByDescending { (id, _) -> snap.config.priorities.firstOrNull { it.id == id }?.order ?: 0 }
-        .map { (id, group_tasks) -> Section(GroupKey.OfPriority(id), group_tasks.sortedWith(order)) }
-
-    /**
-     * Una tarea con varias etiquetas sale bajo **todas** las suyas, no bajo la
-     * primera: agrupar por etiqueta sirve para ver junto todo lo de una, y repartir
-     * cada tarea en un único cajón haría que la mitad de ellas faltasen del suyo.
-     *
-     * Las que no tienen ninguna van a un grupo propio al final en vez de
-     * desaparecer, que es lo que haría un `flatMap` sobre `tags` a secas.
-     */
-    private fun byTag(tasks: List<Task>, order: Comparator<Task>): List<Section> = tasks
-        .flatMap { task -> task.tags.ifEmpty { listOf(null) }.map { it to task } }
-        .groupBy({ it.first }, { it.second })
-        .toList()
-        .sortedWith(compareBy(nullsLast(String.CASE_INSENSITIVE_ORDER)) { it.first })
-        .map { (tag, group_tasks) -> Section(GroupKey.OfTag(tag), group_tasks.sortedWith(order)) }
-
     // ------------------------------------------------------------- rendering
 
     private fun render(
         snap: TasklaneSnapshot,
         found: SearchResults,
         filter: TaskFilter,
-        sections: List<Section>,
+        pager: TaskPager,
+        outline: List<GroupOutline>,
         counts: Map<StateId, Int>,
     ) {
         snapshot = snap
+        list.pager = pager
+        list.outline = outline
         tabs.update(snap.config.states, counts, stateId)
-        this.sections = sections
-        // Lo que ya no existe no puede seguir desplegado esperando a volver. Se mira
-        // el snapshot entero y no lo que esta pestaña lista: una búsqueda esconde la
-        // tarjeta un rato, y al limpiarla tiene que volver como se dejó.
-        renderer.retainExpanded(
-            snap.tasksByRepo.values.flatMapTo(mutableSetOf()) { tasks -> tasks.map { it.id } },
-        )
+
         // Una captura pegada puede rellenar un hueco que antes no estaba.
         cardImages.forgetMissing()
         renderer.config = snap.config
         renderer.highlighter = found.highlighter
         renderer.activeRepo = snap.activeRepo
         renderer.repoNames = snap.repositories.associate { it.key to it.displayName }
-        val terminal = snap.config.state(stateId)?.terminal ?: false
 
         updateEmptyText(found, filter)
 
-        val previouslySelected = selectedTasks().map { it.id }.toSet()
-
-        rendering = true
-        try {
-            root.removeAllChildren()
-            for (section in sections) {
-                if (section.key == null) {
-                    section.tasks.forEach { root.add(TaskNode(it, terminal)) }
-                } else {
-                    val group = GroupNode(section.key, section.tasks.size)
-                    if (section.tasks.isEmpty()) {
-                        group.add(EmptyGroupNode(emptyGroupText(terminal)))
-                    } else {
-                        section.tasks.forEach { group.add(TaskNode(it, terminal)) }
-                    }
-                    root.add(group)
-                }
-            }
-            (tree.model as DefaultTreeModel).reload()
-            expandGroups()
-        } finally {
-            rendering = false
+        // Otra lista es otra ventana, y se empieza por el principio. Cambiar de
+        // agrupación cambia además la identidad de los grupos, así que lo que el
+        // usuario abrió o cerró deja de referirse a nada.
+        val key = ViewKey(grouping, filter, found.raw, snap.activeRepo)
+        if (listKey != key) {
+            if (listKey?.grouping != key.grouping) list.forgetGroups()
+            list.rewind()
+            listKey = key
         }
 
-        restoreSelection(previouslySelected)
+        resync { list.sync() }
 
-        // Lo que se pidió enseñar antes de que la tarea llegara al árbol. Se vacía antes
-        // de reintentar para que un segundo fallo no lo deje dando vueltas.
+        // Lo que se pidió enseñar antes de que la tarea llegara a la lista. Se vacía
+        // antes de reintentar para que un segundo fallo no lo deje dando vueltas.
         if (pendingReveal.isNotEmpty()) {
             val pending = pendingReveal
             pendingReveal = emptySet()
             reveal(pending, retry = false)
         }
+    }
+
+    /**
+     * Todo lo que mueve el árbol pasa por aquí.
+     *
+     * Le pone al día el contexto que depende del estado —qué dice un grupo vacío no es
+     * lo mismo en *ToDo* que en *Done*— y le devuelve la selección a lo que se haya
+     * movido de sitio. Sincronizar por diferencias conserva los nodos que siguen, y con
+     * ellos su selección: sólo se paga cuando una tarea ha cambiado de grupo o de
+     * posición, que es lo único que `JTree` no puede preservar porque para él ha sido
+     * quitar y volver a poner.
+     */
+    private fun resync(change: () -> Int): Int {
+        val terminal = snapshot.config.state(stateId)?.terminal ?: false
+        list.terminal = terminal
+        list.emptyText = emptyGroupText(terminal)
+        val selected = selectedTasks().mapTo(mutableSetOf()) { it.id }
+        val touched = change()
+        restoreSelection(selected)
+        return touched
     }
 
     /**
@@ -765,17 +730,36 @@ internal class TasklanePanel(
         }
     }
 
-    private fun expandGroups() {
-        for (node in root.children().asSequence().filterIsInstance<GroupNode>()) {
-            if (node.key !in collapsed) tree.expandPath(TreePath(node.path))
-        }
-    }
-
     /** La selección se restaura por [TaskId], no por índice: reordenar no debe moverla. */
     private fun restoreSelection(ids: Set<TaskId>) {
         if (ids.isEmpty()) return
+        if (selectedTasks().mapTo(mutableSetOf()) { it.id } == ids) return
         val paths = taskNodes().filter { it.task.id in ids }.map { TreePath(it.path) }.toList()
         if (paths.isNotEmpty()) tree.selectionPaths = paths.toTypedArray()
+    }
+
+    private fun loadMore(node: MoreNode) {
+        metrics.time(TasklaneMetrics.Op.RENDER) { resync { list.loadMore(node) } }
+    }
+
+    /**
+     * Si el centinela del final se ve, pide su página. Es el mismo gesto que ya existe
+     * en *Find in Files*, y el motivo de que el árbol no tenga que contener el grupo
+     * entero para que se pueda recorrer.
+     *
+     * La carga va fuera del evento del viewport porque mutar el modelo mientras Swing
+     * está repartiendo el sitio es pedirle que revalide dentro de una revalidación.
+     */
+    private fun loadVisibleSentinel() {
+        if (loadPending) return
+        val node = list.visibleSentinel() ?: return
+        loadPending = true
+        SwingUtilities.invokeLater {
+            loadPending = false
+            // Entre el encolado y ahora puede haber llegado un repintado que se lo
+            // llevara por delante.
+            if (node.parent != null) loadMore(node)
+        }
     }
 
     /**
@@ -784,16 +768,15 @@ internal class TasklanePanel(
      * las demás pueden ignorarla sin coordinarse entre sí.
      *
      * **Puede llegar antes que la tarea.** Pulsar una marca de un fichero cuya tarea vive
-     * en otro repositorio cambia el activo, y el árbol se reconstruye después, fuera del
-     * EDT: mirar el árbol en ese instante no encontraría nada. Y una búsqueda o un filtro
+     * en otro repositorio cambia el activo, y la lista se reconstruye después, fuera del
+     * EDT: preguntar en ese instante no encontraría nada. Y una búsqueda o un filtro
      * puestos la esconderían aunque ya estuviera. Así que cuando la tarea **es de esta
      * pestaña** pero no se ve, se quita lo que la tapa y se apunta para el siguiente
      * repintado, que es cuando se reintenta —una vez, con [retry] a `false`: un reintento
      * que se re-apunta a sí mismo volvería a intentarlo en cada repintado para siempre—.
      */
     private fun reveal(ids: Set<TaskId>, retry: Boolean = true) {
-        val nodes = taskNodes().filter { it.task.id in ids }.toList()
-        if (nodes.isEmpty()) {
+        if (!list.reveal(ids)) {
             if (retry) waitFor(ids)
             return
         }
@@ -801,17 +784,10 @@ internal class TasklanePanel(
         onSelectState(stateId)
         ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)?.activate(null, false)
 
-        // Una tarea dentro de un grupo plegado obliga a abrirlo, y entonces el pliegue
-        // deja de describir lo que se ve: se olvida a propósito, o el siguiente
-        // repintado volvería a cerrarlo encima de lo que se acaba de enseñar. Va
-        // explícito porque la selección ya no despliega nada por su cuenta —ver
-        // `expandsSelectedPaths` en el `init`—.
-        for (group in nodes.mapNotNull { it.parent as? GroupNode }.distinctBy { it.key }) {
-            collapsed -= group.key
-            tree.expandPath(TreePath(group.path))
-        }
+        metrics.time(TasklaneMetrics.Op.RENDER) { resync { list.sync() } }
 
-        val paths = nodes.map { TreePath(it.path) }
+        val paths = taskNodes().filter { it.task.id in ids }.map { TreePath(it.path) }.toList()
+        if (paths.isEmpty()) return
         tree.selectionPaths = paths.toTypedArray()
         TreeUtil.showRowCentered(tree, tree.getRowForPath(paths.first()), false, true)
     }
@@ -884,21 +860,26 @@ internal class TasklanePanel(
 
         fun section(key: GroupKey?, tasks: List<Task>) = TaskExporter.Section(heading(key), tasks, day(key))
 
+        // Ya no se exporta lo que hay **en el árbol**: el árbol sólo tiene las páginas
+        // cargadas. Se vuelve a pedir la misma lista sin tope, que es lo que deja
+        // escrito el §2.5 del plan de escala —y lo que la Fase 5 pasará a escribir en
+        // streaming, porque exportar un millón de tareas es leer un millón de tareas—.
         // Los grupos vacíos —«hoy», cuando se enseña sin tareas— no se copian: una
         // cabecera con nada debajo no es lo que se quería pegar.
-        val sections = sections.filter { it.tasks.isNotEmpty() }
+        val outline = list.outline
         return when (scope) {
-            ExportScope.STATE -> sections.map { section(it.key, it.tasks) }
+            ExportScope.STATE ->
+                if (outline.isEmpty()) listOf(section(null, list.contents(null)))
+                else outline.map { section(it.key, list.contents(it.key)) }
 
             ExportScope.GROUP -> selectedGroup()
-                ?.let { key -> sections.filter { it.key == key } }
+                ?.let { key -> listOf(section(key, list.contents(key))) }
                 .orEmpty()
-                .map { section(it.key, it.tasks) }
 
             // La selección puede cruzar grupos —y repositorios, buscando en todos—,
             // así que sale como un bloque único bajo el nombre del estado.
             ExportScope.SELECTION -> listOf(section(null, selectedTasks()))
-        }
+        }.filter { it.tasks.isNotEmpty() }
     }
 
     /** El grupo donde está la selección. `null` si la pestaña no agrupa. */

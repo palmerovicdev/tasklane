@@ -9,6 +9,53 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [1.6.0] — La lista deja de pesar lo que pesa el proyecto
+
+La **Fase 2** del plan de escala (`docs/plan-escala.md`): la ventana carga la lista a
+páginas y repinta sólo lo que cambió. Con un millón de tareas ninguna operación de la
+interfaz pasa de 3 ms; antes abrir la ventana costaba diez segundos con el IDE
+congelado. Nada de esto cambia el orden, los grupos ni los contadores: cambia cuánto
+cuesta enseñarlos.
+
+### Añadido
+- **La lista carga a páginas.** Al final de un grupo hay una fila que dice cuántas
+  tareas quedan; llegar a ella desplazándose, pulsarla o darle a `Enter` trae las
+  siguientes. Es el mismo gesto que *Find in Files*.
+- **Los grupos grandes empiezan plegados**, con su número en la cabecera —y los de
+  abajo también, cuando los de arriba ya llenan la pantalla—. Abrir uno carga su primera
+  página en ese momento. Lo que el usuario abre o cierra manda siempre.
+
+### Cambiado
+- **Repintar la lista deja de depender del tamaño del proyecto.** Con 100.000 tareas,
+  abrir la ventana pasa de **1.179 ms a 4,1 ms** y repintarla tras completar una tarea
+  de **1.194 ms a 0,31 ms**. Con un millón, de **10,2 s a 0,61 ms**. El árbol ya no se
+  reconstruye en cada cambio: se pone al día fila a fila, y las que siguen igual
+  conservan su altura ya medida.
+- **Enseñar una tarea desde una marca del editor** ya no tiene que cargar todo lo que
+  tiene delante: la lista se abre a su altura y anuncia lo que queda por encima.
+- **Contar las tareas de las pestañas y repartirlas por estado es una sola pasada**, no
+  dos.
+
+### Corregido
+- **Cada repintado recorría el proyecto entero para olvidar las tarjetas desplegadas que
+  ya no existían**, en el hilo de la interfaz. Con listas grandes esa limpieza costaba
+  más que el propio repintado, y no hacía falta: los identificadores no se reciclan.
+- **Copiar un estado o un grupo al portapapeles copiaba lo que estuviera pintado.** Ahora
+  vuelve a pedir la lista completa, que es lo que el usuario espera de «copiar este
+  estado» aunque la lista se cargue a trozos.
+
+### Interno
+- Nueva costura `TaskPager` entre la ventana y quien tenga los datos: la UI pide páginas
+  y agregados, nunca listas. En la Fase 3 se cambia la implementación —SQLite con
+  índices, `LIMIT` y FTS5— y la ventana no se entera. Es la misma jugada que ya funcionó
+  con `TaskSearchIndex`.
+- El trabajo de la lista (`ListSync`, `TreeSync`, `GroupBudget`, `InMemoryPager`) vive
+  fuera del panel y no necesita arrancar un IDE: 58 casos nuevos lo cubren, incluida la
+  lista de punta a punta.
+- El banco de escala mide ahora código de producción en vez de una copia suya, y trae
+  tres escenarios nuevos —primer pintado, repintado y desplazamiento— cada uno con el
+  camino viejo medido al lado.
+
 ## [1.5.0] — Las listas grandes dejan de pesar
 
 Dos fases del plan de escala (`docs/plan-escala.md`): el banco de pruebas que convierte

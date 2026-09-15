@@ -486,6 +486,29 @@ la pastilla deja **aire** a los lados para que el código no entre y salga de el
 grupo de fecha se copia como el **parte de su día** —la fecha en ISO y una lista
 numerada—.
 
+De la `1.5.0` en adelante el trabajo lo marca otro plan,
+[`docs/plan-escala.md`](docs/plan-escala.md): que un repositorio de **un millón de
+tareas** se abra, se busque y se recorra igual que el primer día. Empieza con un banco
+de pruebas —porque nada se optimiza sin medirlo— y va fase a fase, cada una con su
+puerta y su versión.
+
+| | | | |
+|---|---|---|---|
+| E0 | Banco de pruebas e instrumentación | `1.5.0` | ✅ |
+| E1 | Quitar los O(n) por comando | `1.5.0` | ✅ |
+| E2 | UI acotada | `1.6.0` | ✅ |
+| E3 | El almacén (SQLite + FTS5) | | |
+| E4 | Adjuntos a escala | | |
+| E5 | Las operaciones grandes | | |
+| E6 | Endurecimiento | | |
+
+Las dos primeras salieron juntas en la `1.5.0`: la acción *Tasklane: Diagnostics*, que
+convierte «va lento» en una cifra, y el recorte del trabajo por comando —editar una
+tarea sobre 100.000 pasó de 26 ms a 6 ms—. La `1.6.0` cierra la **Fase 2**: la lista se
+carga **a páginas** y el árbol se repinta **por diferencias**, así que abrir la ventana
+sobre un millón de tareas pasa de diez segundos con el IDE congelado a menos de un
+milisegundo. Lo que queda por debajo —cargar, buscar y la memoria— es la Fase 3.
+
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
 **cerrado** en la `0.6.6`; cada iteración subió la versión baja y dejó un plugin
@@ -523,7 +546,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v1.4.1 && git push origin v1.4.1
+git tag v1.6.0 && git push origin v1.6.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

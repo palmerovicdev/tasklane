@@ -5,22 +5,27 @@ import com.intellij.ui.CheckedTreeNode
 import com.tasklane.data.store.TasksCodec
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
-import com.tasklane.domain.model.DateGrouper
 import com.tasklane.domain.model.Grouping
-import com.tasklane.domain.model.GroupKey
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.domain.model.StateId
 import com.tasklane.domain.query.QueryParser
+import com.tasklane.paging.GroupOutline
+import com.tasklane.paging.InMemoryPager
+import com.tasklane.paging.PageQuery
+import com.tasklane.paging.TaskPager
 import com.tasklane.search.LinearScanIndex
 import com.tasklane.search.SearchScope
 import com.tasklane.service.SearchResults
 import com.tasklane.ui.toolwindow.GroupNode
+import com.tasklane.ui.toolwindow.ListSync
+import com.tasklane.ui.toolwindow.MoreNode
 import com.tasklane.ui.toolwindow.TaskNode
+import com.tasklane.ui.toolwindow.TaskTreeModel
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
-import com.tasklane.ui.toolwindow.VisibleTasks
 import org.junit.AfterClass
 import org.junit.Assert.assertTrue
 import org.junit.Assume
@@ -31,12 +36,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.temporal.WeekFields
-import java.util.Locale
 import javax.swing.JTree
-import javax.swing.plaf.basic.BasicTreeUI
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 
@@ -298,90 +298,179 @@ class ScaleBenchmark {
 
     /**
      * **§1.7 — cambiar de pestaña.** Filtrar, contar, ordenar y agrupar: lo que
-     * `TasklanePanel` hace fuera del EDT en cada repintado, para las tres pestañas.
+     * `TasklanePanel` pide fuera del EDT en cada repintado.
      *
-     * El bloque de agrupación reproduce `TasklanePanel.buildSections`, que es privado.
-     * Se mantiene al lado del original a propósito: si aquél cambia de orden, esto
-     * mide otra cosa y hay que tocarlo.
+     * Desde la Fase 2 esto **es** código de producción: construir el pager y
+     * calentarle el contorno y los contadores es exactamente lo que hace el panel en
+     * su corrutina. Antes había aquí una copia de `buildSections` que podía derivar
+     * del original sin que nada avisara.
      */
     @Test
     fun `repintado - contar, filtrar, ordenar y agrupar`() {
-        val snapshot = loaded()
-        val found = SearchResults.NONE
+        val snapshot = loaded().copy(config = board)
         val now = Instant.now()
 
-        val result = Bench.measure("repintado: countsByState + of + sort + group", runs = 10, warmup = 3) {
-            VisibleTasks.countsByState(snapshot, found, TaskFilter.ALL, now)
-            for (state in config.states) {
-                val mine = VisibleTasks.of(snapshot, found, TaskFilter.ALL, state.id, now)
-                sections(mine, state.grouping, state.anchor)
-            }
+        val result = Bench.measure("repintado: pager (contar + filtrar + ordenar + agrupar)", runs = 10, warmup = 3) {
+            val pager = InMemoryPager(snapshot, SearchResults.NONE, TaskFilter.ALL, now)
+            pager.counts()
+            for (state in board.states) pager.outline(state.id)
         }
         record(result)
     }
 
     /**
-     * **§1.4 — la trampa del EDT.** Con `rowHeight = 0`, `JTree` usa
-     * `VariableHeightLayoutCache`, que **mide cada fila invocando al renderer**.
-     * Construir los nodos, recargar y desplegar los grupos es una invocación del
-     * renderer por tarea, en el hilo de UI.
+     * **§1.4 — la trampa del EDT, y la puerta de la Fase 2.** Con `rowHeight = 0`,
+     * `JTree` usa `VariableHeightLayoutCache`, que **mide cada fila invocando al
+     * renderer**: ~0,064 ms cada una.
      *
-     * Éste es el escenario que el plan llama «independiente del almacén»: aunque los
-     * datos vinieran de una base de datos perfecta, esto mata el IDE. Por eso la
-     * Fase 2 va antes que la 3.
+     * Los dos caminos, uno al lado del otro y en la misma ejecución, que es la única
+     * forma de que la comparación signifique algo (§1-bis.5):
+     *
+     * - **Hasta la Fase 2**: un nodo por tarea, `reload()` y desplegar todos los
+     *   grupos. Una invocación del renderer por tarea, en el hilo de interfaz.
+     * - **Desde la Fase 2**: las cabeceras salen del agregado y sólo los grupos que
+     *   caben en el presupuesto reciben su **primera página**. El árbol no llega a
+     *   contener el corpus, así que la cifra deja de crecer con N — que es justamente
+     *   lo que hay que poder comprobar.
+     *
+     * Cada ejecución parte de un árbol nuevo a propósito: lo que se mide es el
+     * **primer** pintado, que es el único momento en el que sincronizar por
+     * diferencias no ayuda porque no hay nada puesto que reaprovechar.
      *
      * `JTree` y no `CheckboxTree` por lo mismo que en `TaskTreeRendererTest`: el
      * constructor de la de la plataforma instala su speed search y eso sí necesita
-     * `Application`. Lo que se mide —crear nodos, recargar y **medir cada fila**— es
-     * idéntico.
+     * `Application`. Lo que se mide —crear nodos y **medir cada fila**— es idéntico.
      */
     @Test
     fun `render en el EDT`() {
-        val snapshot = loaded()
-        val state = config.states.first()
-        val mine = VisibleTasks.of(snapshot, SearchResults.NONE, TaskFilter.ALL, state.id, Instant.now())
-        val sections = sections(mine, Grouping.BY_DATE, state.anchor)
+        val snapshot = loaded().copy(config = board)
+        val state = TasklaneConfig.TODO
+        val pager = pager(snapshot, state)
+        val outline = pager.outline(state)
 
-        val renderer = TaskTreeRenderer().apply {
-            config = this@ScaleBenchmark.config
-            // Sin IDE no hay DateFormatUtil; para medir, la fecha es texto y nada más.
-            formatDate = { "15/09/2026" }
-        }
-        val root = CheckedTreeNode("root")
-        val tree = Bench.edt {
-            JTree(DefaultTreeModel(root)).apply {
-                cellRenderer = renderer
-                isRootVisible = false
-                showsRootHandles = false
-                rowHeight = 0
-                setSize(400, 800)
-                doLayout()
-            }
-        }
-
-        val result = Bench.measureOnEdt("render en el EDT: nodos + reload + medir filas", runs = 3, warmup = 1) {
-            root.removeAllChildren()
-            for ((key, tasks) in sections) {
-                val group = GroupNode(key, tasks.size)
-                tasks.forEach { group.add(TaskNode(it, false)) }
-                root.add(group)
+        val antes = Bench.measureOnEdt("render · el corpus entero + reload (hasta la Fase 2)", runs = 3, warmup = 1) {
+            val tree = newTree()
+            val root = tree.model.root as CheckedTreeNode
+            for (group in outline) {
+                val node = GroupNode(group.key, group.size)
+                pager.all(PageQuery(state, group.key)).forEach { node.add(TaskNode(it, false)) }
+                root.add(node)
             }
             (tree.model as DefaultTreeModel).reload()
-            // `expandGroups()`: desplegar es lo que obliga a MEDIR cada fila, y medir
-            // es lo que invoca al renderer una vez por tarea. Sin esto el árbol sólo
-            // mediría las cabeceras y el banco diría que todo va bien.
+            // Desplegar es lo que obliga a MEDIR cada fila, y medir es lo que invoca al
+            // renderer una vez por tarea. Sin esto el árbol sólo mediría las cabeceras
+            // y el banco diría que todo va bien.
             //
-            // Por RUTA y no por fila, igual que el panel. `expandRow(i)` parece
-            // equivalente y no lo es: al desplegar el grupo 0 sus miles de hijos se
-            // meten en la numeración, así que la fila 1 ya no es el grupo 1 sino una
-            // tarea, y el resto del bucle no despliega nada. Con ese fallo este banco
-            // marcaba 51 ms a 100k —sublineal, imposible— en vez de lo que cuesta.
+            // Por RUTA y no por fila. `expandRow(i)` parece equivalente y no lo es: al
+            // desplegar el grupo 0 sus miles de hijos se meten en la numeración, así que
+            // la fila 1 ya no es el grupo 1 sino una tarea, y el resto del bucle no
+            // despliega nada. Con ese fallo este banco marcaba 51 ms a 100k —sublineal,
+            // imposible— en vez de lo que cuesta.
             for (node in root.children().toList().filterIsInstance<GroupNode>()) {
                 tree.expandPath(TreePath(node.path))
             }
-            (tree.ui as BasicTreeUI).let { it.leftChildIndent = it.leftChildIndent }
-            assertTrue(tree.rowCount > 0)
-            tree.preferredSize
+            settle(tree)
+        }
+        record(antes)
+
+        val ahora = Bench.measureOnEdt("render · contorno + una página por grupo (Fase 2)", runs = 3, warmup = 1) {
+            val tree = newTree()
+            list(tree, pager, state, outline).sync()
+            settle(tree)
+        }
+        record(ahora)
+    }
+
+    /**
+     * **Lo que de verdad se paga a diario**: el repintado que llega detrás de *cada*
+     * comando y de *cada* tecla del buscador, con el árbol ya pintado.
+     *
+     * Es el escenario que justifica que el árbol se sincronice por diferencias en vez
+     * de reconstruirse. Aquí la lista ya está en pantalla y sólo ha cambiado una
+     * tarea: lo que se mide es cuántas filas hay que volver a medir por ello.
+     */
+    @Test
+    fun `repintado con el arbol ya pintado`() {
+        val start = loaded().copy(config = board)
+        val state = TasklaneConfig.TODO
+        val before = pager(start, state)
+        val outlineBefore = before.outline(state)
+        // La primera fila de la primera página del primer grupo: la tarea que el
+        // usuario tiene delante. Completar una que no esté cargada mediría el caso
+        // fácil —no hay nada que rehacer porque no había nada puesto—.
+        val victim = before.page(PageQuery(state, outlineBefore.first().key)).items.first()
+        val after = reducer.plan(start, TaskCommand.ToggleComplete(repo, victim.id)).snapshot
+
+        val pagers = listOf(before, pager(after, state))
+        val outlines = listOf(outlineBefore, pagers[1].outline(state))
+
+        var flip = 0
+        val viejo = Bench.measureOnEdt("repintar · reload del corpus entero (hasta la Fase 2)", runs = 3, warmup = 1) {
+            val tree = newTree()
+            val root = tree.model.root as CheckedTreeNode
+            val which = flip++ % 2
+            root.removeAllChildren()
+            for (group in outlines[which]) {
+                val node = GroupNode(group.key, group.size)
+                pagers[which].all(PageQuery(state, group.key)).forEach { node.add(TaskNode(it, false)) }
+                root.add(node)
+            }
+            (tree.model as DefaultTreeModel).reload()
+            for (node in root.children().toList().filterIsInstance<GroupNode>()) {
+                tree.expandPath(TreePath(node.path))
+            }
+            settle(tree)
+        }
+        record(viejo)
+
+        val sync = Bench.edt { newTree().let { tree -> list(tree, pagers[0], state, outlines[0]) to tree } }
+        Bench.edt { sync.first.sync() }
+        var touched = 0
+        var round = 0
+        val nuevo = Bench.measureOnEdt("repintar · sincronizar por diferencias (Fase 2)", runs = 20, warmup = 5) {
+            val which = round++ % 2
+            sync.first.pager = pagers[which]
+            sync.first.outline = outlines[which]
+            touched = maxOf(touched, sync.first.sync())
+            settle(sync.second)
+        }
+        // Si esto fuera cero el escenario no estaría midiendo nada: querría decir que
+        // la tarea que cambió no estaba en ninguna página cargada.
+        assertTrue("el repintado tiene que tener algo que rehacer", touched > 0)
+        println("  filas tocadas por repintado: $touched")
+        record(nuevo)
+    }
+
+    /**
+     * **Desplazarse.** Llegar al centinela pide la siguiente página, y ésas sí son cien
+     * filas nuevas que hay que medir. Es el otro número de la puerta de la Fase 2 —el
+     * desplazamiento tiene que mantener 60 fps— y el que dice si el tamaño de página
+     * está bien elegido: el presupuesto son 16 ms.
+     *
+     * Va sobre la pestaña **sin agrupar**, que es donde la raíz se pagina directamente
+     * y las páginas son más largas —agrupando, una página se reparte entre grupos—.
+     */
+    @Test
+    fun `desplazarse una pagina`() {
+        val snapshot = loaded()
+        val state = TasklaneConfig.TODO
+        val pager = pager(snapshot, state)
+        assertTrue("esta pestaña no agrupa: la raíz se pagina sola", pager.outline(state).isEmpty())
+
+        val tree = Bench.edt { newTree() }
+        val sync = list(tree, pager, state, emptyList())
+        // La primera página fuera de la medida: lo que se cronometra es lo que cuesta
+        // traer la siguiente, no abrir la lista.
+        Bench.edt {
+            sync.sync()
+            settle(tree)
+        }
+
+        val result = Bench.measureOnEdt("desplazarse: una página más (${TaskPager.PAGE} filas)", runs = 10, warmup = 3) {
+            // Exactamente lo que hace llegar al centinela desplazándose.
+            val sentinel = tree.getPathForRow(tree.rowCount - 1).lastPathComponent as MoreNode
+            sync.loadMore(sentinel)
+            settle(tree)
         }
         record(result)
     }
@@ -486,30 +575,72 @@ class ScaleBenchmark {
     private fun loaded(): TasklaneSnapshot = reducer.reduce(base(), TaskCommand.Loaded(repo, corpus()))
 
     /**
-     * `TasklanePanel.buildSections`, reproducido. Ver la nota del escenario de
-     * repintado sobre por qué está duplicado en vez de extraído.
+     * La configuración de los escenarios de lista: la pestaña *ToDo* agrupando por
+     * fecha. Es la agrupación que más cabeceras produce y la que el §1.4 usa para
+     * describir la trampa del EDT.
      */
-    private fun sections(
-        tasks: List<Task>,
-        grouping: Grouping,
-        anchor: com.tasklane.domain.model.DateAnchor,
-    ): List<Pair<GroupKey, List<Task>>> {
-        val natural = compareByDescending<Task> { it.bookmarked }
-            .thenByDescending { config.priorityOrDefault(it.priorityId).order }
-            .thenByDescending { (DateGrouper.anchorOf(it, anchor) ?: it.updatedAt).toEpochMilli() }
+    private val board = config.copy(
+        states = config.states.map {
+            if (it.id == TasklaneConfig.TODO) it.copy(grouping = Grouping.BY_DATE) else it
+        },
+    )
 
-        if (grouping == Grouping.NONE) {
-            return listOf(GroupKey.OfTag(null) to tasks.sortedWith(natural))
+    /**
+     * El pager de una pestaña, **ya caliente**: es lo que el panel construye en su
+     * corrutina, fuera del EDT. Lo que se mide después es lo que le queda al hilo de
+     * interfaz.
+     */
+    private fun pager(snapshot: TasklaneSnapshot, state: StateId): InMemoryPager =
+        InMemoryPager(snapshot, SearchResults.NONE, TaskFilter.ALL, Instant.now()).also {
+            it.counts()
+            it.outline(state)
         }
 
-        val zone = ZoneId.systemDefault()
-        val today = LocalDate.now(zone)
-        val firstDay = WeekFields.of(Locale.getDefault()).firstDayOfWeek
-        return tasks
-            .groupBy { DateGrouper.groupOf(DateGrouper.anchorOf(it, anchor), today, zone, firstDay) }
-            .toSortedMap()
-            .map { (group, inGroup) -> GroupKey.OfDate(group) as GroupKey to inGroup.sortedWith(natural) }
+    private val renderer = TaskTreeRenderer().apply {
+        config = board
+        // Sin IDE no hay DateFormatUtil; para medir, la fecha es texto y nada más.
+        formatDate = { "15/09/2026" }
     }
+
+    /** El árbol de la tool window, con su renderer de verdad y su altura variable. */
+    private fun newTree(): JTree {
+        val root = CheckedTreeNode("root")
+        return JTree(TaskTreeModel(root)).apply {
+            cellRenderer = renderer
+            isRootVisible = false
+            showsRootHandles = false
+            rowHeight = 0
+            setSize(400, 800)
+            doLayout()
+        }
+    }
+
+    /**
+     * Fuerza la medida de las filas que estén sin medir. Sin esto el árbol aplaza el
+     * trabajo que es justamente lo que se quiere cronometrar.
+     *
+     * **Nada de `leftChildIndent`.** Tocarlo era la forma de forzar la medida hasta la
+     * Fase 2, y hace algo más de lo que dice: `BasicTreeUI.setLeftChildIndent` llama a
+     * `treeState.invalidateSizes()`, o sea tira **todas** las alturas cacheadas. Con
+     * un árbol que se reconstruía entero daba igual; midiendo un repintado por
+     * diferencias contaría como coste de esta fase justo lo que esta fase evita.
+     */
+    private fun settle(tree: JTree) {
+        assertTrue(tree.rowCount > 0)
+        tree.preferredSize
+    }
+
+    /**
+     * Lo que hace la pestaña con el árbol, que desde la Fase 2 es **código de
+     * producción**: [ListSync] no necesita un IDE, sólo un `JTree` y un pager. Antes
+     * aquí había una copia de `buildSections` que podía derivar del original sin que
+     * nada avisara; ahora el banco mide exactamente lo que corre.
+     */
+    private fun list(tree: JTree, pager: TaskPager, state: StateId, outline: List<GroupOutline>) =
+        ListSync(tree, state).apply {
+            this.pager = pager
+            this.outline = outline
+        }
 
     private fun record(result: Bench.Result) {
         results += result
@@ -519,6 +650,9 @@ class ScaleBenchmark {
     companion object {
         /** El tamaño del corpus. `-PbenchN=100000`. */
         val n: Int = System.getProperty("tasklane.bench.n")?.toIntOrNull() ?: 10_000
+
+        /** Lo único de `TasklanePanel` que aquí sigue copiado. Ver [ScaleBenchmark.syncBoard]. */
+        const val GROUP_PAGE = 50
 
         private val results = mutableListOf<Bench.Result>()
 

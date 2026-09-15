@@ -105,6 +105,36 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>1.6.0 &mdash; the list stops weighing what the project weighs</h3>
+            <ul>
+              <li><b>Repainting the list no longer depends on how big the project is.</b>
+                  On 100,000 tasks, opening the tool window went from 1,179&nbsp;ms to
+                  4.1&nbsp;ms, and repainting after completing a task from 1,194&nbsp;ms
+                  to 0.31&nbsp;ms. On a million, from 10.2&nbsp;s to 0.61&nbsp;ms. The
+                  tree is no longer rebuilt on every change: it is brought up to date row
+                  by row, and the rows that did not change keep the height they were
+                  already measured at.</li>
+              <li><b>The list loads a page at a time.</b> At the end of a group there is a
+                  row telling you how many tasks are left; scrolling to it, clicking it or
+                  pressing <i>Enter</i> brings the next ones. Same gesture as
+                  <i>Find in Files</i>.</li>
+              <li><b>Big groups start collapsed</b>, with their count in the header
+                  &mdash; and so do the ones below, once the ones above already fill the
+                  screen. Opening one loads its first page right then. What you open or
+                  close always wins.</li>
+              <li><b>Revealing a task from an editor mark</b> no longer has to load
+                  everything above it: the list opens at its height and says how much is
+                  left above.</li>
+              <li>Fixed: <b>every repaint walked the whole project</b> on the UI thread
+                  just to forget expanded cards that no longer existed. On big lists that
+                  cleanup cost more than the repaint itself &mdash; and it was never
+                  needed, since task ids are not reused.</li>
+              <li>Fixed: <b>copying a state or a group to the clipboard copied whatever
+                  happened to be painted.</b> It now asks for the full list again, which
+                  is what &ldquo;copy this state&rdquo; means even when the list loads in
+                  chunks.</li>
+            </ul>
+
             <h3>1.5.0 &mdash; big lists stop weighing</h3>
             <ul>
               <li><b>A command costs eight times less.</b> On a list of 100,000 tasks, a

@@ -721,6 +721,148 @@ EDT por encima de 16 ms. La memoria sigue siendo mala — eso es la Fase 3.
 
 ---
 
+## 2-bis. Resultados de la Fase 2 · CERRADA
+
+**Puerta cerrada.** Con el corpus de **1.000.000 de tareas** en memoria forzada, ninguna
+operación del hilo de interfaz pasa de **3 ms** contra los 16 del presupuesto: abrir la
+ventana cuesta 0,61 ms, repintarla tras un comando 0,14 ms y desplazarse una página
+2,65 ms. La memoria sigue siendo mala y ordenar sigue costando lo que cuesta: eso es la
+Fase 3, como el plan decía.
+
+```
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=1000000 -PtestHeap=32g
+```
+
+### 2-bis.1 La puerta, medida
+
+Todo en **p50 de EDT**, los dos caminos uno al lado del otro **en la misma ejecución**,
+por lo que dice el §1-bis.5. «Antes» es reconstruir el árbol entero y recargarlo, que es
+lo que el panel hacía hasta esta fase.
+
+| Tareas | Primer pintado antes | **ahora** | Repintar tras un comando antes | **ahora** | Desplazar una página | Agrupar y contar *(fuera del EDT)* |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10.000 | 136 ms | **6,1 ms** | 178 ms | **0,29 ms** | 3,1 ms | 3,9 ms |
+| 100.000 | 1.179 ms | **4,1 ms** | 1.194 ms | **0,31 ms** | 2,6 ms | 41 ms |
+| 1.000.000 | 10.200 ms | **0,61 ms** | 10.164 ms | **0,14 ms** | 2,7 ms | 740 ms |
+
+Lo que importa de esa tabla no son los cocientes —×17.000 a un millón— sino la forma:
+**la columna del EDT deja de crecer con N**, y de hecho baja, porque a más tareas más
+grupos superan el umbral y empiezan plegados. El coste de pintar pasa a depender de lo
+que se ve, que es de lo que siempre debió depender.
+
+El repintado tras un comando toca **entre una y tres filas**. Ése es el número que
+explica la columna: completar una tarea no cambia la lista, cambia una fila de la lista.
+
+### 2-bis.2 Dos cifras del §0-bis que había que corregir
+
+**a) La página son cincuenta filas, no cien.** El §2.5.2 dice «primera página (100
+filas)». Medido sobre el corpus de la especificación, traer cien filas cuesta **12,9 ms
+de p50 y 14,9 de p99**, con un presupuesto de 16. Pasar la puerta por un 7 % no es
+pasarla: en una máquina más lenta, o con una tarjeta desplegada de por medio, ese margen
+no existe. Con cincuenta son ~2,7 ms, y cincuenta filas siguen siendo tres pantallas
+largas de tarjetas.
+
+**b) «No más de ~2.000 nodos» no era la invariante.** El §2.5 la enuncia así y el
+§0-bis.4 ya avisaba de que no basta —2.000 filas medidas de cero son ~128 ms—. La
+invariante real, la que se puede defender, es otra:
+
+> **Ningún evento del EDT puede crear o remedir más de ~150 filas.**
+
+El número de nodos del árbol es una consecuencia, no la regla: crece al desplazarse
+—cada página son cincuenta filas más— y eso no cuesta nada mientras las que ya estaban
+no se vuelvan a medir. Por eso el diff no es «una mejora opcional de la Fase 2»
+(§0-bis.4 lo dijo primero): es la fase.
+
+### 2-bis.3 Lo que el plan no había visto
+
+**a) Un O(n) en el EDT que no estaba en ninguna lista.** `TasklanePanel.render` llamaba
+en cada repintado a `renderer.retainExpanded(...)` con los ids de **todas** las tareas
+del snapshot, para olvidar las tarjetas desplegadas que ya no existían. Construir ese
+conjunto es un recorrido del corpus entero en el hilo de interfaz: a un millón de
+tareas, la limpieza costaba más que todo lo que esta fase ahorra. Y no hacía falta: los
+ids no se reciclan, así que un id de una tarea borrada no le da su despliegue a nadie.
+El conjunto pasa a estar acotado por número de entradas y la pasada desaparece.
+
+**b) Las cabeceras también son filas.** Agrupar por fecha reparte un año en meses y
+días, y agrupar por etiqueta puede dar miles de grupos: son filas que hay que medir
+igual que las tareas. El presupuesto se reparte entre las dos cosas, y las cabeceras se
+paginan como todo lo demás —cincuenta y un centinela—. Sin esto, una pestaña con cien
+cabeceras se comía el presupuesto antes de abrir un solo grupo.
+
+**c) `JTree` no despliega sola una raíz que se llena por diferencias.** La raíz va
+oculta, y la plataforma la marca como desplegada en **dos** momentos: al instalar el
+modelo —si ya tiene hijos— y en cada `reload()`. Quitado el `reload()`, no queda
+ninguno: el árbol se queda en blanco con el modelo lleno. Es el peor modo de fallo
+posible porque no se parece a un fallo, y ya se vivió una vez —el trabajo de
+accesibilidad de la 1.0.0 dejó la ventana vacía con las cuentas pintadas—. Lo fija un
+test que describe el comportamiento de la plataforma, no el nuestro.
+
+**d) Otra vez el campo protegido que se llama igual que el accesor.** Una cabecera nace
+sin hijos y aun así tiene que poder desplegarse: ése es el gesto que pide su primera
+página. `DefaultTreeModel` trae para eso `asksAllowsChildren`, y en Kotlin
+`modelo.asksAllowsChildren = true` **no compila**, porque el nombre resuelve al campo
+protegido en vez de al `setter` — exactamente el mismo tropiezo que obligó a construir a
+mano el `AccessibleContext` de `StateTabRow`. Se resuelve con un `isLeaf` propio
+(`TaskTreeModel`), que además dice en una línea lo que el interruptor decía en dos.
+
+### 2-bis.4 Qué cambia para quien lo usa
+
+- **La lista carga a páginas.** Al final de cada grupo hay una fila que dice cuántas
+  quedan; llegar a ella desplazándose —o pulsarla, o darle a `Enter`— trae las
+  siguientes. Es el gesto de *Find in Files*.
+- **Los grupos grandes empiezan plegados**, con su número en la cabecera. Y los de abajo
+  también, cuando los de arriba ya llenan la pantalla.
+- **Enseñar una tarea** —pulsar una marca del editor— ya no carga lo que tiene delante:
+  abre la ventana a su altura y anuncia lo que queda por encima con otro centinela.
+- **La exportación no exporta «lo que está cargado»**: vuelve a pedir la misma lista sin
+  tope. Es lo único que sigue siendo O(n) a propósito, y lo que la Fase 5 pasará a
+  escribir en *streaming*.
+- Lo que **no** cambia: el orden, la agrupación, los contadores de las pestañas, la
+  selección, la búsqueda y el pliegue que el usuario decida. La regla de arriba es que
+  lo que dijo el usuario manda sobre lo que decida el presupuesto.
+
+### 2-bis.5 Lo que quedó construido
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `TaskPager` + `PageQuery` / `TaskPage` / `Cursor` | `main/…/paging/` | La costura del §2.1: la UI pide páginas y agregados, nunca listas. En la Fase 3 se cambia la implementación y nadie más se entera |
+| `InMemoryPager` | `main/…/paging/` | El `buildSections` de antes, detrás de la costura: ordena y agrupa el snapshot y lo sirve a trozos, con cursor y sin `OFFSET` |
+| `ListSync` | `main/…/ui/toolwindow/` | El árbol acotado: páginas, centinelas, ventanas cargadas y el salto de «enséñame esta tarea». **No necesita un IDE**, y por eso tiene test de punta a punta |
+| `TreeSync` + `Row` | `main/…/ui/toolwindow/` | La sincronización por diferencias. Lo que sigue igual no vuelve a pasar por el renderer |
+| `GroupBudget` | `main/…/ui/toolwindow/` | Qué grupos se abren solos: el reparto del presupuesto de filas del primer pintado |
+| `MoreNode`, `TaskTreeModel` | `main/…/ui/toolwindow/` | El centinela de una página, y la cabecera que se despliega estando vacía |
+| `VisibleTasks.byState` | `main/…/ui/toolwindow/` | Contar y repartir por estado en **una** pasada en vez de dos. Es el agregado del §2.5.5 mientras no haya tabla `counter` |
+| Cuatro suites nuevas | `test/…/paging/`, `test/…/ui/` | `InMemoryPagerTest`, `ListSyncTest`, `TreeSyncTest`, `GroupBudgetTest`: 58 casos sobre la paginación, el diff, el presupuesto y la lista entera |
+| Tres escenarios de banco | `test/…/bench/` | Primer pintado, repintado con el árbol ya puesto y desplazarse una página — cada uno con el camino viejo al lado |
+
+El banco dejó además de tener una copia de `buildSections`: mide `InMemoryPager`,
+`ListSync`, `TreeSync` y `GroupBudget`, que son los de producción. Lo único que sigue
+duplicado ahí es el camino **viejo**, que ya no existe en ningún otro sitio.
+
+### 2-bis.6 Qué sigue siendo el techo
+
+Repintar ya no lo es. Lo que queda, medido a 1.000.000:
+
+| | Coste | Dónde se arregla |
+|---|---:|---|
+| Ordenar y agrupar el corpus (fuera del EDT) | 740 ms | **Fase 3** (`ORDER BY` + `LIMIT`) |
+| Cargar en frío | ~34 s † | Fase 3 |
+| Buscar | ~0,9 s † | Fase 3 (FTS5) |
+| Memoria | 12,9 KB/tarea | Fase 3 |
+| EDT | **nada por encima de 3 ms** | — |
+
+† Extrapolado desde las cifras medidas a 100.000 (3,4 s y 93 ms), que es lo único de
+esta tabla que no está medido a un millón: los dos escenarios necesitan el `tasks.xml`
+de 2,9 GB y el DOM de JDOM encima, y eso es justamente lo que la Fase 3 borra. El §0-bis
+ya comprobó que las dos cosas escalan lineales en N.
+
+Los 740 ms de agrupar son ahora lo primero que el usuario nota, y son el trabajo que la
+Fase 3 borra de un plumazo: la lista de una pestaña es un índice compuesto y un `LIMIT`,
+y los contadores son cinco filas de la tabla `counter`. La costura para cambiarlo ya está
+puesta —`TaskPager`— y la UI no se va a enterar.
+
+---
+
 ### Fase 3 — El almacén *(~5-6 semanas)*
 
 La fase grande.
