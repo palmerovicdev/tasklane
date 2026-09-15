@@ -190,6 +190,9 @@ internal class TasklanePanel(
      */
     private val searchField = SearchTextField(HISTORY_PROPERTY)
 
+    /** Evita que sincronizar una copia del campo vuelva a publicar la consulta. */
+    private var updatingSearchField = false
+
     /** Los estados, encima del buscador. Cada panel pinta la suya y marca la propia. */
     private val tabs = StateTabRow(onSelectState)
 
@@ -312,6 +315,7 @@ internal class TasklanePanel(
 
         setContent(buildContent())
         toolbar = buildToolbar()
+        installPopupSelection()
         PopupHandler.installPopupMenu(tree, CONTEXT_MENU_GROUP, ActionPlaces.TOOLWINDOW_POPUP)
 
         installSearchField()
@@ -349,7 +353,20 @@ internal class TasklanePanel(
             // demás tienen que enseñar lo mismo al cambiar de tab.
             search.rawQuery.collect { raw ->
                 withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
-                    if (searchField.text != raw) searchField.text = raw
+                    // Hay un campo por estado, pero la consulta es de la ventana. Una
+                    // escritura programática dispara el DocumentListener de ese campo;
+                    // si lo dejamos pasar, las copias que aún están procesando una
+                    // emisión vieja pueden devolver `rawQuery` a un prefijo y borrar
+                    // lo que el usuario acaba de escribir. Además, una tarea vieja ya
+                    // encolada en el EDT no debe pisar la consulta más nueva.
+                    if (searchField.text != raw && search.rawQuery.value == raw) {
+                        updatingSearchField = true
+                        try {
+                            searchField.text = raw
+                        } finally {
+                            updatingSearchField = false
+                        }
+                    }
                 }
             }
         }
@@ -401,6 +418,27 @@ internal class TasklanePanel(
         return toolbar.component
     }
 
+    /**
+     * El clic derecho también cambia la fila activa, como hace el botón `⋮` de una
+     * tarjeta. `JTree` conserva la selección anterior por defecto, y eso haría que el
+     * menú de un grupo pudiera borrar la selección vieja en vez del grupo pulsado.
+     * Una fila ya seleccionada conserva la selección múltiple para que el menú siga
+     * actuando sobre todo el lote.
+     */
+    private fun installPopupSelection() {
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(event: MouseEvent) = selectPopupRow(event)
+
+            override fun mouseReleased(event: MouseEvent) = selectPopupRow(event)
+
+            private fun selectPopupRow(event: MouseEvent) {
+                if (!event.isPopupTrigger) return
+                val row = rowAtHeight(tree, event.y)
+                if (row >= 0 && !tree.isRowSelected(row)) tree.selectionRows = intArrayOf(row)
+            }
+        })
+    }
+
     /** Cómo las acciones registradas encuentran esta pestaña. */
     override fun uiDataSnapshot(sink: DataSink) {
         super.uiDataSnapshot(sink)
@@ -422,7 +460,9 @@ internal class TasklanePanel(
             else TasklaneBundle.message("search.placeholder.shortcut", hint)
         searchField.textEditor.toolTipText = TasklaneBundle.message("search.tooltip")
         searchField.addDocumentListener(object : DocumentAdapter() {
-            override fun textChanged(e: DocumentEvent) = search.setQuery(searchField.text)
+            override fun textChanged(e: DocumentEvent) {
+                if (!updatingSearchField) search.setQuery(searchField.text)
+            }
         })
         searchField.textEditor.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
@@ -835,6 +875,16 @@ internal class TasklanePanel(
     fun isSelectionEditable(): Boolean =
         selectedTasks().let { tasks -> tasks.isNotEmpty() && tasks.none { service.isReadOnly(it.repo) } }
 
+    /** Si Delete tiene algo que borrar: una selección de tareas o un grupo no vacío. */
+    fun canDeleteSelection(): Boolean {
+        val tasks = selectedTasks()
+        return if (tasks.isNotEmpty()) {
+            isSelectionEditable()
+        } else {
+            selectedGroup()?.let { list.sizeOf(it) > 0 } == true
+        }
+    }
+
     val repositoryCount: Int get() = snapshot.repositories.size
 
     val activeRepository: RepositoryRef? get() = snapshot.activeRepository
@@ -1044,7 +1094,15 @@ internal class TasklanePanel(
      * `Delete` con cinco mil ids sería un comando suelto que se aplicaría en el acto.
      */
     fun deleteSelected() {
-        service.applyAll(selectedTasks().map { TaskCommand.Delete(it.repo, listOf(it.id)) })
+        val tasks = selectedTasks()
+        if (tasks.isNotEmpty()) {
+            service.applyAll(tasks.map { TaskCommand.Delete(it.repo, listOf(it.id)) })
+            return
+        }
+
+        val group = selectedGroup() ?: return
+        val total = list.sizeOf(group)
+        if (total > 0) service.deleteGroup(list.pager, PageQuery(stateId, group), total)
     }
 
     fun toggleSelected() {

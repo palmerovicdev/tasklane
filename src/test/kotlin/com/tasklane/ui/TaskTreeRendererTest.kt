@@ -371,6 +371,18 @@ class TaskTreeRendererTest {
         assertEquals(task.id, hit?.task?.id)
     }
 
+    @Test
+    fun `el boton de copiar esta en la linea de metadatos`() {
+        val task = task("Comprar pan")
+        val tree = treeWith(task)
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Copy
+        }
+
+        assertEquals(task.id, hit?.task?.id)
+    }
+
     /**
      * La de fábrica también, y es el caso que importa: mientras se callaba, las
      * tarjetas que nadie había tocado —las más— eran justo las que no tenían por dónde

@@ -4,6 +4,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.awt.RelativePoint
 import com.tasklane.TasklaneBundle
 import com.tasklane.code.CodeAnchors
+import com.tasklane.domain.text.TaskCopyText
 import com.tasklane.ui.common.ImagePreviewPopup
 import java.awt.Cursor
 import java.awt.event.MouseAdapter
@@ -11,17 +12,17 @@ import java.awt.event.MouseEvent
 import javax.swing.JTree
 
 /**
- * Lo que se abre con **un** clic desde la fila, sin entrar a editar la tarea: sus
- * enlaces, sus anclas de código y su prioridad; y de paso, qué cursor se ve sobre
- * cada sitio.
+ * Lo que se abre o copia con **un** clic desde la fila, sin entrar a editar la tarea:
+ * sus enlaces, sus anclas de código, su prioridad y su texto; y de paso, qué cursor
+ * se ve sobre cada sitio.
  *
- * Los tres van juntos y no en un oyente cada uno porque comparten el estado que se ve
+ * Todos van juntos y no en un oyente cada uno porque comparten el estado que se ve
  * —el cursor y el tooltip del árbol son uno solo— y el trabajo caro: resolver qué hay
  * bajo el ratón obliga a preparar y medir la fila, y tres oyentes lo harían tres veces
  * por cada píxel recorrido. Por eso se pregunta una vez, a [TaskTreeRenderer.hotspotAt].
  * Quien hace el trabajo de verdad sigue siendo cada uno por su lado: [TaskLinks] abre
  * enlaces, [CodeAnchors] navega al código, [PriorityPopup] cambia la prioridad y
- * [ImagePreviewPopup] amplía una captura.
+ * [ImagePreviewPopup] amplía una captura y [TaskCopyText] prepara el texto plano.
  *
  * El doble clic sigue siendo «editar», así que el gesto de editar no se pierde en las
  * filas que tienen enlaces o anclas: sólo deja de dispararse justo encima de uno.
@@ -56,6 +57,9 @@ internal object RowClicks {
                     is TaskTreeRenderer.Hotspot.Image ->
                         TasklaneBundle.message("toolwindow.row.image.tooltip")
 
+                    is TaskTreeRenderer.Hotspot.Copy ->
+                        TasklaneBundle.message("toolwindow.row.copy.tooltip")
+
                     null -> null
                 }
             }
@@ -86,6 +90,11 @@ internal object RowClicks {
                     is TaskTreeRenderer.Hotspot.Image -> {
                         e.consume()
                         ImagePreviewPopup.show(project, hotspot.repo, hotspot.id, RelativePoint(e), tree)
+                    }
+
+                    is TaskTreeRenderer.Hotspot.Copy -> {
+                        e.consume()
+                        CardTextSelection.copy(TaskCopyText.plain(hotspot.task))
                     }
 
                     null -> Unit

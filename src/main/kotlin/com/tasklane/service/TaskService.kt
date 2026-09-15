@@ -55,6 +55,7 @@ import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.paging.MemoryPager
+import com.tasklane.paging.PageQuery
 import com.tasklane.search.LinearScanIndex
 import com.tasklane.search.TaskSearchIndex
 import com.tasklane.paging.TaskPager
@@ -285,6 +286,68 @@ class TaskService(
                 },
             )
         }
+    }
+
+    /**
+     * Borra todas las tareas que pertenecen al grupo que la lista acaba de mostrar.
+     *
+     * La cabecera sólo tiene el agregado y el árbol sólo conserva una página, así que
+     * no se puede convertir el grupo en una selección de nodos: [TaskPager.each] lo lee
+     * entero sobre una foto y lo entrega a tandas. La búsqueda y el filtro forman parte
+     * de ese paginador, por lo que se borra exactamente lo que el grupo representa en
+     * la ventana, no tareas que el usuario no está viendo.
+     *
+     * Cada tanda es una transacción independiente y la operación no es cancelable. Una
+     * cancelación a mitad dejaría un grupo parcialmente borrado; es la misma regla que
+     * [clearRepo], donde se acepta el coste de varias transacciones para no tomar el
+     * escritor durante minutos.
+     */
+    internal fun deleteGroup(pager: TaskPager, query: PageQuery, total: Int) {
+        if (total <= 0) return
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(
+                project,
+                TasklaneBundle.message("bulk.delete.progress", total),
+                false,
+            ) {
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    var removed = 0
+                    pager.snapshot { frozen ->
+                        // Una selección que busca en todos los repositorios puede mezclar
+                        // filas de repositorios en solo lectura. Se hace la comprobación
+                        // antes de borrar la primera tanda para no dejarla a medias.
+                        val repos = LinkedHashSet<RepoKey>()
+                        frozen.each(query, TaskStore.FORGET_BATCH) { tasks ->
+                            tasks.forEach { repos += it.repo }
+                        }
+                        if (repos.any(::isReadOnly)) return@snapshot
+
+                        frozen.each(query, TaskStore.FORGET_BATCH) { tasks ->
+                            if (tasks.isEmpty()) return@each
+                            val commands = tasks
+                                .groupBy { it.repo }
+                                .map { (repo, inRepo) ->
+                                    TaskCommand.Delete(repo, inRepo.map { it.id })
+                                }
+                            val before = removed
+                            metrics.time(TasklaneMetrics.Op.COMMAND) {
+                                synchronized(gate) {
+                                    inBulk {
+                                        applyLocked(TaskCommand.Batch(commands)) { done, _ ->
+                                            indicator.fraction =
+                                                (before + done).toDouble() / total.coerceAtLeast(1)
+                                        }
+                                    }
+                                }
+                            }
+                            removed += tasks.size
+                            indicator.fraction = removed.toDouble() / total.coerceAtLeast(1)
+                        }
+                    }
+                }
+            },
+        )
     }
 
     private fun applyNow(command: TaskCommand) = synchronized(gate) { applyLocked(command) }

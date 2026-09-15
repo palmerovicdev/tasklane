@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -17,6 +18,7 @@ import com.intellij.openapi.fileTypes.UnknownFileType
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.RepoKey
 import java.awt.Image
@@ -166,6 +168,13 @@ internal class MarkdownField(
     }
 
     private fun configure(editor: EditorEx) {
+        // `EditorTextField` no longer reliably inherits the surrounding Swing
+        // component colors on the newer IDE themes: the text can fall back to black
+        // over a dark, transparent editor. Bind both values to the IDE scheme/theme
+        // explicitly so the body remains readable in the task dialog.
+        editor.setColorsScheme(EditorColorsManager.getInstance().globalScheme)
+        editor.setBackgroundColor(UIUtil.getTextFieldBackground())
+        editor.contentComponent.foreground = UIUtil.getTextFieldForeground()
         editor.settings.apply {
             isUseSoftWraps = true
             isLineNumbersShown = false

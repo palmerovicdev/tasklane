@@ -261,6 +261,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Lo que responde al clic sobre un gemelo de sólo icono. Ver [priorityChip]. */
     private val iconTags = IdentityHashMap<SimpleColoredComponent, Any>()
 
+    /** Copiar el cuerpo completo de la tarea, sin metadatos ni Markdown. */
+    private val copyButton = icon()
+
     /**
      * Los dos controles de la derecha. El marcador se ve siempre que la tarea lo
      * esté —es información, no sólo un botón— y apagado sólo bajo el ratón; el menú,
@@ -302,6 +305,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             meta.add(icon)
             ChipRow.keep(chip, icon)
         }
+        meta.add(copyButton)
         chips.forEach(meta::add)
         lines.add(meta)
         add(lines, BorderLayout.CENTER)
@@ -404,6 +408,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         imageViews.forEach { it.isVisible = false }
         pendingImagesShown = false
         detail.isVisible = false
+        copyButton.isVisible = false
+        iconTags.remove(copyButton)
         chips.forEach { it.isVisible = false }
         meta.isVisible = false
         actions.isVisible = false
@@ -824,7 +830,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     // ------------------------------------------------------- línea de distintivos
 
     /**
-     * Vencimiento, etiquetas, repositorio y estado.
+     * Copia, vencimiento, etiquetas, repositorio y estado.
      *
      * El indicador de enlaces e imágenes va aparte, en [detail], y es el único con
      * icono de la plataforma **y** contador clicable: el icono es uno solo porque un
@@ -901,6 +907,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         if (showStateName) {
             chip(config.stateOrDefault(task.stateId).name, null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
+
+        copyButton.clear()
+        copyButton.icon = AllIcons.Actions.Copy
+        copyButton.foreground = foreground
+        copyButton.isVisible = true
+        iconTags[copyButton] = CopyTask(task)
 
         for (index in next until chips.size) chips[index].isVisible = false
         // La prioridad está en todas: la línea también.
@@ -1214,6 +1226,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             is CodeAnchor -> Hotspot.Anchor(tag)
             is TaskPriority -> Hotspot.Priority(task)
             is AttachmentId -> Hotspot.Image(task.repo, tag)
+            is CopyTask -> Hotspot.Copy(tag.task)
             else -> null
         }
     }
@@ -1224,7 +1237,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         class Anchor(val anchor: CodeAnchor) : Hotspot
         class Priority(val task: Task) : Hotspot
         class Image(val repo: RepoKey, val id: AttachmentId) : Hotspot
+        class Copy(val task: Task) : Hotspot
     }
+
+    private class CopyTask(val task: Task)
 
     /** Una fila de tarea resuelta: el nodo y su fila, que hacen falta los dos para medirla. */
     private class Hit(val node: TaskNode, val row: Int)

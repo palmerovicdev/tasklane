@@ -70,7 +70,7 @@ internal class ToggleBookmarkAction : PanelAction() {
 internal class DeleteTaskAction : PanelAction() {
     override fun update(e: AnActionEvent) {
         val panel = panelOf(e)
-        e.presentation.isEnabled = panel?.isSelectionEditable() == true
+        e.presentation.isEnabled = panel?.canDeleteSelection() == true
     }
 
     override fun actionPerformed(e: AnActionEvent) {
