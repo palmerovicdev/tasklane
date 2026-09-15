@@ -131,20 +131,21 @@ class TaskService(
 
     private fun applyNow(command: TaskCommand) {
         var before: TasklaneSnapshot
-        var after: TasklaneSnapshot
+        var result: TaskReducer.Reduction
         // Bucle de compare-and-set: hay dos productores reales —el EDT y la carga en
         // Dispatchers.IO— y un leer-modificar-escribir suelto perdería comandos.
         do {
             before = _snapshot.value
-            after = reducer.reduce(before, command)
-            if (after == before) return
-        } while (!_snapshot.compareAndSet(before, after))
+            result = reducer.plan(before, command)
+            if (result.snapshot === before) return
+        } while (!_snapshot.compareAndSet(before, result.snapshot))
 
-        reportRemapped(before, after)
-
-        // Una carga desde disco no es una edición: no marca nada como sucio.
-        if (command is TaskCommand.Loaded) return
-        markDirty(before, after)
+        // El reducer ya sabe qué hizo, así que aquí no se deduce nada: antes esto
+        // aplanaba el snapshot entero dos veces para descubrir las tareas aparcadas y
+        // comparaba las listas de todos los repositorios para descubrir cuáles
+        // reescribir. Ver `TaskReducer.Reduction`.
+        if (result.remapped.isNotEmpty()) reportRemapped(result.remapped)
+        markDirty(result.dirty)
     }
 
     fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly
@@ -216,17 +217,18 @@ class TaskService(
     }
 
     /**
-     * Qué repositorios hay que reescribir. Se deduce comparando el antes y el después
-     * en vez de leerlo del comando: desde la Fase 2 hay comandos —cambio de
-     * configuración, reasignación— que tocan varios repos a la vez, y un comando
-     * puede no cambiar nada en alguno de ellos.
+     * Qué repositorios hay que reescribir. Lo dice el reducer, que es quien acaba de
+     * cambiarlos; aquí sólo se descuentan los abiertos en solo lectura, que es lo
+     * único de esta decisión que el reducer no puede saber.
+     *
+     * Sigue sin leerse del comando, y por la misma razón de siempre: hay comandos
+     * —cambio de configuración, reasignación— que tocan varios repositorios a la vez y
+     * pueden no cambiar nada en alguno de ellos.
      */
-    private fun markDirty(before: TasklaneSnapshot, after: TasklaneSnapshot) {
-        val changed = after.tasksByRepo.keys.filter { repo ->
-            repo !in readOnly && after.tasksOf(repo) != before.tasksOf(repo)
-        }
-        if (changed.isEmpty()) return
-        dirty += changed
+    private fun markDirty(changed: Set<RepoKey>) {
+        val writable = changed.filterNot { it in readOnly }
+        if (writable.isEmpty()) return
+        dirty += writable
         saveSignal.tryEmit(Unit)
     }
 
@@ -307,13 +309,12 @@ class TaskService(
      * por apuntar a configuración inexistente. No es un error recuperable en
      * silencio: el usuario ve sus tareas en un sitio que no eligió, y merece saber
      * cuántas y cuáles.
+     *
+     * [fresh] son **sólo las nuevas**: el reducer ya descarta las que ya venían
+     * aparcadas, que es lo que este método conseguía antes comparando el conjunto de
+     * huérfanas de antes con el de después.
      */
-    private fun reportRemapped(before: TasklaneSnapshot, after: TasklaneSnapshot) {
-        val was = TaskReducer.orphans(before.tasksByRepo.values.flatten()).map { it.id }.toSet()
-        val now = TaskReducer.orphans(after.tasksByRepo.values.flatten())
-        val fresh = now.filterNot { it.id in was }
-        if (fresh.isEmpty()) return
-
+    private fun reportRemapped(fresh: List<Task>) {
         val ids = fresh.map { it.id }.toSet()
         NotificationGroupManager.getInstance()
             .getNotificationGroup(NOTIFICATION_GROUP)

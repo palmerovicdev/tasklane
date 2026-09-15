@@ -105,6 +105,32 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>1.5.0 &mdash; big lists stop weighing</h3>
+            <ul>
+              <li><b>A command costs eight times less.</b> On a list of 100,000 tasks, a
+                  command went from 4.14&nbsp;ms to 0.51&nbsp;ms. The model now reports what
+                  it changed instead of the service working it out by walking everything
+                  after every keystroke.</li>
+              <li><b>Saving the edit dialog sends one change, not six.</b> Body, state,
+                  priority, tags, due date and anchors used to go as six separate commands,
+                  each producing a new state &mdash; six copies of the list and up to six
+                  tree repaints for one click on <i>Save</i>. Editing a task on a list of
+                  100,000 went from 26&nbsp;ms to 6&nbsp;ms.</li>
+              <li><b>New action: <i>Tasklane: Diagnostics</i>.</b> How many tasks you have,
+                  what they weigh on disk, how many images and how much deduplication saves
+                  you, and the last hour of latencies per operation. One button copies the
+                  whole report, because where it belongs is an issue. It says so plainly
+                  when repainting goes over its budget, since that one happens on the UI
+                  thread.</li>
+              <li>Fixed: <b>the image caches are bounded by memory, not by number of
+                  entries.</b> A 1600px screenshot decoded takes 10.2&nbsp;MB and sixteen
+                  were kept &mdash; up to 164&nbsp;MB of heap with twenty tasks on screen.
+                  The caps are now 64&nbsp;MB and 16&nbsp;MB, actually counted.</li>
+              <li>Fixed: deleting a task that was already gone still rebuilt the list, with
+                  a repaint and a disk write behind it. And accepting the edit dialog
+                  without changing anything still moved the task's modified date.</li>
+            </ul>
+
             <h3>1.4.1 &mdash; the mark reads, and what you copy carries its date</h3>
             <ul>
               <li><b>The inline chip's tooltip shows the task's screenshots.</b> Half a task

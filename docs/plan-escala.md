@@ -583,6 +583,118 @@ Fase 3.
 
 ---
 
+## 1-bis. Resultados de la Fase 1 · CERRADA
+
+**Puerta cerrada.** Con 100.000 tareas, editar una tarea cuesta **5,99 ms de p99 de
+EDT** contra los 16 del presupuesto, y una pulsación de tecla no consume EDT en
+absoluto —la búsqueda corre en `Dispatchers.Default`, ver 1-bis.4—.
+
+### 1-bis.1 El plan ordenaba mal las prioridades
+
+Antes de tocar nada se midió el desglose, porque el §1.5 lista seis sitios O(n) pero no
+dice cuál pesa, y arreglar el que no era es la forma más común de gastar una semana sin
+mover una cifra. A 100.000 tareas:
+
+| Pieza del comando | Coste | Puesto en la lista del §1.5 |
+|---|---:|---|
+| `reduce` — en concreto `mapTask` | **2,86 ms · 69 %** | 5.º de 7 |
+| `reportRemapped` (2 × `flatten`) | 0,54 ms · 13 % | **1.º** |
+| `markDirty` (`equals` de listas) | 0,06 ms · 1,4 % | 2.º |
+| `snapshot.nextOrder` | 0,48 ms | 4.º |
+| `snapshot.task(id)` | 0,26 ms | 3.º |
+
+Y en la tecla, `setCorpus` —el único que el plan menciona— eran 8 ms de los 99: el 8 %.
+Los otros 91 son el escaneo, que es O(n) por diseño hasta la Fase 3.
+
+### 1-bis.2 Qué se hizo, y el resultado
+
+| Sitio | Antes | Después |
+|---|---:|---:|
+| Un comando (p50 / p99) | 4,14 / 16,62 ms | **0,51 / 3,56 ms** |
+| └ el reducer | 2,86 ms | **0,30 ms** |
+| └ `reportRemapped` | 0,54 ms | *desaparece* |
+| └ `markDirty` | 0,06 ms | *desaparece* |
+| `snapshot.task(id)` | 0,26 ms | **0,00 ms** |
+| `snapshot.nextOrder` | 0,48 ms | **0,00 ms** |
+| `LinearScanIndex.setCorpus` | 8,09 ms | **0,00 ms** |
+| **Editar una tarea (p99)** | **26,11 ms** | **5,99 ms** |
+
+- **El reducer devuelve un recibo.** `TaskReducer.plan` produce una `Reduction` con el
+  snapshot, **qué repositorios hay que reescribir** y **qué tareas acaba de aparcar**.
+  El servicio deja de deducirlo: `reportRemapped` ya no aplana el snapshot dos veces y
+  `markDirty` ya no compara listas. En la Fase 3 esta misma forma pasa a llevar
+  `List<Mutation>` (§3.4), así que la costura ya está puesta.
+- **`mapTask` deja de reconstruir la lista.** Era `map` con una lambda por elemento;
+  ahora es buscar el índice y copiar el array de una llamada. Sigue siendo O(n) —eso es
+  la Fase 3— pero la constante baja casi 10×.
+- **`nextOrder` y `task(id)` pasan a O(1).** El techo del orden lo mantiene el reducer
+  (`TasklaneSnapshot.maxOrder`), calculado al cargar y subido al crear. El índice por id
+  es un `lazy`: se construye sólo si alguien pregunta, que en producción es un único
+  sitio —pulsar una marca del editor—.
+- **`setCorpus` cuenta antes de construir.** La poda sólo hace falta cuando hay más
+  documentos cacheados que tareas; sumar el tamaño de un puñado de listas es gratis,
+  construir un `HashSet` con todos los ids del proyecto en cada snapshot no lo era.
+- **Las cachés de imágenes se acotan por bytes** (`ByteBoundedCache`, 64 MB y 16 MB).
+  Es el arreglo de un consumo de hasta **164 MB que existe hoy con veinte tareas**: una
+  captura de 1600 px descodificada a `INT_ARGB` ocupa 10,2 MB, y se cacheaban dieciséis
+  contando *entradas*. Ahora caben seis, que es lo que son 64 MB.
+
+### 1-bis.3 Lo que no estaba en el plan y la puerta obligó a hacer
+
+Medir la puerta tal y como está escrita —«una **edición de tarea**»— dio 26,11 ms de
+p99, por encima del presupuesto. El motivo no estaba en la lista del §1.5:
+
+> `TasklanePanel.editSelected` mandaba **seis comandos seguidos** al aceptar el
+> diálogo: cuerpo, estado, prioridad, etiquetas, vencimiento y anclas.
+
+Seis comandos son seis copias de la lista del repositorio —3,6 MB de basura por
+edición a 100.000 tareas— y, mucho peor, **seis snapshots**, o sea hasta seis
+repintados del árbol por un solo clic en *Guardar*. A 2,1 s de EDT por repintado, el
+coste real de esto era de otro orden que el que la puerta mide.
+
+Se resuelve con un comando único, `TaskCommand.UpdateTask`, que aplica los seis cambios
+sobre una sola copia y produce un solo snapshot. Los comandos sueltos se quedan: *Move
+To*, el distintivo de prioridad y el marcador cambian **una** cosa y para eso son. Lo
+que no tenía sentido era componer una edición con ellos.
+
+Un test fija que `UpdateTask` da **exactamente** la misma tarea que los seis comandos
+que sustituye, `updatedAt` y `completedAt` incluidos: una optimización de este tipo
+sólo vale si el resultado es idéntico.
+
+De paso, el contrato de identidad nuevo —el servicio decide por `===` si hay algo que
+hacer— destapó que `Delete` con un id inexistente reconstruía la lista igualmente: un
+repintado y un volcado a disco por un borrado que no borraba nada.
+
+### 1-bis.4 Qué sigue siendo el techo
+
+El camino del comando **ya no lo es**. Lo que queda, medido a 100.000:
+
+| | Coste | Dónde se arregla |
+|---|---:|---|
+| Repintar el árbol (**en el EDT**) | 2.189 ms | **Fase 2** |
+| Buscar (fuera del EDT) | 91 ms | Fase 3 (FTS5) |
+| Cargar en frío | 3.302 ms | Fase 3 |
+| Volcar el fichero entero | 1.105 ms | Fase 3 |
+| Memoria | 12,9 KB/tarea | Fase 3 |
+
+Una precisión sobre la puerta: la pulsación de tecla **no consume EDT**, porque
+`SearchService` corre con `flowOn(Dispatchers.Default)`. Lo que el usuario nota al
+teclear es la latencia de 91 ms hasta los resultados y, detrás, los 2,2 s de repintado
+— que es de la Fase 2, no de ésta.
+
+### 1-bis.5 Una nota sobre cómo medir
+
+Las cifras de «antes» del §0-bis y las de «después» de aquí **no se pueden restar entre
+sí**: entre unas y otras el portátil estaba en otro estado y el mismo escenario sin
+tocar —el repintado— se movió de 48 a 57 ms sin que nadie cambiara una línea. Se
+comprobó guardando el trabajo y volviendo a medir la base en ese momento.
+
+Toda comparación de este documento a partir de aquí es **lado a lado en la misma
+ejecución**, que es el motivo de que el banco mida los dos caminos de la edición en vez
+de sólo el nuevo.
+
+---
+
 ### Fase 2 — UI acotada *(~2-3 semanas)*
 
 La pieza que hay que hacer sí o sí, venga la lista de donde venga. Después de esta fase,
@@ -768,6 +880,13 @@ Así que hace falta una política, y son tres opciones:
    de ser inmutable — si el usuario mueve el fichero, se pierde.
 
 Se pueden combinar: 1 por defecto, 2 y 3 como ajustes.
+
+**DECIDIDO** (2026-09-15): la **opción 1, cuota con aviso**, y además el tope de
+escalado baja de 1600 px a **400 px**, que no era una de las tres opciones y las mejora
+a todas. Medido en el §0-bis.5: divide el peso de una captura por doce y medio —de
+407 KB a 33 KB— y con él todo el presupuesto de disco. Queda por decidir en la propia
+Fase 4 qué hacer con lo que ya esté guardado a 1600 px; reescalarlo cambiaría su SHA y
+con él todas las referencias de los cuerpos, así que no es un cambio de un bucle.
 
 **Puerta:** con 1M de blobs sintéticos, el arranque no se entera, el GC completo tarda
 menos de 30 s en segundo plano y el desplazamiento por una lista de tarjetas con imagen

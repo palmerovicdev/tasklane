@@ -9,6 +9,54 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [1.5.0] — Las listas grandes dejan de pesar
+
+Dos fases del plan de escala (`docs/plan-escala.md`): el banco de pruebas que convierte
+«va lento» en una cifra, y el primer recorte de trabajo por comando. Nada de esto cambia
+lo que la ventana enseña; cambia lo que cuesta enseñarlo.
+
+### Añadido
+- **Acción *Tasklane: Diagnostics*.** Cuántas tareas hay, cuánto ocupan en disco, cuántas
+  imágenes y de qué peso, cuánto ahorra la deduplicación, y las latencias de la última
+  hora por operación (cargar, comando, guardar, buscar, agrupar, repintar). Se copia con
+  un botón, porque su destino natural es un issue.
+
+  Avisa explícitamente cuando el p99 del repintado se pasa de 16 ms: es el único número
+  del informe con un techo duro, porque ocurre en el hilo de la interfaz.
+- **Banco de escala** (`ScaleBenchmark`, con corpus sintético reproducible). No se
+  ejecuta en el build normal; se lanza con `-PbenchN=<tareas>`. Es lo que cierra las
+  puertas de las fases del plan con cifras medidas en vez de con estimaciones.
+
+### Cambiado
+- **Un comando cuesta ocho veces menos.** Con 100.000 tareas, de 4,14 ms a 0,51 ms. El
+  reducer devuelve ahora qué repositorios tocó y qué tareas aparcó, en vez de que el
+  servicio lo deduzca recorriendo el modelo entero detrás de cada pulsación.
+- **Guardar el diálogo de edición manda un comando, no seis.** Cambiar cuerpo, estado,
+  prioridad, etiquetas, vencimiento y anclas enviaba seis comandos seguidos, y cada uno
+  producía un estado nuevo: seis copias de la lista y hasta seis repintados del árbol por
+  un solo clic en *Guardar*. Editar una tarea sobre 100.000 pasa de 26 ms a 6 ms.
+- **Buscar el siguiente hueco de orden y buscar una tarea por su id pasan a ser
+  instantáneos**, en vez de recorrer la lista entera cada vez.
+- **Escribir en el buscador deja de reconstruir el índice de tareas vivas en cada
+  pulsación.** Sólo se reconstruye cuando hay algo que podar.
+
+### Corregido
+- **Las cachés de imágenes se acotan por memoria, no por número de entradas.** Una
+  captura de 1600 px descodificada ocupa 10,2 MB, y se guardaban dieciséis: hasta 164 MB
+  de memoria con veinte tareas en la lista. Ahora el tope son 64 MB de imágenes
+  descodificadas y 16 MB de escaladas, contados de verdad.
+- Borrar una tarea que ya no existía reconstruía la lista igualmente, con su repintado y
+  su escritura a disco detrás.
+- Aceptar el diálogo de edición sin cambiar nada movía la fecha de modificación de la
+  tarea.
+
+### Interno
+- Los tests se ejecutan en CI —en Linux, Windows y macOS, y contra la versión mínima de
+  plataforma soportada—, cosa que hasta ahora no ocurría en ningún sitio.
+- El almacén de la Fase 3 usará el SQLite que **ya trae la plataforma**
+  (`org.jetbrains.sqlite`, con FTS5 compilado), así que no habrá que empaquetar ninguna
+  dependencia nativa. Ver `docs/plan-escala.md` §0-bis.1.
+
 ## [1.4.1] — La marca se lee, y lo copiado lleva fecha
 
 Tres cosas de las que se usan a diario y estorbaban en silencio: una marca inline pegada

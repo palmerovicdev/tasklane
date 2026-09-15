@@ -968,14 +968,22 @@ internal class TasklanePanel(
             task.anchors,
         )
         if (!dialog.showAndGet()) return
-        with(service) {
-            apply(TaskCommand.UpdateBody(task.repo, task.id, dialog.body))
-            apply(TaskCommand.ChangeState(task.repo, task.id, dialog.stateId))
-            apply(TaskCommand.ChangePriority(task.repo, task.id, dialog.priorityId))
-            apply(TaskCommand.SetTags(task.repo, task.id, dialog.tags))
-            apply(TaskCommand.SetDueDate(task.repo, task.id, dialog.dueDate))
-            apply(TaskCommand.SetAnchors(task.repo, task.id, dialog.anchors))
-        }
+        // UN comando y no seis. Hasta la Fase 1 esto mandaba uno por campo, y cada uno
+        // producía un snapshot: seis copias de la lista del repositorio y hasta seis
+        // repintados del árbol por un solo clic en *Guardar*. Ver
+        // [TaskCommand.UpdateTask].
+        service.apply(
+            TaskCommand.UpdateTask(
+                repo = task.repo,
+                id = task.id,
+                body = dialog.body,
+                stateId = dialog.stateId,
+                priorityId = dialog.priorityId,
+                tags = dialog.tags,
+                dueDate = java.util.Optional.ofNullable(dialog.dueDate),
+                anchors = dialog.anchors,
+            ),
+        )
     }
 
     /**

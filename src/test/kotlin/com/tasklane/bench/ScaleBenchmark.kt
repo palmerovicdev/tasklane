@@ -118,31 +118,159 @@ class ScaleBenchmark {
     }
 
     /**
-     * **§1.5 — seis pasadas O(n) por pulsación de tecla.** Se mide un comando
-     * completo tal y como lo ejecuta `TaskService.apply`: el reducer, más las dos
-     * pasadas de `reportRemapped` y la comparación de `markDirty`.
+     * **§1.5 — el comando completo**, tal y como lo ejecuta hoy `TaskService.apply`:
+     * `reducer.plan` y el consumo de su recibo.
      *
-     * Las tres líneas de contabilidad están copiadas de `TaskService` a propósito y no
-     * extraídas: lo que se mide tiene que ser lo que el servicio hace hoy, no una
-     * versión limpia de ello. La Fase 1 las hace desaparecer.
+     * Antes de la Fase 1 esto eran tres cosas: el reducer, más dos `flatten()` del
+     * snapshot entero para averiguar qué tareas se habían aparcado, más una
+     * comparación estructural de las listas de todos los repositorios. Ahora el
+     * reducer lo dice al devolver.
      */
     @Test
     fun `un comando`() {
         val before = loaded()
         val victim = before.activeTasks[before.activeTasks.size / 2]
 
-        val result = Bench.measure("un comando: reduce + reportRemapped + markDirty", runs = 20, warmup = 5) {
-            val after = reducer.reduce(before, TaskCommand.ToggleComplete(repo, victim.id))
-
-            // --- TaskService.reportRemapped: flatten() del snapshot DOS veces -------
-            val was = TaskReducer.orphans(before.tasksByRepo.values.flatten()).map { it.id }.toSet()
-            val now = TaskReducer.orphans(after.tasksByRepo.values.flatten())
-            now.filterNot { it.id in was }
-
-            // --- TaskService.markDirty: comparación estructural de la lista --------
-            after.tasksByRepo.keys.filter { key -> after.tasksOf(key) != before.tasksOf(key) }
+        val result = Bench.measure("un comando: plan + consumir el recibo", runs = 20, warmup = 5) {
+            val reduction = reducer.plan(before, TaskCommand.ToggleComplete(repo, victim.id))
+            assertTrue(reduction.dirty.size == 1 && reduction.remapped.isEmpty())
         }
         record(result)
+    }
+
+    /**
+     * **La puerta de la Fase 1, tal y como está escrita**: «una edición de tarea por
+     * debajo de 16 ms de EDT».
+     *
+     * Y una edición no es un comando: `TasklanePanel.editSelected` manda **seis**
+     * seguidos al aceptar el diálogo —cuerpo, estado, prioridad, etiquetas,
+     * vencimiento y anclas—, todos desde el EDT. Medir uno solo y dar la puerta por
+     * cerrada sería medir la sexta parte del problema.
+     */
+    @Test
+    fun `editar una tarea`() {
+        val start = loaded()
+        val victim = start.activeTasks[start.activeTasks.size / 2]
+        val otroEstado = config.states.first { it.id != victim.stateId }.id
+        val otraPrioridad = config.priorities.first { it.id != victim.priorityId }.id
+
+        var flip = false
+        // Los dos caminos, medidos uno al lado del otro: el que había hasta la Fase 1
+        // y el que hay ahora. Es la única forma de que la cifra signifique algo.
+        val seis = Bench.measureOnEdt("editar · seis comandos (como hasta la Fase 1)", runs = 10, warmup = 3) {
+            flip = !flip
+            // Se alterna para que ningún comando se salga por «ya estaba así»: una
+            // edición que no cambia nada es barata por razones que no queremos medir.
+            var snapshot = start
+            for (command in listOf(
+                TaskCommand.UpdateBody(repo, victim.id, if (flip) "cuerpo nuevo" else "otro cuerpo"),
+                TaskCommand.ChangeState(repo, victim.id, if (flip) otroEstado else victim.stateId),
+                TaskCommand.ChangePriority(repo, victim.id, if (flip) otraPrioridad else victim.priorityId),
+                TaskCommand.SetTags(repo, victim.id, if (flip) listOf("uno") else listOf("dos")),
+                TaskCommand.SetDueDate(repo, victim.id, if (flip) SyntheticCorpus.REFERENCE_NOW else null),
+                TaskCommand.SetAnchors(repo, victim.id, emptyList()),
+            )) {
+                snapshot = reducer.plan(snapshot, command).snapshot
+            }
+            assertTrue(snapshot !== start)
+        }
+        record(seis)
+
+        val uno = Bench.measureOnEdt("editar · un UpdateTask (lo que hace el diálogo)", runs = 10, warmup = 3) {
+            flip = !flip
+            val reduction = reducer.plan(
+                start,
+                TaskCommand.UpdateTask(
+                    repo = repo,
+                    id = victim.id,
+                    body = if (flip) "cuerpo nuevo" else "otro cuerpo",
+                    stateId = if (flip) otroEstado else victim.stateId,
+                    priorityId = if (flip) otraPrioridad else victim.priorityId,
+                    tags = if (flip) listOf("uno") else listOf("dos"),
+                    dueDate = java.util.Optional.ofNullable(
+                        if (flip) SyntheticCorpus.REFERENCE_NOW else null,
+                    ),
+                    anchors = emptyList(),
+                ),
+            )
+            assertTrue(reduction.snapshot !== start)
+        }
+        record(uno)
+    }
+
+    /**
+     * El desglose del comando, pieza a pieza. El §1.5 lista seis sitios O(n) pero no
+     * dice cuál pesa, y arreglar el que no era es la forma más común de gastar una
+     * semana sin mover una cifra. Aquí se ve cuál era: el `reduce`.
+     *
+     * Las dos últimas líneas miden lo que el §1.5 llamaba «escaneo lineal» y
+     * «`maxOfOrNull` sobre todo el repo». Desde la Fase 1 son búsquedas en un mapa y
+     * por eso su cifra deja de crecer con N — que es justamente lo que hay que poder
+     * comprobar.
+     */
+    @Test
+    fun `desglose de un comando`() {
+        val before = loaded()
+        val victim = before.activeTasks[before.activeTasks.size / 2]
+        val command = TaskCommand.ToggleComplete(repo, victim.id)
+
+        record(Bench.measure("  desglose · plan (reducer entero)", runs = 20, warmup = 5) {
+            reducer.plan(before, command)
+        })
+        // Lo que `TaskService.apply` hace con el recibo: descontar los repositorios en
+        // solo lectura y mirar si hay algo que anunciar. Antes esto eran dos `flatten()`
+        // del snapshot entero más un `equals` de listas.
+        val readOnly = emptySet<com.tasklane.domain.model.RepoKey>()
+        record(
+            Bench.measure("  desglose · consumir el recibo", runs = 20, warmup = 5) {
+                val reduction = reducer.plan(before, command)
+                assertTrue(reduction.dirty.none { it in readOnly } && reduction.remapped.isEmpty())
+            },
+        )
+        // El índice por id se construye la primera vez que alguien pregunta, así que se
+        // fuerza fuera de la medida: lo que interesa es cuánto cuesta preguntar, no
+        // cuánto costó construirlo.
+        before.task(victim.id)
+        record(
+            Bench.measure("  desglose · snapshot.task(id)", runs = 20, warmup = 5) {
+                assertTrue(before.task(victim.id) != null)
+            },
+        )
+        record(
+            Bench.measure("  desglose · snapshot.nextOrder", runs = 20, warmup = 5) {
+                assertTrue(before.nextOrder(repo) > 0)
+            },
+        )
+        record(
+            Bench.measure("  desglose · crear una tarea", runs = 20, warmup = 5) {
+                reducer.plan(before, TaskCommand.Create(repo, "una tarea nueva"))
+            },
+        )
+    }
+
+    /**
+     * Y el desglose de la tecla. `setCorpus` recorre el corpus entero en cada snapshot
+     * (§1.5) y `search` lo recorre otra vez; saber cuál de los dos manda decide si la
+     * Fase 1 toca el índice o no.
+     */
+    @Test
+    fun `desglose de una tecla`() {
+        val snapshot = loaded()
+        val index = LinearScanIndex()
+        index.setCorpus(snapshot)
+        index.search(QueryParser.parse("token"), SearchScope.Repo(repo))
+
+        record(Bench.measure("  desglose · setCorpus", runs = 20, warmup = 5) { index.setCorpus(snapshot) })
+        record(
+            Bench.measure("  desglose · search (texto libre)", runs = 20, warmup = 5) {
+                index.search(QueryParser.parse("token cache"), SearchScope.Repo(repo))
+            },
+        )
+        record(
+            Bench.measure("  desglose · search (solo operadores)", runs = 20, warmup = 5) {
+                index.search(QueryParser.parse("is:done #api"), SearchScope.Repo(repo))
+            },
+        )
     }
 
     /**

@@ -9,6 +9,7 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import java.time.Instant
+import java.util.Optional
 
 /**
  * Todas las mutaciones posibles del modelo. `sealed` a propósito: añadir un caso
@@ -35,6 +36,35 @@ sealed interface TaskCommand {
     ) : RepoScoped
 
     data class UpdateBody(override val repo: RepoKey, val id: TaskId, val body: String) : RepoScoped
+
+    /**
+     * Lo que el diálogo de edición devuelve al aceptar: **todo a la vez**.
+     *
+     * Existe porque no hacerlo era caro de dos maneras distintas. `TaskEditDialog`
+     * puede cambiar seis cosas de una tarea, y hasta la Fase 1 se enviaban seis
+     * comandos seguidos desde el EDT. Eso son seis copias de la lista del repositorio
+     * —a 100.000 tareas, 3,6 MB de basura por edición— y, peor, **seis snapshots**, o
+     * sea hasta seis repintados del árbol por un solo clic en *Guardar*.
+     *
+     * Los comandos sueltos siguen existiendo y siguen haciendo falta: *Move To*,
+     * el distintivo de prioridad y el marcador cambian **una** cosa, y para eso son.
+     * Lo que no tenía sentido era componer una edición con ellos.
+     *
+     * Cada campo es opcional con el sentido de «no lo toques»: [dueDate] es
+     * `Optional`-como-envoltorio y no un `Instant?` porque aquí `null` significaría
+     * las dos cosas a la vez —«no lo toques» y «quítale la fecha»— y quitar una fecha
+     * de vencimiento tiene que poder pedirse.
+     */
+    data class UpdateTask(
+        override val repo: RepoKey,
+        val id: TaskId,
+        val body: String? = null,
+        val stateId: StateId? = null,
+        val priorityId: PriorityId? = null,
+        val tags: List<String>? = null,
+        val dueDate: Optional<Instant>? = null,
+        val anchors: List<CodeAnchor>? = null,
+    ) : RepoScoped
 
     data class ChangeState(override val repo: RepoKey, val id: TaskId, val stateId: StateId) : RepoScoped
 

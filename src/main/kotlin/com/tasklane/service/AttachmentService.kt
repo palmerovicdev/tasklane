@@ -40,12 +40,13 @@ class AttachmentService(private val project: Project) {
      * Imágenes ya decodificadas y sus versiones escaladas.
      *
      * Con caché porque el renderer de un inlay se ejecuta en cada repintado del
-     * editor: sin esto, mover el cursor por el texto releería el PNG del disco. Es
-     * una LRU acotada y no un mapa a secas porque una tarea con muchas capturas
-     * podría, si no, quedarse con todas en memoria mientras el diálogo está abierto.
+     * editor: sin esto, mover el cursor por el texto releería el PNG del disco.
+     *
+     * **Acotadas por bytes y no por número de entradas**: ver [ByteBoundedCache], que
+     * es donde está el porqué.
      */
-    private val decoded = LruCache<Key, Holder>(DECODED_CACHE)
-    private val scaled = LruCache<ScaledKey, BufferedImage>(SCALED_CACHE)
+    private val decoded = ByteBoundedCache<Key, Holder>(DECODED_BYTES) { it.bytes }
+    private val scaled = ByteBoundedCache<ScaledKey, BufferedImage>(SCALED_BYTES, ::imageBytes)
 
     // ------------------------------------------------------------- escritura
 
@@ -187,34 +188,29 @@ class AttachmentService(private val project: Project) {
     private data class ScaledKey(val repo: RepoKey, val id: AttachmentId, val width: Int)
 
     /** Envoltorio para poder cachear también el «no está»: si no, se releería siempre. */
-    private class Holder(val image: BufferedImage?)
-
-    /**
-     * LRU mínima sobre [LinkedHashMap] en modo acceso. Sincronizada porque el inlay
-     * pinta en el EDT y la carga de una imagen llega de un hilo de fondo.
-     */
-    private class LruCache<K : Any, V : Any>(private val capacity: Int) {
-        private val map = object : LinkedHashMap<K, V>(16, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>): Boolean = size > capacity
-        }
-
-        @Synchronized
-        fun get(key: K): V? = map[key]
-
-        @Synchronized
-        fun put(key: K, value: V) {
-            map[key] = value
-        }
-
-        @Synchronized
-        fun remove(key: K) {
-            map.remove(key)
-        }
+    private class Holder(val image: BufferedImage?) {
+        /** Un «no está» no ocupa nada, pero tiene que poder entrar en la caché igual. */
+        val bytes: Long get() = image?.let(::imageBytes) ?: 0L
     }
 
     companion object {
-        private const val DECODED_CACHE = 16
-        private const val SCALED_CACHE = 32
+        /**
+         * Lo que puede ocupar el conjunto de imágenes descodificadas.
+         *
+         * 64 MB es el valor del §2.6, y con el tope de 400 px de la Fase 4 —640 KB por
+         * imagen— dan para un centenar largo: mucho más de lo que cabe en una lista.
+         * Con las capturas de 1600 px que puede haber ya en disco son seis, que es
+         * exactamente el punto: seis imágenes grandes ocupan lo que ocupan, y antes
+         * cabían dieciséis sin que nadie llevara la cuenta.
+         */
+        private const val DECODED_BYTES = 64L * 1024 * 1024
+
+        /** Las escaladas son las que se pintan, y son pequeñas por definición. */
+        private const val SCALED_BYTES = 16L * 1024 * 1024
+
+        /** `INT_ARGB`: cuatro bytes por píxel. No hay que estimar nada. */
+        private fun imageBytes(image: BufferedImage): Long =
+            image.width.toLong() * image.height.toLong() * 4L
 
         fun getInstance(project: Project): AttachmentService = project.service()
     }
