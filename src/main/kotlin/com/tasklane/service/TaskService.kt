@@ -1,6 +1,16 @@
 package com.tasklane.service
 
 import com.intellij.notification.NotificationAction
+import com.intellij.ide.actions.RevealFileAction
+import com.intellij.openapi.project.ProjectManager
+import com.tasklane.data.sqlite.StoreRecovery
+import com.tasklane.data.store.LoadAlert
+import com.tasklane.domain.query.TaskQuery
+import com.tasklane.search.ScoredTask
+import com.tasklane.search.SearchCorpus
+import com.tasklane.search.SearchScope
+import java.text.DateFormat
+import java.util.Date
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
@@ -108,13 +118,38 @@ class TaskService(
      * `tasklane.db`, y si el marcador no estuviera ya puesto, la base —y su diario, y
      * sus adjuntos— acabarían en el `git status` del usuario.
      */
-    private val db: TaskDb? = layout?.let {
+    private val opening: TaskDb.Opening? = layout?.let {
         runCatching { it.ensureIgnored() }.onFailure { e ->
             thisLogger().warn("Tasklane: no se pudo escribir el .gitignore de los datos", e)
         }
-        TaskDb.open(it.root)
+        TaskDb.openChecked(it.root)
     }
-    private val store: TaskStore? = db?.let(::TaskStore)
+
+    /**
+     * La base abierta. **`var` desde la Fase 6**: una base dañada no se abre, se recupera en
+     * segundo plano —ver [recoverStore]— y se pone aquí cuando está entera. Hasta entonces el
+     * servicio funciona como sin almacén y en solo lectura. Se asigna una sola vez; quien la
+     * usa la copia a una variable local, como ya hacía.
+     */
+    @Volatile
+    private var db: TaskDb? = (opening as? TaskDb.Opening.Ready)?.db
+
+    @Volatile
+    private var store: TaskStore? = db?.let(::TaskStore)
+
+    /** La base se está recuperando (§6.2): nada se escribe hasta que termine. */
+    @Volatile
+    private var recovering: Boolean = opening is TaskDb.Opening.Damaged
+
+    /**
+     * Se encontró daño **con la base abierta** —la comprobación tras un cierre sucio, o un
+     * `SQLITE_CORRUPT` al escribir—. Desde ese momento no se escribe: lo que se escribiera en
+     * un fichero dañado se perdería con él, y la recuperación de la apertura siguiente rescata
+     * lo que haya hasta aquí. Ver [markDamaged].
+     */
+    @Volatile
+    private var damaged: Boolean = false
+
     private val reducer = TaskReducer()
 
     /**
@@ -124,7 +159,8 @@ class TaskService(
      * tiene la base. Sin base —un *default project*, un test ligero— se cae al escaneo
      * lineal sobre un corpus vacío, que es exactamente «no hay nada que buscar».
      */
-    internal val searchIndex: TaskSearchIndex = db?.let { Fts5Index(it.reader) } ?: LinearScanIndex()
+    private val index = LateIndex(db?.let { Fts5Index(it.reader) } ?: LinearScanIndex())
+    internal val searchIndex: TaskSearchIndex get() = index
     private val configService = TasklaneConfigService.getInstance(project)
     private val registry = RepositoryRegistry.getInstance(project)
     private val workspace = TasklaneWorkspaceService.getInstance(project)
@@ -187,6 +223,8 @@ class TaskService(
         // La selección guardada se restaura ANTES de que llegue el catálogo: así la
         // tool window no llega a pintar el repositorio equivocado.
         workspace.selectedRepo?.let { apply(TaskCommand.SelectRepo(RepoKey(it))) }
+        // Una base dañada se recupera antes de nada, en segundo plano. Ver [recoverStore].
+        if (recovering) scope.launch(Dispatchers.IO) { recoverStore() }
         // La configuración entra en el modelo como un comando más. El primer valor
         // que emite el StateFlow es el que ya se sembró arriba, así que es inocuo.
         scope.launch { configService.config.collect { apply(TaskCommand.ConfigChanged(it)) } }
@@ -258,7 +296,7 @@ class TaskService(
         val view = reducer.view(before, command)
         val store = store
 
-        if (store == null || store.readOnly || isReadOnly(command)) {
+        if (store == null || store.readOnly || recovering || damaged || isReadOnly(command)) {
             if (view !== before) _snapshot.value = view
             return
         }
@@ -309,7 +347,7 @@ class TaskService(
         else -> false
     }
 
-    fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly || store?.readOnly == true
+    fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly || store?.readOnly == true || recovering || damaged
 
     // ------------------------------------------------------------- lectura
 
@@ -431,6 +469,7 @@ class TaskService(
         val store = store ?: return false
         if (store.readOnly || isReadOnly(repo) || repo in importing) return false
         val layout = layout ?: return false
+        if (recoveryHolds(store, layout)) return false
         return store.isImported(repo) || !Files.exists(layout.tasksFile(repo))
     }
 
@@ -712,6 +751,9 @@ class TaskService(
                 store.forgetChore(StoreMaintenance.INTEGRITY_PENDING)
             }
         }.onFailure { thisLogger().warn("Tasklane: no se pudo apuntar la comprobación de la base", it) }
+        // Hasta la 2.3 esto sólo avisaba. Desde la Fase 6 se deja de escribir y la apertura
+        // siguiente la recupera.
+        problems.firstOrNull()?.let(::markDamaged)
         return Integrity(problems)
     }
 
@@ -725,7 +767,9 @@ class TaskService(
     internal fun backupIfDue(): Backup? {
         val db = db ?: return null
         val store = store ?: return null
-        if (store.readOnly) return null
+        // Una base bajo sospecha no se copia: la copia sustituye a la anterior, y es de la
+        // anterior de la que va a tirar la recuperación.
+        if (store.readOnly || damaged || recovering) return null
         val target = backupFile() ?: return null
 
         val backupAt = runCatching { Files.getLastModifiedTime(target).toMillis() }.getOrNull()
@@ -743,13 +787,192 @@ class TaskService(
         return Backup(target, db.backupTo(target))
     }
 
-    /** `tasklane.db.backup`. Ver [StoreMaintenance.BACKUP_SUFFIX]. */
-    fun backupFile(): Path? = db?.file?.let { it.resolveSibling("${it.fileName}${StoreMaintenance.BACKUP_SUFFIX}") }
+    /**
+     * `tasklane.db.backup`. Ver [StoreMaintenance.BACKUP_SUFFIX]. Sale del directorio y no de
+     * la base abierta: la recuperación la necesita justo cuando no hay base abierta.
+     */
+    fun backupFile(): Path? = layout?.root?.resolve("${TaskDb.FILE_NAME}${StoreMaintenance.BACKUP_SUFFIX}")
 
     /** La última comprobación de integridad que terminó, y si hay una pendiente. Para el informe. */
     fun integrityState(): Pair<Chore?, Boolean> =
         store?.let { it.chore(StoreMaintenance.INTEGRITY) to (it.chore(StoreMaintenance.INTEGRITY_PENDING) != null) }
             ?: (null to false)
+
+    /** Cómo está la recuperación de la base, para el informe. */
+    internal data class RecoveryState(
+        /** Cuándo se recuperó por última vez, o `null` si nunca hizo falta. */
+        val recoveredAt: Long?,
+        /** La última recuperación tuvo huecos y su fichero dañado sigue ahí: el recolector espera. */
+        val holdingImages: Boolean,
+        /** Hay daño visto y la recuperación está pendiente de reabrir, o en marcha. */
+        val pending: Boolean,
+    )
+
+    internal fun recoveryState(): RecoveryState {
+        val store = store
+        val layout = layout
+        return RecoveryState(
+            recoveredAt = store?.chore(StoreRecovery.RECOVERED)?.at,
+            holdingImages = store != null && layout != null && recoveryHolds(store, layout),
+            pending = recovering || damaged,
+        )
+    }
+
+    // ------------------------------------------------------ recuperación (Fase 6)
+
+    /**
+     * Recupera la base dañada y la pone en su sitio. **En segundo plano y sin cancelar**:
+     * son sentencias que la plataforma no deja interrumpir, y una recuperación a medias se
+     * rehace entera en la apertura siguiente —ver `StoreRecovery`—, así que cancelarla sólo
+     * serviría para dejar el proyecto en solo lectura más tiempo.
+     */
+    private fun recoverStore() {
+        val layout = layout ?: return
+        notify(
+            TasklaneBundle.message("recovery.started.title"),
+            TasklaneBundle.message("recovery.started.content"),
+            NotificationType.WARNING,
+        )
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(project, TasklaneBundle.message("recovery.progress"), false) {
+                private var outcome: StoreRecovery.Outcome? = null
+                private var failure: Throwable? = null
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = true
+                    try {
+                        outcome = StoreRecovery.recover(layout.root, backupFile()) { phase ->
+                            indicator.text = TasklaneBundle.message("recovery.phase.$phase")
+                        }
+                        when (val reopened = TaskDb.openChecked(layout.root)) {
+                            is TaskDb.Opening.Ready -> bind(reopened.db)
+                            is TaskDb.Opening.Damaged -> error("la base recuperada vuelve a estar dañada: ${reopened.reason}")
+                            is TaskDb.Opening.Unavailable -> throw reopened.error
+                        }
+                    } catch (e: Throwable) {
+                        if (e is ControlFlowException) throw e
+                        failure = e
+                    }
+                }
+
+                override fun onFinished() {
+                    failure?.let {
+                        thisLogger().error("Tasklane: no se pudo recuperar la base de tareas", it)
+                        notify(
+                            TasklaneBundle.message("recovery.failed.title"),
+                            TasklaneBundle.message("recovery.failed.content", it.message.orEmpty(), layout.root),
+                            NotificationType.ERROR,
+                        )
+                        return
+                    }
+                    outcome?.let(::reportRecovery)
+                }
+            },
+        )
+    }
+
+    /** Pone una base ya abierta y sana en el servicio. Una sola vez: ver [db]. */
+    private fun bind(opened: TaskDb) {
+        synchronized(gate) {
+            db = opened
+            store = TaskStore(opened)
+            index.bind(Fts5Index(opened.reader))
+            recovering = false
+            _snapshot.value = _snapshot.value.touched()
+        }
+        importPending()
+    }
+
+    /**
+     * Lo que salió de la recuperación, con el mismo criterio con el que se avisaba de un
+     * `tasks.xml` ilegible —ver [StoreRecovery.Outcome.alert]—.
+     */
+    private fun reportRecovery(outcome: StoreRecovery.Outcome) {
+        thisLogger().warn("Tasklane: base de tareas recuperada: $outcome")
+        val where = outcome.quarantined?.toString() ?: TasklaneBundle.message("recovery.noFile")
+        val (title, content, type) = when (outcome.alert()) {
+            is LoadAlert.Repaired -> Triple(
+                TasklaneBundle.message("recovery.repaired.title"),
+                TasklaneBundle.message("recovery.repaired.content", outcome.tasks, where),
+                NotificationType.INFORMATION,
+            )
+            is LoadAlert.Lost -> Triple(
+                TasklaneBundle.message("recovery.lost.title"),
+                TasklaneBundle.message("recovery.lost.content", where),
+                NotificationType.ERROR,
+            )
+            else -> {
+                val backup = outcome.backupAt?.let {
+                    TasklaneBundle.message("recovery.fromBackup", outcome.restored, DateFormat.getDateTimeInstance().format(Date(it)))
+                } ?: TasklaneBundle.message("recovery.noBackup")
+                val partial = if (outcome.partial > 0) " " + TasklaneBundle.message("recovery.partial", outcome.partial) else ""
+                Triple(
+                    TasklaneBundle.message("recovery.recovered.title"),
+                    TasklaneBundle.message("recovery.recovered.content", outcome.salvaged, backup, partial, where),
+                    NotificationType.WARNING,
+                )
+            }
+        }
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(title, content, type)
+            .apply {
+                outcome.quarantined?.let { file ->
+                    addAction(NotificationAction.createSimple(RevealFileAction.getActionName()) { RevealFileAction.openFile(file) })
+                }
+            }
+            .notify(project)
+    }
+
+    /**
+     * Daño visto **con la base abierta**. Se deja de escribir, se apunta para que la apertura
+     * siguiente la recupere y se ofrece reabrir ya. Una vez por sesión.
+     *
+     * No se recupera en caliente, y es a propósito: la conexión la tienen la lista, la
+     * búsqueda y las marcas del editor, y cambiarles el fichero por debajo es mucho más
+     * frágil que reabrir el proyecto, que es exactamente el camino que ya está probado.
+     */
+    internal fun markDamaged(reason: String) {
+        val layout = layout ?: return
+        synchronized(gate) {
+            if (damaged) return
+            damaged = true
+            _snapshot.value = _snapshot.value.touched()
+        }
+        runCatching { StoreRecovery.markDamaged(layout.root, reason) }
+            .onFailure { thisLogger().warn("Tasklane: no se pudo apuntar que la base está dañada", it) }
+        thisLogger().warn("Tasklane: la base de tareas está dañada: $reason")
+
+        val backup = backupFile()?.takeIf { Files.exists(it) }
+        val where = backup?.let {
+            TasklaneBundle.message("notification.integrity.backup", DateFormat.getDateTimeInstance().format(Date(Files.getLastModifiedTime(it).toMillis())))
+        } ?: TasklaneBundle.message("notification.integrity.noBackup")
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(
+                TasklaneBundle.message("notification.integrity.title"),
+                TasklaneBundle.message("notification.integrity.content", reason, where),
+                NotificationType.ERROR,
+            )
+            .addAction(
+                NotificationAction.createSimpleExpiring(TasklaneBundle.message("notification.integrity.repair")) {
+                    ProjectManager.getInstance().reloadProject(project)
+                },
+            )
+            .notify(project)
+    }
+
+    /**
+     * ¿Hay que dejar de recolectar imágenes por una recuperación con huecos? Mientras su
+     * fichero dañado siga en disco, sí —ver [StoreRecovery.INCOMPLETE]—. Cuando el usuario lo
+     * borra, se olvida la marca y el recolector vuelve.
+     */
+    private fun recoveryHolds(store: TaskStore, layout: StorageLayout): Boolean {
+        val incomplete = store.chore(StoreRecovery.INCOMPLETE) ?: return false
+        if (Files.exists(StoreRecovery.quarantineOf(layout.root, incomplete.at))) return true
+        if (!store.readOnly) runCatching { store.write { store.forgetChore(StoreRecovery.INCOMPLETE) } }
+        return false
+    }
 
     private fun modified(file: Path): Long = runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0L)
 
@@ -940,6 +1163,11 @@ class TaskService(
     }
 
     private fun report(error: Throwable) {
+        if (StoreRecovery.isCorruption(error)) {
+            thisLogger().warn("Tasklane: la base de tareas falló por daño al escribir", error)
+            markDamaged(error.message ?: error.javaClass.simpleName)
+            return
+        }
         thisLogger().error("Tasklane: fallo al escribir en la base de tareas", error)
         notify(
             TasklaneBundle.message("notification.save.title"),
@@ -978,4 +1206,31 @@ class TaskService(
 
         fun getInstance(project: Project): TaskService = project.service()
     }
+}
+
+/**
+ * El índice de búsqueda que el servicio entrega, **con su implementación puesta después**.
+ *
+ * `SearchService` pide el índice una vez al crearse. Con una base que se está recuperando no
+ * hay todavía de dónde leer, así que recibe esto: busca sobre nada hasta que la base está en
+ * su sitio, y a partir de ahí delega en `Fts5Index` con el último contexto que se le dio.
+ */
+private class LateIndex(initial: TaskSearchIndex) : TaskSearchIndex {
+    @Volatile
+    private var target: TaskSearchIndex = initial
+
+    @Volatile
+    private var corpus: SearchCorpus? = null
+
+    fun bind(index: TaskSearchIndex) {
+        corpus?.let(index::setCorpus)
+        target = index
+    }
+
+    override fun setCorpus(corpus: SearchCorpus) {
+        this.corpus = corpus
+        target.setCorpus(corpus)
+    }
+
+    override fun search(query: TaskQuery, scope: SearchScope): List<ScoredTask> = target.search(query, scope)
 }

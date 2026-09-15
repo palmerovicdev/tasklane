@@ -10,202 +10,299 @@
          imagenes rotas. Ver README, «Publicar». -->
     <description><![CDATA[
         <p>
-            <b>Tasklane</b> keeps a to-do list inside your project, one per repository,
-            stored as plain XML next to the code. No account, no server, no network call:
-            the tasks live in <code>.idea/tasklane/</code> and are yours to commit or ignore.
+            <b>Tasklane</b> keeps a to-do list inside your project, one per repository, next to
+            the code it talks about. No account, no server, no network call: tasks live in a
+            local database under <code>.idea/tasklane/</code>, which the plugin keeps out of
+            version control for you, while the workflow you configure &mdash; states and
+            priorities &mdash; can be committed and shared with your team.
         </p>
 
-        <p>It is built for the notes you take <i>while</i> you code — the ones that never
-            survive the trip to an external tracker.</p>
+        <p>It is built for the notes you take <i>while</i> you code &mdash; the ones that never
+            survive the trip to an external tracker &mdash; and it stays fast with a million of
+            them.</p>
 
         <p>
             <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/tool-window.png" alt="The Tasklane tool window: states as tabs with live counts, a search field, and one card per task with its priority stripe" width="330"/>
             <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/new-task.png" alt="The new-task dialog: a Markdown body with a formatting toolbar, a drop zone for images, and fields for state, priority, due date and tags" width="440"/>
         </p>
 
-        <h3>In the tool window</h3>
+        <h3>The tool window</h3>
         <ul>
-            <li><b>States are tabs</b>, each with a live count. The count comes from the same
-                pass that fills the list, so it never claims three over a list of two: the
-                search and the view filter are already in it. Every tab keeps its own
-                selection and its own folded groups, and the one you left open comes back
-                when you reopen the project.</li>
-            <li><b>A card per task.</b> A priority stripe down its left edge, the title over
-                up to three lines, one line of the body, and badges for priority, due date,
-                tags, links, images and date. Title and description render Markdown in
-                place: <b>bold</b>, <i>italics</i>, <code>code</code> and strikethrough show
-                their style, not their marks.</li>
-            <li><b>Expand a card</b> with the chevron on its right to read the whole task
-                without leaving the list — the full title, every line of the body, and the
-                images it references, each one after the line that names it. Click an image
-                to open it full size. The chevron only appears when the card is actually
-                hiding something.</li>
-            <li><b>Select card text with the mouse</b> and copy it with <code>⌘C</code> /
-                <code>Ctrl+C</code>. <code>Escape</code> clears the selection. Both keys stay
-                out of the way while nothing is selected.</li>
-            <li><b>Open links with a single click</b>, straight from the card — in the title
-                or anywhere in the body, even in its greyed-out lines. Plain URLs,
-                <code>www.</code> addresses and Markdown links are all recognised, shortened
-                for display and opened in full. Links inside code spans are examples, not
-                destinations, and stay untouched.</li>
-            <li><b>Change the priority from the card</b>: click its priority badge for the
-                list of priorities with their colours, or use <i>Priority ▸</i> in the
-                context menu to change every selected task at once.</li>
-            <li><b>Move tasks between states</b> with <i>Move To ▸</i>, or one tab at a time
-                with <code>⇧⌥←/→</code> — no dialog either way. <code>⌥←/→</code> just
-                switches the tab you are looking at.</li>
-            <li><b>Bookmark</b> a task from its own row to pin it to the top of its group,
-                whatever its priority: bookmarking is exactly saying "do not let me lose
-                this".</li>
-            <li><b>Group by</b> date, priority or tag — or not at all. Grouping by date gives
-                <i>Today</i>, then <b>one section per day that has tasks</b>, each with its
-                date — <i>Sep 14</i>, <i>Sep 10, 2025</i> — and <i>No date</i> last, against
-                whichever date the state anchors on. Every header folds with a click or with
-                <code>←</code>/<code>→</code>, and both the grouping and what you folded are
-                remembered per state.</li>
-            <li><b>Filter the view</b> down to open, overdue or bookmarked tasks. It stacks
-                with the search instead of replacing it, and clearing the search leaves it
-                alone.</li>
-            <li><b>Search that understands operators</b> and reads the whole body, not just
-                the row, ignoring case and accents in both directions:
-                <code>state:</code>, <code>p:</code>, <code>repo:</code>, <code>is:</code>,
-                <code>has:link|image|code</code>, <code>file:</code> and <code>#tag</code>.
-                Free text asks for every term; a half-typed operator is ignored rather than
-                emptying the list.</li>
-            <li><b>One list per repository.</b> Open several Git repositories in the same
-                window and each keeps its own tasks, with a selector to switch — plus a
-                toolbar toggle to search across all of them at once, which labels every row
-                with the repository it came from.</li>
-            <li><b>Copy to the clipboard</b> as Markdown or plain text: this whole tab, the
-                date group the selection is in, or just the selected rows. With a search
-                active you copy the search result, which is the only thing you can check
-                before pasting. A date group comes out as the log of its day —
-                <code>## 2026-09-11</code> and a numbered list — so it can be pasted into a
-                journal or a weekly report as is.</li>
-            <li><b>Save a whole repository to a file</b> — CSV, Markdown or plain text —
-                from <i>Export ▸ Save Repository As</i>. CSV is one row per task, ready for a
-                spreadsheet. Everything runs in the background and the file is written in
-                full or not at all.</li>
-            <li><b>Delete all the tasks of a repository</b> in one go, from the same menu,
-                after a confirmation that says how many. It only ever touches the active
-                repository, which stays in the list, empty.</li>
+            <li><b>States are tabs</b> in a row above the search field, each with a live count
+                (<code>ToDo 5</code>). The count comes from the same pass that fills the list,
+                so it always agrees with the search and the view filter. Every tab keeps its own
+                selection and folded groups, and the tab you left open comes back when you
+                reopen the project.</li>
+            <li><b>A toolbar</b> with <i>New Task</i> &mdash; a split button: the body creates in
+                the current tab, the arrow lets you pick another target state &mdash;,
+                <i>Edit</i>, <i>Delete</i>, <i>Group By</i>, <i>Search All Repositories</i>,
+                <i>Export</i> and <i>Settings</i>.</li>
+            <li><b>A repository selector</b> and a <b>view filter</b> in the window header. The
+                filter shows <i>All tasks</i>, <i>Open</i>, <i>Overdue</i> or
+                <i>Bookmarked</i>, stacks with the search instead of replacing it, and is
+                remembered.</li>
+            <li><b>Group by</b> date, priority or tag &mdash; or not at all &mdash; chosen per
+                state. By date: <i>Today</i>, then <b>one section per day that has tasks</b>,
+                each with its date (<i>Sep 14</i>, <i>Sep 10, 2025</i>), and <i>No date</i>
+                last, against the date the state anchors on: created, updated or completed.
+                By priority: highest first, only priorities with tasks. By tag: a task with two
+                tags appears under both, untagged tasks in a group at the end.</li>
+            <li><b>Every header folds</b> with a click on its chevron or with
+                <code>&larr;</code>/<code>&rarr;</code>, and shows how many tasks it holds.
+                <i>Today</i> is shown even when empty &mdash; <i>No tasks today &middot; You're
+                all caught up!</i> &mdash; because that is exactly what you came to check.</li>
+            <li><b>Ungrouped order</b>: bookmarked tasks first, then by priority, then the most
+                recent.</li>
+            <li><b>Built for huge lists.</b> The list loads a page at a time and says how many
+                are left (<i>4,213 more</i>) &mdash; scrolling to it loads the next page &mdash;,
+                groups with more than 500 tasks start folded, and all the heavy work runs off the
+                UI thread. With 100,000 tasks a project opens its list in about 9&nbsp;ms.</li>
         </ul>
 
-        <h3>In the task dialog</h3>
+        <h3>The card</h3>
         <ul>
-            <li><b>Write in Markdown</b>, with a formatting toolbar for bold, italics, code,
-                links, images and bulleted or numbered lists. It is the same dialog whether
-                you create or edit, so a task jotted down in a hurry is not born different
-                from one written calmly.</li>
-            <li><b>Images you can paste, drag or pick.</b> A screenshot from the clipboard
-                lands under the line your caret was on and shows up right there, scaled.
-                <code>⌘Z</code> undoes it like any other edit, clicking it opens it full
-                size, and deleting its <code>[image]</code> marker removes it. Files are
-                stored beside the tasks of their repository, named after the SHA-256 of
-                their content: the same screenshot pasted into two tasks is one file, and
-                what nothing references any more is collected when the project opens.</li>
+            <li><b>A card per task</b>: a priority stripe down its left edge, a checkbox that
+                completes it, the title over up to three lines, one line of the body, and a row
+                of badges &mdash; priority, code anchors, due date, tags, a link and image
+                counter, and the date. Searching across repositories adds the repository
+                name.</li>
+            <li><b>Markdown in place</b>: <b>bold</b>, <i>italics</i>, <code>code</code> and
+                strikethrough show their style, not their marks. Underscores are left alone,
+                because <code>a_name_like_this</code> is an identifier far more often than it is
+                italics. Completed tasks are struck through.</li>
+            <li><b>Links open with a single click</b>, in the title or anywhere in the body
+                &mdash; even in its greyed-out lines. Plain URLs, <code>www.</code> addresses
+                and Markdown links are recognised, shown shortened
+                (<code>youtrack.jetbrains.com/&hellip;/ABC-123</code>) and opened in full, with
+                the full URL in the tooltip. The link counter opens a list of all of them. Only
+                <code>http</code> and <code>https</code> are clickable, links inside code spans
+                are examples rather than destinations, and trailing punctuation is not part of a
+                link.</li>
+            <li><b>Change the priority from the card</b>: click the priority badge for the list
+                of priorities with their colours.</li>
+            <li><b>Jump to the code</b> from the <code>Auth.kt:42</code> badge, with the full
+                path in its tooltip. On a narrow card the priority and anchor badges shrink to
+                their icon instead of disappearing &mdash; guaranteed down to the narrowest the
+                window can be &mdash; and the icon still works.</li>
+            <li><b>Expand a card</b> with the chevron on its right to read the whole task without
+                leaving the list: the full title, every line of the body and the images, each one
+                after the line that names it. Click an image to see it full size. The chevron only
+                appears when the card is hiding something.</li>
+            <li><b>Select card text with the mouse</b> and copy it with <code>&#8984;C</code> /
+                <code>Ctrl+C</code>; <code>Escape</code> clears the selection.</li>
+            <li><b>Bookmark</b> a task from the icon on its row to pin it to the top of its group,
+                whatever its priority. The bookmark stays visible on bookmarked tasks; the
+                <i>&vellip;</i> menu appears on hover.</li>
+            <li><b>Double-click</b> or <code>Enter</code> opens the task.</li>
+        </ul>
+
+        <h3>Working with tasks</h3>
+        <ul>
+            <li><b>A context menu</b> with <i>New Task</i>, <i>Edit</i>, <i>Toggle
+                Completed</i>, <i>Bookmark</i>, <i>Move To &#9656;</i>, <i>Priority &#9656;</i>,
+                <i>Export</i> and <i>Delete</i> &mdash; the same one as the row's
+                <i>&vellip;</i> menu.</li>
+            <li><b>Move tasks between states</b> with <i>Move To &#9656;</i>, or one tab at a time
+                with <code>&#8679;&#8997;&larr;/&rarr;</code>, without opening a dialog.
+                <code>&#8997;&larr;/&rarr;</code> just switches the tab you are looking at.</li>
+            <li><b>Everything works on a multiple selection</b>: complete, bookmark, move, change
+                priority, delete. Many tasks at once are one operation and one repaint; above ten
+                it runs in the background with a progress bar, and <b>cancelling undoes
+                it</b>.</li>
+            <li><b>Entering a terminal state</b> &mdash; <i>Done</i> by default &mdash; stamps the
+                completion date, and leaving it clears the date.</li>
+        </ul>
+
+        <h3>The task dialog</h3>
+        <ul>
+            <li><b>One dialog to create and edit</b>, so a task jotted down in a hurry is not born
+                different from one written calmly.</li>
+            <li><b>Write in Markdown</b> with a formatting toolbar: bold, italics, code, link,
+                image, bulleted list and numbered list.</li>
+            <li><b>Images you can paste, drop or pick</b>: a screenshot from the clipboard, an
+                image file copied or dragged in, or one chosen from disk. It lands under the line
+                your caret was on and shows right there as a preview; the text only shows
+                <code>[image]</code>. <code>&#8984;Z</code> undoes it like any other edit,
+                clicking the preview opens it full size, and deleting <code>[image]</code> removes
+                it. A missing image shows a marker instead of disappearing.</li>
             <li><b>State and priority</b> as dropdowns, seeded from the tab you were on.</li>
-            <li><b>A due date</b> from presets — today, tomorrow, end of week, next week — or
-                from a calendar. It falls due at the <i>end</i> of the day, so something set
-                for today is not born overdue; once past, the card paints it red.</li>
-            <li><b>Tags as chips</b>, typed separated by comma or space and removed with
-                their cross. In the search field they are <code>#api</code>.</li>
-            <li><b>Code anchors as chips</b> too, each one removable. They cannot be typed in
-                by hand: an anchor is a place in the editor, and typing a path and a number
-                is what this exists to avoid.</li>
-            <li><b>Priority triggers.</b> Typing <code>!!! Fix the login</code> creates
-                <i>Fix the login</i> at <i>High</i>: the prefix moves the priority dropdown
-                as you type and is never saved. Longest match wins, a trailing space is
-                required, deleting it gives the old priority back, and picking one by hand
-                beats the prefix. Only when creating — an existing task should not lose its
-                priority just because its body starts with <code>!!!</code>.</li>
+            <li><b>A due date</b> from presets &mdash; today, tomorrow, end of week, next week
+                &mdash; or from a calendar. It falls due at the <i>end</i> of the day, so a task set
+                for today is not born overdue; once past, the card shows it in red and the
+                <i>Overdue</i> filter finds it.</li>
+            <li><b>Tags as chips</b>, typed separated by comma or space, removed with their cross
+                or with <code>Backspace</code>. In the search field they are
+                <code>#api</code>.</li>
+            <li><b>Code anchors as chips</b>, each one removable. They are captured from the
+                editor, never typed.</li>
+            <li><b>Priority triggers</b>: typing <code>!!! Fix the login</code> creates <i>Fix the
+                login</i> at <i>High</i>. The prefix moves the priority dropdown as you type and is
+                never saved. The longest match wins, a trailing space is required, deleting the
+                prefix gives the old priority back, and picking one by hand beats it. Only when
+                creating.</li>
             <li><code>Escape</code> closes the dialog even with the caret inside the body.</li>
+        </ul>
+
+        <h3>Search</h3>
+        <ul>
+            <li><b>It reads the whole body</b>, not just the title, and ignores case and accents in
+                both directions: <i>autenticacion</i> finds <i>autenticaci&oacute;n</i>. Results are
+                ranked by relevance, with matches in the title weighing more.</li>
+            <li><b>Operators</b>: <code>state:doing</code>, <code>p:high</code>,
+                <code>repo:backend</code>, <code>is:done</code> / <code>is:open</code>,
+                <code>has:link</code>, <code>has:image</code>, <code>has:code</code>,
+                <code>file:AuthService</code> (part of an anchored path) and
+                <code>#tag</code>. Values are prefixes, quoted when they have spaces
+                (<code>state:"In Review"</code>); several values of one operator mean
+                <i>or</i>, different operators add up, and free text asks for every term. A
+                half-typed operator is ignored instead of emptying the list.</li>
+            <li><code>&#8984;K</code> / <code>Ctrl+K</code> focuses the field from the list,
+                <code>Enter</code> keeps the query in the field's history and returns to the list,
+                and <code>Escape</code> clears it.</li>
+            <li><b>Search All Repositories</b> &mdash; shown when the window has more than one
+                &mdash; searches every repository and labels each row with its own.</li>
         </ul>
 
         <h3>In the editor</h3>
         <ul>
-            <li><b>Tasks that point at the code.</b> <i>New Tasklane Task from Here</i>, in
-                the editor's context menu, opens the dialog with the file, the line and the
-                character already attached; anything selected comes in as the body. The card
-                then shows an <code>Auth.kt:42</code> badge that jumps back to that exact
-                character, with the full path in its tooltip. On a narrow card the badge
-                shrinks to its icon instead of disappearing, and the icon still takes you
-                there.</li>
-            <li><b>Anchors that survive edits.</b> The line is stored with its text, not just
-                its number, and is found again by that text when you follow it: an extra
-                import, a re-indent or a moved function break nothing. If the line is gone
-                the file still opens where it was, and if the file is gone you are told —
-                a click that does nothing reads as a bug.</li>
-            <li><b>And the code points back.</b> A line with an open task on it is marked in
-                the colour of the task's priority. Hover the mark and the task is there —
-                title, state, priority, due date, tags <b>and its screenshots</b>, so the
-                one case where you must not have to open anything, an image, is the one it
-                shows you. Click it and the tool window opens with that task selected,
-                switching repository if the task belongs to another one.</li>
-            <li><b>Two marks, and you pick.</b> A <b>gutter icon</b>, which never moves your
-                code by a single pixel and lives where breakpoints already do; or an
-                <b>inline chip</b> sitting on the exact character the task was about —
-                because <code>cache.get(key) ?: load(key)</code> is two things in the same
-                place. The chip carries the task's own state in capitals, like a code marker
-                has for decades, so the factory setting reads <code>TODO</code> and a task in
-                <i>Doing</i> reads <code>DOING</code> instead of lying. It keeps a little air
-                on both sides so the code does not run into it, and that space belongs to the
-                mark, not to your file. Or no mark at all, if you prefer.</li>
-            <li><b>Only what is still open gets marked.</b> A task in a done state is history,
-                not a note about the code, so its mark goes the moment you move it — and it
-                goes then, not whenever an inspection next runs. Marks work the same in a
-                <code>.txt</code> as in a <code>.kt</code>.</li>
-            <li><b>Several tasks in one spot share one mark</b>, coloured by the highest
-                priority among them, and the tooltip lists them.</li>
+            <li><b>Tasks that point at the code.</b> <i>New Tasklane Task from Here</i>, in the
+                editor's context menu and the <b>Tools</b> menu, opens the dialog with the file,
+                the line and the exact character already attached; whatever is selected comes in
+                as the body. With a file selected in the Project view instead, the task points at
+                the file.</li>
+            <li><b>Anchors that survive edits.</b> The line is stored with its text, not just its
+                number, and found again by that text: an extra import, a re-indent or a moved
+                function break nothing. If the line is gone the file still opens where it was, and
+                if the file is gone you are told.</li>
+            <li><b>The code points back.</b> A line with an open task is marked in the colour of the
+                task's priority. Hover the mark to see the title, state, priority, due date and
+                tags; click it to open the tool window with that task selected, switching
+                repository if needed.</li>
+            <li><b>Two kinds of mark, and you pick</b>: a <b>gutter icon</b>, which never moves
+                your code; or an <b>inline chip</b> on the exact character, carrying the task's
+                state in capitals (<code>TODO</code>, <code>DOING</code>) and showing the task's
+                <b>screenshots</b> in its tooltip. Or no mark at all.</li>
+            <li><b>Only open tasks are marked</b>, and a mark goes the moment its task is done.
+                Several tasks on one line share a mark coloured by the highest priority, and the
+                tooltip lists them. Marks work in any file, <code>.txt</code> included.</li>
+        </ul>
+
+        <h3>Repositories</h3>
+        <ul>
+            <li><b>One task list per repository.</b> Git repositories registered in the project
+                &mdash; submodules included &mdash; each keep their own tasks, and a repository
+                added while the IDE is open shows up without a restart. Without Git, the project
+                root works as a single repository. With only one, the selector hides and its name
+                goes to the window title.</li>
+            <li><b>Nothing is ever hidden.</b> A repository deeper than the detection depth that
+                already has tasks appears under <i>Other</i>, and one whose folder is gone stays in
+                the list as <i>(missing)</i> with its tasks. Moving the whole project breaks
+                nothing.</li>
+            <li><b>Everything that deletes acts on the active repository only.</b></li>
+        </ul>
+
+        <h3>Export and clean up</h3>
+        <ul>
+            <li><b>Copy to the clipboard</b> as Markdown or plain text: this whole tab, the date
+                group the selection is in, or just the selected rows. With a search active you copy
+                the search result. A date group comes out as the log of its day &mdash;
+                <code>## 2026-09-11</code> and a numbered list &mdash; ready for a journal or a
+                weekly report. Past 10,000 tasks you are offered a file instead.</li>
+            <li><b>Save a whole repository to a file</b> from <i>Export &#9656; Save Repository
+                As</i>: <b>CSV</b> &mdash; one row per task with title, description, state,
+                priority, tags, due date, bookmark, code anchors, links, dates and id, readable by
+                Excel with accents intact &mdash;, <b>Markdown</b> or <b>plain text</b>, state by
+                state.</li>
+            <li><b>Delete all the tasks of a repository</b> with <i>Delete All Tasks in
+                &hellip;</i>, after a confirmation that says how many. The repository stays,
+                empty.</li>
+            <li><b>Export the repository to XML</b>, the <code>tasks.xml</code> interchange format
+                any version of the plugin can read.</li>
+            <li><b>Export and Remove</b> a repository whose folder is gone: every task is exported
+                and counted before anything is deleted.</li>
+            <li>Exports run in the background, can be cancelled, capture the list <b>as it was
+                when you clicked</b> even if you keep editing, and write files in full or not at
+                all.</li>
+        </ul>
+
+        <h3>Images</h3>
+        <ul>
+            <li><b>Stored at their original size</b>, next to the tasks of their repository: a
+                pasted screenshot as a lossless PNG, a dropped or copied file byte for byte. Each
+                file is named after the SHA-256 of its content, so the same image in two tasks is
+                stored once.</li>
+            <li><b>The list paints thumbnails</b> and never decodes a large original; the full image
+                opens on click, loaded in the background.</li>
+            <li><b>Unused images are cleaned up on their own</b>, a day after the last task stopped
+                pointing at them.</li>
+            <li><b>Settings shows how much the active repository's images weigh</b>, with
+                <i>Delete Unused Images</i> to clean up right away and <i>Delete All
+                Images&hellip;</i> to empty them after a confirmation (tasks are left untouched).</li>
+            <li><b>A warning when a repository's images pass a threshold</b> &mdash; 5&nbsp;GB by
+                default, configurable or off. It never deletes anything.</li>
+        </ul>
+
+        <h3>Settings &rarr; Tools &rarr; Tasklane</h3>
+        <ul>
+            <li><b>States</b>, as a table: name, default state for new tasks, whether it means
+                done, how it groups its tasks and which date it groups by. The order is the order
+                of the tabs: drag a row by its handle or use the arrows. Deleting a state asks where
+                its tasks should go, and making a state terminal offers to fill in completion dates
+                from the last modification.</li>
+            <li><b>Priorities</b>, highest first as in the tool window: name, default, trigger, and
+                a colour for light and dark themes picked with the platform colour picker. Drag
+                rows to change the priority order; deleting one asks where its tasks should
+                go.</li>
+            <li>Mistakes are caught before <i>Apply</i>: blank names, two priorities with the same
+                trigger, a trigger with a space. There is always at least one state and one
+                priority.</li>
+            <li><b>Priority triggers</b> can be turned off altogether.</li>
+            <li><b>Repository depth</b>: how deep to look for repositories under the project root
+                &mdash; a view filter, never a delete.</li>
+            <li><b>Code anchor marks</b>: gutter icon, inline chip or none. This one is yours alone
+                and is not shared with the project.</li>
+            <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
+                the warning threshold.</li>
+            <li><b>Save as template for new projects</b>, so configuring per project does not mean
+                configuring every project, and a direct link to the Keymap.</li>
         </ul>
 
         <h3>From anywhere in the IDE</h3>
         <ul>
-            <li><b>Quick Add</b> with <code>⌘⌥R</code> / <code>Ctrl+Alt+R</code> opens the
-                full task dialog without going through the tool window. The task lands in the
-                active repository.</li>
-            <li><i>Quick Add Task</i> and <i>New Tasklane Task from Here</i> also sit in the
-                <b>Tools</b> menu, and every Tasklane action is reachable from <b>Search
-                Everywhere</b>.</li>
-            <li><b>Every action is in Settings → Keymap</b> under <i>Plugins → Tasklane</i>,
-                so anything you use daily can get a key of its own — including the ones that
-                ship without one because they only mean something inside the tool window.</li>
+            <li><b>Quick Add</b> with <code>&#8984;&#8997;R</code> / <code>Ctrl+Alt+R</code> opens
+                the full task dialog without going through the tool window; the task lands in the
+                active repository. It is also in the <b>Tools</b> menu.</li>
+            <li><b>Every action is in Search Everywhere and in Settings &rarr; Keymap</b> under
+                <i>Plugins &rarr; Tasklane</i>, so anything you use daily can get its own key.</li>
+            <li><b>Fully usable from the keyboard</b>: <code>Tab</code> walks the state row
+                (<code>Space</code> or <code>Enter</code> opens a tab), the search field and the
+                list; <code>Delete</code> removes the selected tasks. The list, the search field
+                and the dialog fields have names for screen readers.</li>
         </ul>
 
-        <h3>In Settings → Tools → Tasklane</h3>
+        <h3>Where your tasks live, and how they are kept safe</h3>
         <ul>
-            <li><b>States</b>, as a table: name, which one is the default, which ones mean
-                "done", how each groups its tasks, which date it groups by (created, updated
-                or completed) and its colour in light and dark themes. The order here is the
-                order of the tabs: drag a row by its handle, or use the arrows. Deleting a
-                state asks where its tasks should go.</li>
-            <li><b>Priorities</b>, the same way: name, default, colours, and the trigger you
-                type to select it. They are listed highest first, as in the tool window, and
-                dragging them is how you change the priority order. Click a colour to pick
-                another.</li>
-            <li><b>Priority triggers</b> can be turned off altogether.</li>
-            <li><b>Repository depth</b>: how deep to look for repositories under the project
-                root. It is a view filter, not a delete — a deeper repository that already
-                has tasks is never hidden, and neither is one whose folder is gone.</li>
-            <li><b>Code anchors</b>: gutter icon, inline chip, or no mark. This one is yours
-                alone — it goes to <code>workspace.xml</code> and is not shared with the
-                project.</li>
-            <li><b>Image size</b>: the longest side pasted screenshots are scaled down to.</li>
-            <li><b>Save as template for new projects</b>, so configuring per project does not
-                mean configuring every project. And a direct link to the Keymap.</li>
+            <li><b>Tasks</b> live in <code>.idea/tasklane/tasklane.db</code>, a local SQLite
+                database the plugin keeps out of your diffs with its own <code>.gitignore</code>.
+                <b>States and priorities</b> live in <code>.idea/tasklane.xml</code>, which is meant
+                to be committed: that is how a team shares a workflow.</li>
+            <li><b>A daily backup</b>, <code>tasklane.db.backup</code>, made in the background
+                only when something changed.</li>
+            <li><b>A check after an unclean shutdown</b>: if the database is damaged you are told,
+                with the date of the last backup.</li>
+            <li><b>Changing the configuration never loses tasks</b>: tasks whose state or priority
+                disappears move to the default one, you are told how many with a <i>Show
+                them</i> link, and they go back on their own if it reappears.</li>
+            <li><b>Projects from before 2.0</b> move their <code>tasks.xml</code> into the database
+                automatically, in the background, resuming if the IDE closes halfway. The original
+                is kept as <code>tasks.xml.migrated</code>.</li>
+            <li><b>Tasklane: Diagnostics</b> reports how many tasks and images there are, what they
+                take up on disk, the state of the backup and the recent latencies, ready to copy
+                into a bug report.</li>
         </ul>
 
-        <h3>Where your tasks live</h3>
-        <p>
-            Tasks go to <code>.idea/tasklane/</code>, which the plugin auto-ignores, so
-            nothing lands in your diff unless you ask for it. States and priorities go to
-            <code>.idea/tasklane.xml</code>, which <i>is</i> meant to be committed: that is
-            how a team shares the same workflow. Every write is atomic and keeps a backup,
-            and a file it cannot read is quarantined instead of overwritten.
-        </p>
-
-        <p>Requires IntelliJ IDEA 2025.2 or newer (any IntelliJ-based IDE). Git is optional:
-            without it, the project root works as a single repository.</p>
+        <p>Requires IntelliJ IDEA 2025.2 or newer, or any IDE built on the IntelliJ Platform. Git
+            is optional.</p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
