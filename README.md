@@ -11,9 +11,29 @@ sin una sola llamada de red.
 </div>
 
 <div align="center">
-  <img src="docs/screenshots/tool-window.png" width="330" alt="La tool window de Tasklane: estados como pestañas con su recuento, buscador y una tarjeta por tarea con su franja de prioridad">
+  <img src="docs/screenshots/tool-window.png" width="660" alt="La tool window de Tasklane: estados como pestañas con su recuento, buscador y una tarjeta por tarea con su franja de prioridad">
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/expanded-card.png" width="330" alt="Una tarjeta desplegada con el cuerpo Markdown entero, distintivos de prioridad, enlace y ancla de código">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/new-task.png" width="440" alt="El diálogo de tarea nueva: cuerpo en Markdown con barra de formato, zona para soltar imágenes, y estado, prioridad, vencimiento y etiquetas">
+  <img src="docs/screenshots/new-task.png" width="330" alt="El diálogo de tarea nueva: cuerpo en Markdown con barra de formato, zona para soltar imágenes, y estado, prioridad, vencimiento y etiquetas">
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/edit-task.png" width="330" alt="Editando una tarea con captura pegada y ficha de ancla de código">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/context-menu.png" width="330" alt="El menú contextual de la tarjeta: crear, editar, completar, marcar, mover, prioridad, exportar y borrar">
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/editor-mark.png" width="660" alt="La marca del ancla en el editor: el tooltip enseña la tarea con su captura y un clic la abre en Tasklane">
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/export-menu.png" width="330" alt="El menú Export: copiar estado, grupo o selección, guardar el repositorio, exportar a XML o vaciarlo">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/settings-images.png" width="330" alt="Los ajustes de Tasklane: estados, prioridades con triggers y colores, repositorios, anclas e imágenes">
 </div>
 
 ---
@@ -65,7 +85,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.5.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.5.1.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -812,7 +832,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.5.0 && git push origin v2.5.0
+git tag v2.5.1 && git push origin v2.5.1
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

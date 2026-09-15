@@ -9,6 +9,13 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.5.1]
+
+Parche sin cambio de formato: capturas de la ficha (`docs/screenshots/`, README y
+descripción del Marketplace) rehechas sobre la interfaz actual —ventana, tarjeta
+desplegada, diálogos, menús contextuales y de exportación, marca en el editor y
+ajustes—.
+
 ## [2.5.0] — IntelliJ IDEA 2026.1.5 en adelante
 
 Menor aunque sube el mínimo de plataforma: quien siga en un IDE anterior no pierde nada, se

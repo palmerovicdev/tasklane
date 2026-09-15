@@ -22,8 +22,22 @@
             them.</p>
 
         <p>
-            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/tool-window.png" alt="The Tasklane tool window: states as tabs with live counts, a search field, and one card per task with its priority stripe" width="330"/>
-            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/new-task.png" alt="The new-task dialog: a Markdown body with a formatting toolbar, a drop zone for images, and fields for state, priority, due date and tags" width="440"/>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/tool-window.png" alt="The Tasklane tool window: states as tabs with live counts, a search field, and one card per task with its priority stripe" width="660"/>
+        </p>
+        <p>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/expanded-card.png" alt="An expanded card showing the full Markdown body with priority, link and code-anchor badges" width="330"/>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/new-task.png" alt="The new-task dialog: a Markdown body with a formatting toolbar, a drop zone for images, and fields for state, priority, due date and tags" width="330"/>
+        </p>
+        <p>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/edit-task.png" alt="Editing a task with a pasted screenshot preview and a code-anchor chip" width="330"/>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/context-menu.png" alt="The card context menu: New Task, Edit, Toggle Completed, Bookmark, Move To, Priority, Export and Delete" width="330"/>
+        </p>
+        <p>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/editor-mark.png" alt="A code anchor mark in the editor: hovering the line shows the task tooltip, clicking opens it in Tasklane" width="660"/>
+        </p>
+        <p>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/export-menu.png" alt="The Export menu: copy state, group or selection, save the repository, export to XML, or delete all tasks" width="330"/>
+            <img src="https://raw.githubusercontent.com/palmerovicdev/tasklane/main/docs/screenshots/settings-images.png" alt="Tasklane settings: states, priorities with triggers and colours, repositories, code anchors and images" width="330"/>
         </p>
 
         <h3>The tool window</h3>

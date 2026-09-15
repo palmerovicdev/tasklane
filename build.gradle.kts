@@ -118,6 +118,15 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.5.1 &mdash; new screenshots</h3>
+            <ul>
+              <li><b>New listing screenshots</b>: the tool window, an expanded card, the
+                  task dialogs, the context and export menus, the editor mark and the
+                  settings, retaken on the current UI.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.5.0 and 2.5.1 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.5.0 &mdash; IntelliJ IDEA 2026.1.5 or newer</h3>
             <ul>
               <li><b>Requires IntelliJ IDEA 2026.1.5 or newer</b> (build 261.27258.48), or any
