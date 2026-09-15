@@ -9,6 +9,59 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.2.0] — Las operaciones grandes
+
+La **Fase 5** del plan de escala (`docs/plan-escala.md`): lo que es O(n) por definición.
+Exportar un millón de tareas sigue siendo leer un millón de tareas, pero deja de retener
+lo que lee, deja de ocurrir en el hilo de interfaz, deja de bloquear a los demás y se
+puede cancelar. Y el `.bak` que se copiaba en cada guardado tiene por fin su sustituto.
+
+### Añadido
+- **Exportar a un fichero.** Copiar una pestaña de más de 10.000 tareas ofrece guardarlas
+  en un `.md` o `.txt` en vez de llenar el portapapeles. Se escribe a un temporal que sólo
+  sustituye al destino cuando está entero.
+- **Una copia de seguridad de la base al día**, como mucho: `tasklane.db.backup`, en
+  segundo plano, sólo si hubo cambios y si cabe. Sustituye al `.bak` de cada guardado.
+- **Comprobación de la base tras un cierre inesperado del IDE**, en segundo plano. Si
+  encuentra daños lo dice, con la fecha de la última copia, y deja de copiar encima de
+  ella. *Tasklane: Diagnostics* enseña la copia y la última comprobación.
+
+### Cambiado
+- **Exportar va en *streaming*.** Con 100.000 tareas, copiar un estado de 33.000 filas
+  retenía **280 MB**; ahora **2,2 MB**. Exportar el repositorio a `tasks.xml` retenía
+  **1,5 GB**; ahora **15 MB**. Y lo que sale es la pestaña **en el momento de pulsar**,
+  aunque se siga editando mientras se escribe.
+- **Las operaciones sobre muchas tareas a la vez** —mover, completar, marcar, cambiar la
+  prioridad, borrar— son **una** operación y **un** repintado, no uno por fila. Por encima
+  de diez filas van en segundo plano con barra, y **cancelar deshace**. Marcar 2.000 tareas
+  pasa de 1,9 s a 0,74 s.
+- **Escribir una tarea es más barato**: una sentencia por tabla en vez de treinta por
+  tarea, y el índice de búsqueda sólo se toca si cambió el texto.
+- **«Exportar y quitar» funciona a cualquier tamaño.** Ya no lee en el hilo de interfaz:
+  pone el repositorio en solo lectura, exporta —al portapapeles, o a un fichero por encima
+  de 10.000—, **comprueba que salieron todas** y sólo entonces borra, por tandas. Con
+  100.000 tareas, lo más que espera cualquier otro comando mientras tanto pasa de
+  **12,3 s a 263 ms**.
+
+### Corregido
+- **Un repositorio renombrado o borrado del disco desaparecía del selector con sus
+  tareas dentro** desde la 2.0.0: el catálogo miraba el `tasks.xml`, que la migración
+  renombra. Vuelve a quedarse, marcado como ausente, mientras tenga tareas.
+- **Exportar a XML un repositorio creado después de la migración** dejaba un fichero que
+  se intentaba importar encima de lo que ya había y acababa en cuarentena con un aviso de
+  fichero corrupto.
+- **Exportar a XML con una migración a medias** escribía encima del `tasks.xml` original.
+  Ahora espera a que termine y lo dice.
+- **Borrar una selección grande** era cuadrático en el número de filas.
+- **El aviso de la migración** enseñaba `{1}` en lugar de la ruta del fichero archivado.
+- **Exportar a XML** ya no falla entero por un carácter que XML no admite —la salida de
+  una terminal pegada—: se sustituye por `U+FFFD` y se dice cuántos.
+
+### Compatibilidad
+- **Nada cambia de formato.** El esquema de la base sigue en la versión 1 y no gana tablas;
+  lo nuevo es un fichero al lado —la copia— y dos marcas en la tabla de mantenimiento que
+  ya existía. Una 2.1.0 abre un proyecto usado por la 2.2.0 sin notar nada.
+
 ## [2.1.0] — Las imágenes dejan de pesar
 
 La **Fase 4** del plan de escala (`docs/plan-escala.md`): los adjuntos. Hasta ahora todas

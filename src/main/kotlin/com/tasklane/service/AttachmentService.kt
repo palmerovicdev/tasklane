@@ -47,7 +47,7 @@ import javax.imageio.ImageIO
  *    1600 px que ya estén guardadas dejen de pesar aunque no se toquen.
  * 3. **Mantenimiento**: trasladar lo que quedara en el directorio plano (§4.1),
  *    reconciliar tabla y disco (§4.3) y avisar de la cuota (§4.5). Lo dispara
- *    [com.tasklane.startup.AttachmentMaintenanceActivity], no la UI.
+ *    [com.tasklane.startup.MaintenanceActivity], no la UI.
  *
  * Todo lo que lee o escribe es **bloqueante y no debe llamarse desde el EDT**; quien
  * llama decide el hilo, que es justo lo que necesita el pegado: normalizar en segundo
@@ -264,7 +264,7 @@ class AttachmentService(private val project: Project) {
 
     /**
      * Borra los blobs que no referencia ninguna tarea. **Bloqueante**: llamar fuera
-     * del EDT. Lo dispara [com.tasklane.startup.AttachmentMaintenanceActivity].
+     * del EDT. Lo dispara [com.tasklane.startup.MaintenanceActivity].
      *
      * Tres salvaguardas, y ninguna es paranoia — esto borra ficheros del usuario:
      *

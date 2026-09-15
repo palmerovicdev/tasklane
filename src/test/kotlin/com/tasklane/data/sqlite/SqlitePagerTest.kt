@@ -144,6 +144,61 @@ class SqlitePagerTest {
         }
     }
 
+    /**
+     * **Exportar da la misma lista que la ventana.** `each` no pasa por la ventana del
+     * paginador —ésa existe para crecer y retenerlo todo, que es lo que una exportación de
+     * un millón no puede hacer— y por eso tiene su propia ruta por los cubos. Aquí se fija
+     * que esa ruta llega a lo mismo, con tandas pequeñas para que los cortes caigan en
+     * mitad de cubos y de empates de fecha.
+     */
+    @Test
+    fun `exportar a tandas da la misma lista que la ventana`() = withStore { store, db ->
+        val tasks = corpus()
+        store.importBatch(tasks, config(Grouping.NONE))
+
+        for (grouping in Grouping.entries) {
+            for (filter in listOf(TaskFilter.ALL, TaskFilter.OPEN, TaskFilter.BOOKMARKED)) {
+                val expected = memory(tasks, grouping, filter, DateAnchor.UPDATED)
+                val actual = sqlite(db.reader, grouping, filter, DateAnchor.UPDATED)
+                val groups: List<GroupKey?> = expected.outline(todo).map { it.key }.ifEmpty { listOf(null) }
+                for (group in groups) {
+                    val chunks = mutableListOf<Int>()
+                    val exported = buildList {
+                        actual.each(PageQuery(todo, group), chunk = 7) {
+                            chunks += it.size
+                            addAll(it.map { task -> task.id.value })
+                        }
+                    }
+                    assertEquals("$grouping / $filter, grupo $group", walk(expected, todo, group), exported)
+                    assertTrue("ninguna tanda pasa del tope", chunks.all { it <= 7 })
+                }
+            }
+        }
+    }
+
+    /**
+     * **Una exportación es una foto.** Lo que se escribe mientras se exporta no entra, y
+     * la ventana —que no está congelada— sí lo ve. Es lo que impide que una tarea que se
+     * marca a mitad de una exportación de minutos salte de cubo y salga dos veces.
+     */
+    @Test
+    fun `la foto de la exportacion no ve lo que se escribe mientras dura`() = withStore { store, db ->
+        store.importBatch(corpus(), config(Grouping.NONE))
+        val live = SqlitePager(db.reader, REPO, config(Grouping.NONE), TaskFilter.ALL, now, zone, today, detach = db::openReader)
+
+        val seen = live.snapshot { frozen ->
+            val first = buildList { frozen.each(PageQuery(todo), chunk = 50) { addAll(it) } }.size
+            // Una escritura en medio, por la conexión de siempre.
+            store.importBatch(listOf(task("nueva", body = "Escrita durante la exportación")), config(Grouping.NONE))
+            val second = buildList { frozen.each(PageQuery(todo), chunk = 50) { addAll(it) } }.size
+            first to second
+        }
+
+        assertEquals("la foto no se mueve", seen.first, seen.second)
+        val after = buildList { live.each(PageQuery(todo), chunk = 50) { addAll(it) } }.size
+        assertEquals("fuera de la foto sí se ve", seen.first + 1, after)
+    }
+
     @Test
     fun `agrupar por la fecha de completado coincide tambien`() = withStore { store, db ->
         val tasks = corpus()

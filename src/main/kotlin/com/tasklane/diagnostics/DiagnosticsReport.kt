@@ -43,6 +43,20 @@ object DiagnosticsReport {
         if (report.pending) {
             appendLine("  NOTE: image figures are still being reconciled; they may be incomplete.")
         }
+        // La copia y la comprobación de la base (Fase 5): lo que hay que saber antes de
+        // tocar nada a mano en `.idea/tasklane`.
+        val store = report.store
+        appendLine(
+            "  Backup           " + (store.backupAt?.let { "${stamp(it)}, ${humanBytes(store.backupBytes)}" } ?: "none yet"),
+        )
+        appendLine(
+            "  Integrity        " + when {
+                store.pending -> "check pending (the IDE did not close the database cleanly)"
+                store.checkedAt == null -> "never needed a check"
+                store.problems > 0 -> "DAMAGED: ${store.problems} problem(s) found on ${stamp(store.checkedAt)}"
+                else -> "ok, checked on ${stamp(store.checkedAt)}"
+            },
+        )
         appendLine()
 
         appendLine("Repositories")
@@ -117,6 +131,11 @@ object DiagnosticsReport {
 
     /** Un cuadro de mando de 60 Hz: por encima de esto se ve el tirón. */
     const val EDT_BUDGET_MILLIS = 16.0
+
+    /** `2026-09-15 10:02`: una fecha que se lee igual en la máquina de quien informa y en la de quien lee. */
+    private fun stamp(millis: Long): String =
+        java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
+            .toLocalDateTime().truncatedTo(java.time.temporal.ChronoUnit.MINUTES).toString().replace('T', ' ')
 
     private fun orphanNote(repo: TasklaneDiagnostics.RepoReport): String =
         if (repo.orphans > 0) "  (${repo.orphans} parked on missing config)" else ""

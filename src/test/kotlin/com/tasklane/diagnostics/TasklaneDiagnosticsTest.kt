@@ -153,6 +153,38 @@ class TasklaneDiagnosticsTest {
         assertTrue(text, text.contains("7 image(s) above the 400 px cap"))
     }
 
+    /**
+     * La copia y la comprobación de la base (Fase 5): lo que alguien necesita saber antes
+     * de tocar nada a mano en `.idea/tasklane`. Y la copia cuenta como sitio ocupado.
+     */
+    @Test
+    fun `el informe dice si hay copia de la base y como salio la ultima comprobacion`() {
+        val stats = mapOf(repo to statsOf(SyntheticCorpus.tasks(5)))
+        val at = java.time.LocalDateTime.of(2026, 9, 15, 10, 2).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        val none = DiagnosticsReport.render(TasklaneDiagnostics.collect(null, stats))
+        assertTrue(none, none.contains("Backup           none yet"))
+        assertTrue(none, none.contains("never needed a check"))
+
+        val report = TasklaneDiagnostics.collect(
+            null,
+            stats,
+            store = StoreHealth(backupAt = at, backupBytes = 3L * 1024 * 1024, checkedAt = at, problems = 0),
+        )
+        val ok = DiagnosticsReport.render(report)
+        assertTrue(ok, ok.contains("Backup           2026-09-15 10:02, 3.0 MB"))
+        assertTrue(ok, ok.contains("ok, checked on 2026-09-15 10:02"))
+        assertEquals(3L * 1024 * 1024, report.totalBytes)
+
+        val damaged = DiagnosticsReport.render(
+            TasklaneDiagnostics.collect(null, stats, store = StoreHealth(checkedAt = at, problems = 4)),
+        )
+        assertTrue(damaged, damaged.contains("DAMAGED: 4 problem(s)"))
+
+        val pending = DiagnosticsReport.render(TasklaneDiagnostics.collect(null, stats, store = StoreHealth(pending = true)))
+        assertTrue(pending, pending.contains("check pending"))
+    }
+
     /** La cuota del §4.5 se enseña siempre que esté puesta, y se marca cuando se cruza. */
     @Test
     fun `el informe enseña la cuota y dice cuando se pasa`() {

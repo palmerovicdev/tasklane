@@ -6,8 +6,13 @@ import com.tasklane.data.attachment.AttachmentGc
 import com.tasklane.data.attachment.AttachmentStore
 import com.tasklane.data.attachment.BlobRecord
 import com.tasklane.data.attachment.ImageNormalizer
+import com.tasklane.data.sqlite.RepoSnapshot
 import com.tasklane.data.sqlite.SqlitePager
 import com.tasklane.data.sqlite.Fts5Index
+import com.tasklane.data.sqlite.TasksXmlWriter
+import com.tasklane.domain.export.ExportFormat
+import com.tasklane.domain.export.TaskExporter
+import kotlinx.coroutines.runBlocking
 import com.tasklane.data.sqlite.TaskDb
 import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.data.sqlite.TasksXmlReader
@@ -382,7 +387,7 @@ class ScaleBenchmark {
                 val root = tree.model.root as CheckedTreeNode
                 for (group in outline) {
                     val node = GroupNode(group.key, group.size)
-                    pager.all(PageQuery(state, group.key)).forEach { node.add(TaskNode(it, false)) }
+                    pager.each(PageQuery(state, group.key)) { chunk -> chunk.forEach { node.add(TaskNode(it, false)) } }
                     root.add(node)
                 }
                 (tree.model as DefaultTreeModel).reload()
@@ -693,6 +698,389 @@ class ScaleBenchmark {
         } finally {
             root.toFile().deleteRecursively()
         }
+    }
+
+    // =========================================== las operaciones grandes (Fase 5)
+
+    /**
+     * **§5.1 — exportar un estado entero, en streaming.**
+     *
+     * Exportar es O(n) por definición, así que la puerta no es el tiempo sino **la
+     * memoria**: que exportar 300.000 filas no retenga 300.000 `Task`. Se mide lo que hace
+     * la pestaña —las secciones de su esquema, sobre una foto del paginador— escribiendo a
+     * un sumidero que sólo cuenta, y se vigila el pico de heap por el camino.
+     *
+     * Al lado, el camino de la 2.1: pedir cada sección entera a una lista y construir el
+     * `String`.
+     */
+    @Test
+    fun `exportar un estado entero`() {
+        val db = openDb()
+        val state = TasklaneConfig.TODO
+        val pager = SqlitePager(db.reader, repo, board, TaskFilter.ALL, Instant.now(), detach = db::openReader)
+        val outline = pager.outline(state)
+        val rows = outline.sumOf { it.size }
+
+        fun stream(sample: (() -> Unit)?): Long {
+            val sink = CountingSink()
+            val out = TaskExporter.Stream(sink, board, ExportFormat.MARKDOWN)
+            var chunks = 0
+            pager.snapshot { frozen ->
+                for (group in outline) {
+                    out.section("ToDo · ${group.key}")
+                    frozen.each(PageQuery(state, group.key)) { chunk ->
+                        chunk.forEach(out::task)
+                        if (sample != null && ++chunks % 4 == 0) sample()
+                    }
+                }
+            }
+            assertEquals(rows, out.written)
+            return sink.chars
+        }
+
+        var chars = 0L
+        record(Bench.measure("exportar · un estado de $rows filas, en streaming", runs = 3, warmup = 1) { chars = stream(null) })
+        val baseline = Bench.heapMegabytes()
+        var peak = 0.0
+        stream { peak = maxOf(peak, Bench.heapMegabytes() - baseline) }
+        println("  %d MB de texto · pico de heap en streaming: %.1f MB".format(chars / (1024 * 1024), peak))
+
+        if (n > 200_000) return
+        record(
+            Bench.measure("hasta la 2.1 · cada sección a una lista + String", runs = 3, warmup = 1) {
+                assertTrue(TaskExporter.export(oldSections(pager, outline, state), board, ExportFormat.MARKDOWN).isNotEmpty())
+            },
+        )
+        // Lo que tenía vivo la 2.1 en su punto más alto: las secciones enteras y, encima,
+        // el texto construido a partir de ellas.
+        val before = Bench.heapMegabytes()
+        val sections = oldSections(pager, outline, state)
+        val text = TaskExporter.export(sections, board, ExportFormat.MARKDOWN)
+        println(
+            "  retenido por el camino de la 2.1 en su pico: %.1f MB (%d secciones, %d MB de texto)"
+                .format(Bench.heapMegabytes() - before, sections.size, text.length / (1024 * 1024)),
+        )
+    }
+
+    private fun oldSections(pager: TaskPager, outline: List<GroupOutline>, state: StateId): List<TaskExporter.Section> =
+        outline.map { group ->
+            TaskExporter.Section("ToDo · ${group.key}", buildList { pager.each(PageQuery(state, group.key), Int.MAX_VALUE) { addAll(it) } })
+        }
+
+    /**
+     * **§5.1 — exportar el repositorio a `tasks.xml`.** La puerta de salida de la base.
+     * En la 2.1 era leer el repositorio entero a una lista, construir el árbol de JDOM,
+     * pasarlo a `String` y a bytes: tres copias del fichero vivas a la vez, y a un millón
+     * un `OutOfMemoryError` seguro.
+     */
+    @Test
+    fun `exportar a XML`() {
+        val db = openDb()
+
+        fun stream(sample: (() -> Unit)?): Long {
+            val out = CountingStream()
+            var chunks = 0
+            RepoSnapshot.open(db, repo, config) { snapshot ->
+                val xml = TasksXmlWriter(out, repo)
+                snapshot.eachInOrder { chunk ->
+                    xml.write(chunk)
+                    if (sample != null && ++chunks % 10 == 0) sample()
+                }
+                xml.finish()
+                assertEquals(n, xml.written)
+            }
+            return out.bytes
+        }
+
+        var bytes = 0L
+        record(Bench.measure("exportar · tasks.xml de $n, en streaming", runs = 2, warmup = 1) { bytes = stream(null) })
+        val baseline = Bench.heapMegabytes()
+        var peak = 0.0
+        stream { peak = maxOf(peak, Bench.heapMegabytes() - baseline) }
+        println("  %d MB de XML · pico de heap en streaming: %.1f MB".format(bytes / (1024 * 1024), peak))
+
+        if (n > 200_000) return
+        record(
+            Bench.measure("hasta la 2.1 · lista + JDOM + String + bytes", runs = 2, warmup = 0) {
+                val tasks = buildList { RepoSnapshot.open(db, repo, config) { it.eachInOrder { chunk -> addAll(chunk) } } }
+                assertTrue(JDOMUtil.writeElement(TasksCodec.encode(repo, tasks)).toByteArray(StandardCharsets.UTF_8).isNotEmpty())
+            },
+        )
+        val before = Bench.heapMegabytes()
+        val tasks = buildList { RepoSnapshot.open(db, repo, config) { it.eachInOrder { chunk -> addAll(chunk) } } }
+        val element = TasksCodec.encode(repo, tasks)
+        val string = JDOMUtil.writeElement(element)
+        val bytesOld = string.toByteArray(StandardCharsets.UTF_8)
+        println(
+            "  retenido por el camino de la 2.1 en su pico: %.1f MB (%d tareas, %d MB de XML)"
+                .format(Bench.heapMegabytes() - before, tasks.size, bytesOld.size / (1024 * 1024)),
+        )
+        assertTrue(element.contentSize > 0 && string.isNotEmpty())
+    }
+
+    /**
+     * **§5.3 — una operación sobre una selección grande.** Hasta la 2.1 la pestaña mandaba
+     * un comando por fila: una transacción y un snapshot por cada una. Ahora es un
+     * `TaskCommand.Batch`: una transacción y un snapshot para todas.
+     *
+     * Se marca y se desmarca, que es un cambio que no toca `updatedAt`: así las vueltas del
+     * banco dejan la base como estaba y los demás escenarios miden lo mismo.
+     *
+     * Y el desglose del lote, que es lo que dice dónde está el coste por fila.
+     */
+    @Test
+    fun `operacion masiva`() {
+        val db = openDb()
+        val store = TaskStore(db)
+
+        for (size in listOf(10, 20, 50, 500, 2_000, 5_000)) {
+            val ids = SqlitePager(db.reader, repo, config, TaskFilter.ALL, Instant.now())
+                .page(PageQuery(TasklaneConfig.TODO, null, size)).items.map { it.id }
+            if (ids.size < size) continue
+
+            record(
+                Bench.measure("masiva · $size comandos sueltos (hasta la 2.1)", runs = if (size <= 50) 20 else 3, warmup = if (size <= 50) 6 else 1) {
+                    for (id in ids) {
+                        store.write {
+                            val command = TaskCommand.ToggleBookmark(repo, id)
+                            val plan = reducer.plan(TaskReducer.Subject(config, store.tasks(listOf(id))), command)
+                            store.apply(plan.config, plan.mutations)
+                        }
+                    }
+                },
+            )
+            val batch = TaskCommand.Batch(ids.map { TaskCommand.ToggleBookmark(repo, it) })
+            record(
+                Bench.measure("masiva · $size en un lote", runs = if (size <= 50) 20 else 3, warmup = if (size <= 50) 6 else 1) {
+                    store.write {
+                        val plan = reducer.plan(TaskReducer.Subject(config, store.tasks(reducer.targetsOf(batch))), batch)
+                        store.apply(plan.config, plan.mutations)
+                    }
+                },
+            )
+
+            if (size != 2_000) continue
+            // La misma escritura con la caché de páginas grande que usa la migración: si el
+            // coste por fila crece con el tamaño de la base, es aquí donde tiene que verse.
+            record(
+                Bench.measure("masiva · $size en un lote, caché grande", runs = 3, warmup = 1) {
+                    store.bulk {
+                        store.write {
+                            val plan = reducer.plan(TaskReducer.Subject(config, store.tasks(reducer.targetsOf(batch))), batch)
+                            store.apply(plan.config, plan.mutations)
+                        }
+                    }
+                },
+            )
+            record(Bench.measure("masiva · desglose: leer $size", runs = 5, warmup = 2) { store.tasks(ids) })
+            val subject = TaskReducer.Subject(config, store.tasks(ids))
+            record(Bench.measure("masiva · desglose: planificar $size", runs = 5, warmup = 2) { reducer.plan(subject, batch) })
+            val on = reducer.plan(subject, batch)
+            val off = reducer.plan(TaskReducer.Subject(config, (on.mutations.single() as Mutation.Upsert).tasks), batch)
+            var flip = false
+            record(
+                Bench.measure("masiva · desglose: escribir $size", runs = 4, warmup = 2) {
+                    flip = !flip
+                    store.apply(config, if (flip) on.mutations else off.mutations)
+                },
+            )
+            // Lo que cuesta sólo el índice de texto de esas filas: borrar y volver a
+            // insertar, dentro de una transacción que se deshace al final.
+            val rowsFts = db.writer.rows(
+                "SELECT seq, title, body, tags_text, files_text FROM task WHERE id IN (${ids.take(500).joinToString(",") { "'${it.value}'" }})",
+            ) { arrayOf<Any>(it.getLong(0), it.getString(1).orEmpty(), it.getString(2).orEmpty(), it.getString(3).orEmpty(), it.getString(4).orEmpty()) }
+            record(
+                Bench.measure("masiva · desglose: sólo FTS de 500 (x4 = 2000)", runs = 4, warmup = 2) {
+                    runCatching {
+                        db.writer.transaction {
+                            db.writer.batch("INSERT INTO task_fts(task_fts, rowid, title, body, tags_text, files_text) VALUES ('delete', ?, ?, ?, ?, ?)", 5, rowsFts.asSequence())
+                            db.writer.batch("INSERT INTO task_fts(rowid, title, body, tags_text, files_text) VALUES (?, ?, ?, ?, ?)", 5, rowsFts.asSequence())
+                            throw Rollback
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    /**
+     * **§5.2 — quitar un repositorio entero, y §5.4 — la copia y la comprobación.**
+     *
+     * La copia es `VACUUM INTO` sobre la base del banco, y es además la base que se
+     * destruye después: quitar un repositorio de verdad sobre la compartida dejaría a los
+     * demás escenarios sin corpus.
+     *
+     * Lo que importa de quitar no es el total —borrar un millón de filas cuesta lo que
+     * cuesta— sino **la tanda más larga**: es lo máximo que espera cualquier otro comando
+     * mientras tanto, contra la transacción única de la 2.1, que tenía el escritor tomado
+     * de principio a fin.
+     */
+    @Test
+    fun `quitar un repositorio y copiar la base`() {
+        val db = openDb()
+        val dir = Files.createTempDirectory("tasklane-bench-remove")
+        try {
+            val copyFile = dir.resolve("copia").resolve(TaskDb.FILE_NAME)
+            Files.createDirectories(copyFile.parent)
+            var size = 0L
+            record(Bench.measure("mantenimiento · copia de $n con VACUUM INTO", runs = 1, warmup = 0) { size = db.backupTo(copyFile) })
+            println("  la copia pesa ${size / (1024 * 1024)} MB; la base, ${Files.size(db.file) / (1024 * 1024)} MB")
+            record(
+                Bench.measure("mantenimiento · integrity_check de $n", runs = 1, warmup = 0) {
+                    assertTrue(db.checkIntegrity().isEmpty())
+                },
+            )
+
+            // Las variantes, cada una sobre su propia copia: tal cual, con la caché grande
+            // que ya usa la migración, y con la caché y los *checkpoints* espaciados. Es el
+            // experimento que decidió cómo borra `TaskService.removeRepo`.
+            fun removal(label: String, file: Path, around: (TaskDb, TaskStore, () -> Unit) -> Unit) {
+                val copy = TaskDb.open(file.parent)!!
+                val batches = ArrayList<Double>()
+                try {
+                    val store = TaskStore(copy)
+                    record(
+                        Bench.measure("quitar · $n por tandas de ${TaskStore.FORGET_BATCH} · $label", runs = 1, warmup = 0) {
+                            around(copy, store) {
+                                while (true) {
+                                    val start = System.nanoTime()
+                                    val removed = store.forgetBatch(repo)
+                                    if (removed == 0) break
+                                    batches += (System.nanoTime() - start) / 1_000_000.0
+                                }
+                            }
+                        },
+                    )
+                    assertEquals(0, copy.reader.count("SELECT count(*) FROM task"))
+                } finally {
+                    copy.close()
+                    file.parent.toFile().deleteRecursively()
+                }
+                batches.sort()
+                println(
+                    "  %s · %d tandas · p50 %.1f ms · p99 %.1f ms · la más larga %.1f ms".format(
+                        label,
+                        batches.size,
+                        batches[batches.size / 2],
+                        batches[(batches.size * 99 / 100).coerceAtMost(batches.size - 1)],
+                        batches.last(),
+                    ),
+                )
+            }
+
+            fun freshCopy(name: String): Path {
+                if (name == "copia") return copyFile
+                val file = dir.resolve(name).resolve(TaskDb.FILE_NAME)
+                Files.createDirectories(file.parent)
+                db.backupTo(file)
+                return file
+            }
+
+            removal("tal cual", freshCopy("copia")) { _, _, run -> run() }
+            removal("caché grande", freshCopy("bulk")) { _, store, run -> store.bulk(block = run) }
+            // Y la de producción: la caché grande con el volcado del diario espaciado.
+            removal("caché grande + checkpoint cada ${TaskStore.REMOVAL_CHECKPOINT_PAGES} páginas", freshCopy("bulk-wal")) { _, store, run ->
+                store.bulk(TaskStore.REMOVAL_CHECKPOINT_PAGES, run)
+            }
+
+            if (n > 200_000) return
+            val again = dir.resolve("otra").resolve(TaskDb.FILE_NAME)
+            Files.createDirectories(again.parent)
+            db.backupTo(again)
+            val old = TaskDb.open(again.parent)!!
+            try {
+                val store = TaskStore(old)
+                record(
+                    Bench.measure("hasta la 2.1 · quitar $n en UNA transacción", runs = 1, warmup = 0) {
+                        store.apply(config, listOf(Mutation.Forget(repo)))
+                    },
+                )
+            } finally {
+                old.close()
+            }
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * **§5.2 — borrar el árbol de adjuntos de un repositorio.** Hasta la 2.1 era
+     * `Files.walk` más `sorted(reverseOrder())`, y ordenar es materializar: una ruta en
+     * memoria por fichero antes de borrar el primero. Ahora `walkFileTree`, que sólo
+     * recuerda la rama en la que está. Eje `-PbenchBlobs`; los ficheros van vacíos,
+     * porque lo que se mide son las rutas y no los bytes.
+     */
+    @Test
+    fun `adjuntos · borrar el arbol de un repositorio`() {
+        val root = Files.createTempDirectory("tasklane-rmtree")
+        try {
+            val layout = StorageLayout(root)
+            fun populate() {
+                val dir = layout.attachmentsDir(repo)
+                for (i in 0 until blobs) {
+                    val id = SyntheticBlobs.id(i)
+                    val leaf = dir.resolve(id.value.substring(0, 2)).resolve(id.value.substring(2, 4))
+                    Files.createDirectories(leaf)
+                    Files.createFile(leaf.resolve("${id.value}.png"))
+                }
+            }
+
+            populate()
+            var peakOld = 0.0
+            val baseOld = Bench.heapMegabytes()
+            record(
+                Bench.measure("hasta la 2.1 · walk + sorted de $blobs ficheros", runs = 1, warmup = 0) {
+                    Files.walk(layout.repoDir(repo)).use { paths ->
+                        var i = 0
+                        paths.sorted(Comparator.reverseOrder()).forEach { path ->
+                            if (++i == 1) peakOld = Bench.heapMegabytes() - baseOld
+                            Files.deleteIfExists(path)
+                        }
+                    }
+                },
+            )
+
+            populate()
+            var peakNew = 0.0
+            val baseNew = Bench.heapMegabytes()
+            record(
+                Bench.measure("borrar · walkFileTree de $blobs ficheros", runs = 1, warmup = 0) {
+                    runBlocking {
+                        com.tasklane.data.store.TaskFileStore(layout).delete(repo) {
+                            if (it == 1L) peakNew = Bench.heapMegabytes() - baseNew
+                        }
+                    }
+                },
+            )
+            assertTrue(!Files.exists(layout.repoDir(repo)))
+            println("  heap al empezar a borrar: %.1f MB ordenando, %.1f MB recorriendo".format(peakOld, peakNew))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    /** Un sumidero de texto que sólo cuenta. Mide el exportador sin medir el disco. */
+    private class CountingSink : Appendable {
+        var chars = 0L
+        override fun append(csq: CharSequence?): Appendable = apply { chars += csq?.length ?: 4 }
+        override fun append(csq: CharSequence?, start: Int, end: Int): Appendable = apply { chars += end - start }
+        override fun append(c: Char): Appendable = apply { chars++ }
+    }
+
+    private class CountingStream : java.io.OutputStream() {
+        var bytes = 0L
+        override fun write(b: Int) {
+            bytes++
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            bytes += len
+        }
+    }
+
+    /** Para deshacer una transacción del banco a propósito. */
+    private object Rollback : RuntimeException() {
+        private fun readResolve(): Any = Rollback
     }
 
     /**

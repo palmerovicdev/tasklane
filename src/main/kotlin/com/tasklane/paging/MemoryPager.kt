@@ -76,7 +76,7 @@ internal class MemoryPager(
         }
 
     override fun page(query: PageQuery, from: Cursor?): TaskPage {
-        val tasks = all(query)
+        val tasks = sectionOf(query)
         val start = ((from as? At)?.index ?: 0).coerceIn(0, tasks.size)
         val end = (start + query.limit).coerceIn(start, tasks.size)
         return TaskPage(
@@ -86,7 +86,13 @@ internal class MemoryPager(
         )
     }
 
-    override fun all(query: PageQuery): List<Task> =
+    /** Acotado por naturaleza —ver el KDoc de la clase—, así que las tandas son sublistas. */
+    override fun each(query: PageQuery, chunk: Int, block: (List<Task>) -> Unit) {
+        val tasks = sectionOf(query)
+        for (from in tasks.indices step chunk) block(tasks.subList(from, minOf(from + chunk, tasks.size)))
+    }
+
+    private fun sectionOf(query: PageQuery): List<Task> =
         sections(query.stateId).firstOrNull { it.key == query.group }?.tasks.orEmpty()
 
     /**

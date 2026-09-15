@@ -476,7 +476,7 @@ data class RepositoryRef(
 ├── actions/         QuickAddAction, FocusSearchAction, ToggleCompleteAction,
 │                    ChangeStateAction, ChangePriorityAction, DeleteTaskAction,
 │                    ExportStateAction, ExportGroupAction, ExportSelectionAction
-└── startup/         AttachmentMaintenanceActivity (ProjectActivity)</code></pre>
+└── startup/         MaintenanceActivity (ProjectActivity)</code></pre>
   <div class="adr warn">
     <span class="tag">Corregido durante la Fase 1 · no hay capa de DTOs</span>
     <p>El diseño original tenía un paquete <code>data/dto</code> con clases anotadas para <code>com.intellij.util.xmlb</code>. Al implementarlo apareció un problema que lo invalida: <strong>xmlb descarta los atributos que no reconoce</strong>. Eso destruye justo la garantía que <code>Task.extra</code> existe para dar — que abrir el proyecto con una versión vieja del plugin no borre datos escritos por una nueva.</p>
@@ -576,6 +576,15 @@ data class RepositoryRef(
     <p>Qué se conserva intacto: el <code>.idea/tasklane/</code> auto-ignorado con su <code>.gitignore</code>, el <code>tasklane.xml</code> compartible con la configuración, el <code>layout.xml</code>, el directorio de adjuntos, y la promesa de la versión futura —ahora en <code>PRAGMA user_version</code> en vez de en el atributo <code>version</code>: una base escrita por una versión posterior se abre en solo lectura y se avisa, exactamente igual que antes—.</p>
     <p>Qué cambia además del sitio: la <strong>escritura segura</strong> de arriba —<code>.bak</code>, <code>.tmp</code>, <code>ATOMIC_MOVE</code>, <code>debounce(500 ms)</code>— la sustituye una transacción por comando sobre WAL. Deja de haber un volcado del fichero entero, y con él desaparece la ventana de medio segundo de ediciones que un cierre inesperado del IDE se llevaba por delante.</p>
     <p><strong>El XML no desaparece.</strong> Sigue siendo el formato de intercambio: la migración lo lee en <em>streaming</em> con StAX —un fichero de 2,9 GB no cabe en un DOM— y al terminar lo deja al lado como <code>tasks.xml.migrated</code>, y una acción del menú de copiar lo vuelve a escribir cuando se quiera. Que el dato pueda salir a un fichero de texto es lo que hace que la mudanza no sea un viaje de ida.</p>
+  </div>
+  <div class="adr warn">
+    <span class="tag">2.2.0 · el sustituto del <code>.bak</code> (Fase 5)</span>
+    <p>WAL da atomicidad frente a una caída del IDE, pero no una copia: no protege de un disco que miente sobre un <code>fsync</code>, de un volumen de red ni de un <code>.idea</code> restaurado a medias. Lo que era el <code>.bak</code> de cada volcado pasa a ser <strong>mantenimiento</strong>, en <code>MaintenanceActivity</code> y en segundo plano:</p>
+    <ul>
+      <li><strong>Una copia diaria como mucho</strong>, <code>tasklane.db.backup</code>, con <code>VACUUM INTO</code> desde una conexión de solo lectura: una base compacta y consistente, a un temporal y movida al terminar. No se rehace si nada cambió, no se hace si no cabe, y <strong>nunca con la base bajo sospecha</strong>: copiar una base dañada borraría la última copia buena justo cuando hace falta. La fecha de la copia es la del propio fichero y no una fila de la base, porque apuntarla escribiría en la base y la haría constar como cambiada al día siguiente.</li>
+      <li><strong><code>integrity_check</code> sólo tras un cierre sucio</strong>, que no necesita marcador: al cerrar la última conexión SQLite vuelca el diario y borra <code>tasklane.db-wal</code>, así que si al abrir sigue ahí con algo dentro, la sesión anterior no cerró. La comprobación pendiente se apunta en la base para que una que no llegue a terminar se repita, y con daños se avisa con dónde está la última copia. La recuperación automática es de la Fase 6.</li>
+      <li><strong><code>PRAGMA optimize</code> al cerrar</strong>, con <code>analysis_limit</code>. Con el SQLite 3.42 de la plataforma y sin estadísticas previas hoy no hace nada; un test fija que un <code>ANALYZE</code> completo no le cambia el plan a ninguna consulta de la lista, que es lo que no se podía arriesgar.</li>
+    </ul>
   </div>
 </section>
 
@@ -881,7 +890,17 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <p><strong>Sólo los grupos que son un día.</strong> <code>DateGroup.dayOn(today)</code> resuelve <em>hoy</em> y <em>ayer</em> contra el calendario que se le pase —el dominio no lee el reloj, igual que en <code>DateGrouper</code>— y devuelve <code>null</code> para «esta semana», los meses y «sin fecha»: ésos conservan la cabecera de la pestaña y su casilla en vez de que se les invente una fecha que nadie eligió. En texto plano no cambia nada, porque ahí el destino es un correo y no un documento.</p>
     <p>El día viaja en <code>Section.date</code> y lo rellena la pestaña, que es la que sabe con qué «hoy» agrupó su árbol; el exportador sigue sin depender del reloj y el formato se fija con tests.</p>
   </div>
-  <p><strong>Exportar y quitar.</strong> Un repositorio ausente es el único que puede salir del catálogo, y sólo por aquí: se copian todas sus tareas —un bloque por estado—, se confirma, y sólo entonces <code>TaskService.forgetRepo</code> lo saca del modelo y borra su directorio. El comando es <code>ForgetRepo</code> y no un <code>Delete</code> con todas las tareas: eso dejaría el repositorio en el snapshot con la lista vacía, lo marcaría como sucio y reescribiría un <code>tasks.xml</code> justo detrás de haberlo borrado.</p>
+  <p><strong>Exportar y quitar.</strong> Un repositorio ausente es el único que puede salir del catálogo, y sólo por aquí: se exportan todas sus tareas —un bloque por estado—, se confirma, y sólo entonces <code>TaskService.removeRepo</code> lo saca de la base y borra su directorio. El comando final es <code>ForgetRepo</code> y no un <code>Delete</code> con todas las tareas: eso dejaría el repositorio en el snapshot con la lista vacía, lo marcaría como sucio y reescribiría un <code>tasks.xml</code> justo detrás de haberlo borrado.</p>
+  <div class="adr warn">
+    <span class="tag">2.2.0 · exportar a escala (Fase 5)</span>
+    <p>Exportar es la única operación del plugin que es O(n) <strong>por definición</strong>: exportar un millón de tareas es leer un millón de tareas. No se puede abaratar; se puede hacer <strong>en streaming, cancelable, en segundo plano y consistente</strong>, que es lo que hace la Fase 5 de <code>docs/plan-escala.md</code>.</p>
+    <ul>
+      <li><strong>En streaming.</strong> <code>TaskExporter.Stream</code> escribe tarea a tarea sobre cualquier <code>Appendable</code>, y la versión que devuelve un <code>String</code> está construida encima: hay un único sitio donde se decide el formato. El paginador deja de tener <code>all()</code> y pasa a tener <code>each()</code>, a tandas y sin pasar por la ventana que la lista cachea. El <code>tasks.xml</code> sale por <code>TasksXmlWriter</code>, escrito a mano porque el <code>XMLStreamWriter</code> de la JDK no escapa lo que un lector normaliza —un <code>\r</code> del cuerpo volvería como <code>\n</code>—.</li>
+      <li><strong>Una foto.</strong> <code>TaskPager.snapshot</code> abre una conexión de lectura <strong>propia</strong> con una transacción: en WAL eso es la base en un instante, los escritores no esperan y la ventana sigue viendo lo que se escribe. Sin ella, una tarea marcada a mitad de una exportación de minutos saltaba de cubo por debajo del <em>keyset</em> y salía dos veces.</li>
+      <li><strong>El portapapeles tiene tope</strong> —10.000 tareas— y por encima se ofrece un fichero, que se escribe a un temporal y sólo sustituye al destino cuando está entero y forzado a disco.</li>
+      <li><strong>Exportar y quitar</strong> deja de ocurrir en el EDT y en una transacción: el repositorio pasa a <strong>solo lectura</strong> mientras se exporta —lo que se borra es exactamente lo que salió—, se exporta sobre la foto de <code>RepoSnapshot</code> y se <strong>comprueba que salieron todas</strong> las que la foto contaba antes de borrar nada. Después, por tandas de 500 en su propia transacción —ningún otro comando espera más que una tanda— y el directorio de adjuntos con <code>walkFileTree</code>, que no materializa las rutas que <code>Files.walk().sorted()</code> tenía que ordenar.</li>
+    </ul>
+  </div>
 </section>
 
 <!-- ============ 10 ============ -->

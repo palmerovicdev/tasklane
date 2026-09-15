@@ -68,6 +68,12 @@ internal class SqlitePager(
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val today: LocalDate = LocalDate.now(zone),
     private val firstDayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
+    /**
+     * Cómo abrir una conexión de lectura **propia** para [snapshot]. `null` == este
+     * paginador no sabe congelarse y exporta sobre la conexión compartida, que es lo que
+     * pasa en los tests que no lo necesitan.
+     */
+    private val detach: (() -> Sql)? = null,
 ) : TaskPager {
 
     /** Una combinación de `(marcada, prioridad)`. Ver «la mezcla de cubos» arriba. */
@@ -289,16 +295,51 @@ internal class SqlitePager(
     }
 
     /**
-     * Todo lo de un trozo de la lista, sin `LIMIT`. Lo pide **sólo la exportación**,
-     * que por definición es O(n): exportar un millón de tareas es leer un millón de
-     * tareas. Escribirlo en *streaming* es la Fase 5.
+     * Todo lo de un trozo de la lista, a tandas y **sin la ventana**.
+     *
+     * Por el mismo camino que [page] —cubo a cubo, *keyset* dentro de cada uno— pero sin
+     * pasar por [Window], que existe para crecer y retenerlo todo: es exactamente lo que
+     * una exportación de un millón de filas no puede hacer. Cada tanda es un salto de
+     * índice y un `LIMIT`, y lo único que sobrevive entre una y la siguiente es la tupla
+     * del orden de su última fila.
      */
-    override fun all(query: PageQuery): List<Task> {
-        val out = ArrayList<Task>()
+    override fun each(query: PageQuery, chunk: Int, block: (List<Task>) -> Unit) {
         for (index in buckets.indices) {
-            out += select(query.stateId, buckets[index], query.group, null, Int.MAX_VALUE).map { it.task }
+            var from: Key? = null
+            while (true) {
+                val rows = select(query.stateId, buckets[index], query.group, from, chunk)
+                if (rows.isEmpty()) break
+                block(hydrate(rows.map { it.task }))
+                if (rows.size < chunk) break
+                val last = rows.last()
+                from = Key(index, last.sortDate, last.id, 0)
+            }
         }
-        return hydrate(out)
+    }
+
+    /**
+     * Una conexión de lectura propia con una transacción abierta mientras dure [block].
+     *
+     * En WAL, una transacción de lectura ve la base **tal y como estaba cuando empezó**,
+     * y los escritores siguen escribiendo sin esperarla: la ventana responde y la
+     * exportación no ve nada de lo que pase después. Propia y no la del paginador de
+     * siempre porque esa la comparte la lista, y abrirle una transacción congelaría
+     * también lo que la ventana pinta.
+     *
+     * El precio lo paga el diario: mientras la foto esté abierta, el WAL no se puede
+     * vaciar más allá de ella y crece con lo que se escriba entretanto. Es proporcional a
+     * lo que dure la exportación, y se recupera en el siguiente *checkpoint*.
+     */
+    override fun <T> snapshot(block: (TaskPager) -> T): T {
+        val open = detach ?: return block(this)
+        val sql = open()
+        try {
+            return sql.transaction {
+                block(SqlitePager(sql, repo, config, filter, now, zone, today, firstDayOfWeek, detach = null))
+            }
+        } finally {
+            sql.close()
+        }
     }
 
     // --------------------------------------------------------------------- enseñar
@@ -437,12 +478,11 @@ internal class SqlitePager(
             params += from.sortDate
             params += from.id
         }
-        val cap = if (limit == Int.MAX_VALUE) "" else " LIMIT ?"
-        if (cap.isNotEmpty()) params += limit
+        params += limit
 
         return sql.rows(
             "SELECT ${TaskRows.columns("t")}, ${clause.alias}.sort_date FROM ${clause.source} WHERE $where " +
-                "ORDER BY ${clause.alias}.sort_date DESC, ${tie(clause.alias)} DESC$cap",
+                "ORDER BY ${clause.alias}.sort_date DESC, ${tie(clause.alias)} DESC LIMIT ?",
             *params.toTypedArray(),
         ) { Row(TaskRows.read(it), it.getLong(13)) }
     }

@@ -105,6 +105,41 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.2.0 &mdash; the big operations</h3>
+            <p><b>Exporting a million tasks is still reading a million tasks.</b> What
+               changes is everything around it: it no longer holds what it reads, no longer
+               runs on the UI thread, no longer blocks anything else, and can be
+               cancelled.</p>
+            <ul>
+              <li><b>Exports stream.</b> With 100,000 tasks, copying a 33,000-row state used
+                  to hold 280&nbsp;MB; it now peaks at 2.2&nbsp;MB. Exporting the repository
+                  to <code>tasks.xml</code> held 1.5&nbsp;GB; now 15&nbsp;MB. What comes out
+                  is the tab <b>as it was when you clicked</b>, even if you keep editing.</li>
+              <li><b>Past 10,000 tasks, export to a file</b> instead of flooding the
+                  clipboard. The file is written in full or not at all.</li>
+              <li><b>Acting on many tasks at once</b> &mdash; move, complete, bookmark,
+                  change priority, delete &mdash; is one operation and one repaint, not one
+                  per row. Above ten rows it runs in the background with a progress bar,
+                  and <b>cancelling undoes it</b>. Bookmarking 2,000 tasks went from 1.9&nbsp;s
+                  to 0.74&nbsp;s.</li>
+              <li><b>&ldquo;Export and Remove&rdquo; works at any size.</b> The repository
+                  goes read-only, every task is exported and <b>counted before anything is
+                  deleted</b>, and removal runs in batches: with 100,000 tasks, the longest
+                  any other action waits went from 12.3&nbsp;s to 263&nbsp;ms.</li>
+              <li><b>A daily backup of the task database</b>,
+                  <code>tasklane.db.backup</code>, made in the background only when
+                  something changed. After an unclean IDE shutdown the database is checked,
+                  and if it is damaged you are told, with the date of that backup.</li>
+            </ul>
+            <p><b>Fixed:</b> a repository renamed or deleted from disk vanished from the
+               selector with its tasks inside (since 2.0.0); exporting a new repository to
+               XML ended in a &ldquo;corrupt file&rdquo; warning; exporting to XML during an
+               unfinished migration overwrote the original; the migration notice showed
+               <code>{1}</code> instead of a path.</p>
+            <p><b>Compatibility:</b> no format change. The database schema stays at
+               version 1, and 2.1.0 opens a project used by 2.2.0 as if nothing
+               happened.</p>
+
             <h3>2.1.0 &mdash; pasted images stop weighing</h3>
             <p><b>Screenshots used to live in one flat folder that had to be listed whole
                every time the project opened, and the list decoded the full-size original

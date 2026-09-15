@@ -112,8 +112,14 @@ internal class ListSync(private val tree: JTree, private val stateId: StateId) {
         }
     }
 
-    /** Todo lo de un trozo de la lista, sin tope. Sólo lo pide la exportación. */
-    fun contents(group: GroupKey?): List<Task> = pager.all(PageQuery(stateId, group))
+    /**
+     * Cuántas filas tiene un trozo de la lista, **sin leerlo**: la cabecera de un grupo
+     * ya lo dice, y la raíz lo cuenta la pestaña. Lo pide la exportación para decidir el
+     * destino antes de leer nada. Ver `ExportService.copy`.
+     */
+    fun sizeOf(group: GroupKey?): Int =
+        if (group == null) pager.counts()[stateId] ?: 0
+        else outline.firstOrNull { it.key == group }?.size ?: 0
 
     // ------------------------------------------------------------------ sincronizar
 

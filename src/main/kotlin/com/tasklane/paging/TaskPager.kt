@@ -70,15 +70,41 @@ internal interface TaskPager {
     fun reveal(stateId: StateId, id: TaskId): Reveal?
 
     /**
-     * Todo lo de un trozo de la lista, sin `LIMIT`.
+     * Todo lo de un trozo de la lista, **a tandas**, en el orden de la lista.
      *
-     * Lo pide **sólo la exportación**, que por definición es O(n) —exportar un millón
-     * de tareas es leer un millón de tareas— y por eso está anotada como operación
-     * grande de la Fase 5. El resto de la UI no tiene por qué llamar aquí.
+     * Lo pide **sólo la exportación**, que por definición es O(n) —exportar un millón de
+     * tareas es leer un millón de tareas—. Hasta la Fase 5 esto era `all()` y devolvía
+     * una lista: exportar un estado de 300.000 filas era tener 300.000 `Task` vivas antes
+     * de escribir la primera línea. Ahora a [block] le llegan tandas de [chunk] y lo que
+     * se retiene es la tanda.
+     *
+     * [PageQuery.limit] no cuenta aquí: sin tope es justamente lo que se pide. Para parar
+     * a medias —cancelar— [block] lanza, y la excepción sale tal cual.
      */
-    fun all(query: PageQuery): List<Task>
+    fun each(query: PageQuery, chunk: Int = EXPORT_CHUNK, block: (List<Task>) -> Unit)
+
+    /**
+     * Lo mismo que este paginador, pero **congelado** mientras dure [block].
+     *
+     * Exportar un millón de tareas son minutos, y durante esos minutos la ventana sigue
+     * abierta y el usuario sigue editando. Leyendo por *keyset* sobre una base que cambia
+     * por debajo, una tarea que se marca a mitad de camino salta de cubo y sale **dos
+     * veces** —o ninguna—. Una exportación es una foto de la pestaña en el momento de
+     * pulsar, y esto es lo que la hace serlo.
+     *
+     * Por defecto es el propio paginador: uno que ya describe un instante inmutable
+     * —[MemoryPager], que ordena una lista que ya tiene— no tiene nada que congelar.
+     */
+    fun <T> snapshot(block: (TaskPager) -> T): T = block(this)
 
     companion object {
+        /**
+         * Tareas por tanda al exportar. Lo bastante grande como para que el coste de cada
+         * consulta se reparta, y lo bastante pequeño como para que lo retenido no se
+         * note: dos mil tareas de la especificación son unos 25 MB en el peor caso.
+         */
+        const val EXPORT_CHUNK = 2_000
+
         /**
          * Filas por página.
          *
@@ -162,5 +188,5 @@ internal object EmptyPager : TaskPager {
     override fun outline(stateId: StateId): List<GroupOutline> = emptyList()
     override fun page(query: PageQuery, from: Cursor?): TaskPage = TaskPage(emptyList())
     override fun reveal(stateId: StateId, id: TaskId): Reveal? = null
-    override fun all(query: PageQuery): List<Task> = emptyList()
+    override fun each(query: PageQuery, chunk: Int, block: (List<Task>) -> Unit) = Unit
 }

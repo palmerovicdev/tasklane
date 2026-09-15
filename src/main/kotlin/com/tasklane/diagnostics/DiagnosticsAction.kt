@@ -19,6 +19,7 @@ import com.tasklane.data.store.StorageLayout
 import com.tasklane.service.TaskService
 import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
+import java.nio.file.Files
 import javax.swing.Action
 import javax.swing.JComponent
 
@@ -84,6 +85,16 @@ internal fun showDiagnostics(project: Project) {
                     quotaBytes = AttachmentQuota.bytesOf(config.imageQuotaMegabytes),
                     imageMaxSize = config.imageMaxSize,
                     metrics = metrics,
+                    store = service.integrityState().let { (last, pending) ->
+                        val backup = service.backupFile()?.takeIf { Files.exists(it) }
+                        StoreHealth(
+                            backupAt = backup?.let { Files.getLastModifiedTime(it).toMillis() },
+                            backupBytes = backup?.let(Files::size) ?: 0L,
+                            checkedAt = last?.at,
+                            problems = last?.n ?: 0L,
+                            pending = pending,
+                        )
+                    },
                 )
                 text = DiagnosticsReport.render(report)
             }

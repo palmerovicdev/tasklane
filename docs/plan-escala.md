@@ -1519,6 +1519,252 @@ millón de tareas — y por tanto tiene que ser cancelable, medido y en segundo 
 
 ---
 
+## 5-bis. Resultados de la Fase 5 · CERRADA
+
+> Cerrada en la **2.2.0**. Lo que es O(n) por definición sigue siéndolo —exportar un
+> millón de tareas es leer un millón de tareas—, pero deja de retener lo que lee, deja de
+> ocurrir en el hilo de interfaz, deja de bloquear a los demás y se puede cancelar. Y el
+> `.bak` que se copiaba en cada guardado tiene por fin su sustituto.
+
+```
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=100000 -PtestHeap=4g -PbenchBlobs=100000
+```
+
+### 5-bis.1 La puerta, medida
+
+La puerta de esta fase no estaba escrita con números, y no por descuido: el tiempo de una
+operación O(n) no se puede prometer, es aritmética. Lo que sí se puede prometer, y es lo
+que se midió, es **memoria constante, EDT libre y nadie esperando**. Todo sobre 100.000
+tareas del corpus de la especificación, con el camino de la 2.1 al lado en la misma
+ejecución (§1-bis.5).
+
+| Con 100.000 tareas | 2.1 | **2.2** |
+|---|---:|---:|
+| Exportar un estado entero (33.288 filas, 38 MB de texto) | 1.961 ms · **280 MB** retenidos | 1.693 ms · **2,2 MB** de pico |
+| Exportar el repositorio a `tasks.xml` (276 MB) | 5.037 ms · **1.516 MB** retenidos | 4.813 ms · **15 MB** de pico |
+| Borrar el árbol de 100.000 capturas | 10.167 ms · 62 MB antes del primer borrado | 9.894 ms · **0,1 MB** |
+| Quitar el repositorio: lo más que espera otro comando | **12.282 ms** (una transacción) | **263 ms** (la tanda más larga; p50 80) |
+| Mover, marcar o borrar 2.000 filas seleccionadas | 1.861 ms · 2.000 transacciones y snapshots | **739 ms** · una y uno |
+| Copia de seguridad de la base (1.014 MB → 980 MB) | un `.bak` en **cada** guardado | **1,4 s**, una vez al día como mucho |
+| `integrity_check` | — | **4,0 s**, sólo tras un cierre sucio |
+
+Tres lecturas de esa tabla, porque no todas las filas dicen lo mismo:
+
+**Las dos primeras son la fase.** El tiempo apenas se mueve —es leer y escribir lo mismo—
+y la memoria cae dos órdenes de magnitud. Lo que queda de pico es **una tanda** de dos mil
+tareas, así que no depende de N: a un millón, la 2.1 moría con `OutOfMemoryError` antes de
+escribir un byte —más de 13 GB de `Task` y de texto, con el heap de fábrica de 2 GB— y la 2.2
+retiene lo mismo que aquí.
+
+**La cuarta no mide lo rápido sino lo que bloquea.** Quitar por tandas tarda más en total
+—20,7 s contra 12,3 s— y es a propósito: la transacción única tenía el escritor tomado de
+principio a fin, así que **cualquier** comando del usuario —marcar una tarea de otro
+repositorio desde el EDT— esperaba doce segundos. A un millón serían dos minutos de IDE
+congelado. Ver §5-bis.3.5 para lo que costó dejar el total en 20,7 y no en 34.
+
+**La quinta tiene letra pequeña**: ver §5-bis.3.3 y §5-bis.5.
+
+### 5-bis.2 Dónde el plan acertó
+
+- **«`TaskExporter` pasa a escribir sobre un `Writer`, por páginas.»** Tal cual, con una
+  mejora gratis: la versión que devuelve un `String` está construida **encima** del
+  *stream*, así que el formato sigue viviendo en un sitio y los quince tests que lo
+  fijaban prueban las dos puertas.
+- **El portapapeles acotado a 10.000.** Diez mil tareas de la especificación son ~20 MB
+  de texto; por encima se ofrece un fichero y se dice por qué.
+- **`VACUUM INTO` a `.db.backup`.** Funciona desde una conexión de solo lectura —lo fijó
+  el spike antes de escribir una línea—, así que copiar no para ni a la ventana ni al
+  escritor.
+- **`integrity_check` sólo tras un cierre sucio.** A 100.000 son 4 s; a un millón, un
+  minuto. En cada apertura no cabe.
+
+### 5-bis.3 Dónde el plan se quedó corto — y qué cambió
+
+**1. Una exportación tiene que ser una foto.** El plan dice «por páginas» y no dice sobre
+qué. Paginando por *keyset* sobre una base que se sigue editando, una tarea que se marca
+a mitad de una exportación de minutos **salta de cubo** y sale dos veces, o ninguna. La
+salida es `TaskPager.snapshot`: una conexión de lectura **propia** con una transacción
+abierta, que en WAL es la base en un instante. Propia y no la de la lista, porque abrirle
+una transacción a ésa congelaría también lo que pinta la ventana. El precio lo paga el
+diario, que no se vacía más allá de la foto mientras dura.
+
+**2. «Exportar y quitar» necesitaba dos garantías que no estaban escritas.** «Exportar con
+progreso, y sólo entonces `DELETE`» deja un hueco por cada lado. Por uno, lo que se crea
+en ese repositorio **mientras** se exporta se borraría sin haber salido: el repositorio
+pasa a solo lectura durante la operación. Por el otro, nada comprobaba que salió **todo**:
+se exporta sobre la foto de `RepoSnapshot` y se compara lo escrito con lo que la foto
+contaba; si no cuadra, **no se borra nada** y se dice. Los estados se sacan de `counter`
+y no de la configuración, que se dejaría fuera las tareas de un estado ya borrado justo
+antes del `DELETE`.
+
+**3. El coste de una operación masiva no estaba donde parecía.** Lo evidente era que el
+lote costara transacciones, y lo arregla `TaskCommand.Batch`. Pero medido el desglose de
+escribir dos mil filas sobre 10.000 tareas:
+
+| Pieza | Coste | Por fila |
+|---|---:|---:|
+| leer el sujeto | 76 ms | 38 µs |
+| planificar | 0,4 ms | — |
+| **escribir** | **487 ms** | **243 µs** |
+| └ de eso, el índice de texto | ~50 ms | 25 µs |
+
+El 90 % de la escritura eran **las ~30 sentencias preparadas y cerradas por fila**: la
+tarea, sus ocho etiquetas, sus cinco anclas, sus diez referencias y los tres borrados de
+delante. Es exactamente lo que la migración ya resolvía con `Sql.batch`, y la escritura
+normal pasa a hacer lo mismo: una lectura de lo que había por tanda y un lote por tabla.
+De paso **se salta el índice de texto cuando el texto no cambió**, que es mover, completar,
+marcar y cambiar la prioridad. Escribir las dos mil filas: 487 → **247 ms**.
+
+**4. «Hasta una página en el acto» no cabía.** La primera versión aplicaba en el EDT los
+lotes de hasta cincuenta filas —«lo que cabe en una selección sin desplazarse»—, y
+cincuenta filas son 23 ms a 10.000 tareas y 31 ms a 100.000. El umbral acabó en **diez**:
+2,3 ms de p50 y 9 de p99 a 100.000. Veinte cabían a 10.000 y dejaban de caber con holgura a
+100.000, que es la advertencia del §5-bis.5.
+
+**5. Por tandas no bastaba: el diario se volcaba en cada una.** Las tandas de 500 salían a
+46 ms sobre 10.000 tareas y a 172 ms sobre 100.000, y quitar el repositorio entero tardaba
+**34 s**, casi el triple que la transacción única. La caché era la sospechosa obvia y
+explicaba poco; lo que pesaba era el **checkpoint automático de SQLite cada mil páginas**,
+que con una confirmación por tanda copia a la base las mismas páginas interiores de los
+índices una y otra vez. Medido en la misma ejecución:
+
+| Quitar 100.000 tareas | Total | Tanda p50 | La más larga |
+|---|---:|---:|---:|
+| Tandas de 500, tal cual | 33,9 s | 172 ms | 419 ms |
+| + caché de 256 MB | 32,4 s | 146 ms | 307 ms |
+| **+ volcado del diario cada 20.000 páginas** | **20,7 s** | **80 ms** | **263 ms** |
+| Una transacción (2.1) | 12,3 s | — | 12.282 ms |
+
+`TaskStore.bulk` gana un parámetro para eso, y sólo lo usa quitar un repositorio. El
+lote masivo en segundo plano usa la caché grande sin espaciar nada —es una sola
+transacción—, y ahí la caché sí se nota: 965 → **739 ms** para dos mil filas.
+
+**6. El cierre sucio no necesita marcador.** El plan da por hecho que hay que detectarlo.
+SQLite ya deja la señal: con WAL, cerrar la última conexión vuelca el diario y **borra**
+`tasklane.db-wal`; si al abrir sigue ahí con algo dentro, la sesión anterior no cerró. La
+comprobación pendiente sí se apunta en la base, para que una que no llega a terminar se
+repita en la apertura siguiente.
+
+**7. La copia no puede fecharse en la base.** Lo natural era una fila en `chore` con la
+fecha de la última copia. Escribirla modifica la base, y al día siguiente la base consta
+como cambiada aunque nadie haya tocado una tarea: se copiaría cada día para siempre. La
+fecha es la **del propio fichero** de la copia, y de paso una copia borrada a mano se
+rehace sola.
+
+**8. Nunca copiar una base bajo sospecha.** No estaba en el plan y es la mitad de que la
+copia sirva: la copia **sustituye** a la anterior, así que copiar una base dañada borraría
+la última buena justo cuando más falta hace. Con una comprobación pendiente o con daños en
+la última, no se copia. Tampoco sin sitio: se exige vez y media lo que ocupa la base.
+
+**9. `PRAGMA optimize` hoy no hace nada, y se deja con su centinela.** Con el SQLite 3.42
+de la plataforma y sin estadísticas previas, `optimize` no lanza `ANALYZE`. Se deja
+—con `analysis_limit`, que convierte el análisis en muestreo— porque es lo que SQLite pide
+antes de cerrar y lo que costaría no tener el día que la plataforma lo actualice. Lo que no
+se podía arriesgar es que unas estadísticas cambiaran el plan de la lista, sobre el que
+descansa la Fase 3 entera: `TaskDbTest` lanza un `ANALYZE` completo y comprueba que cada
+consulta sigue yendo por su índice cubriente y sin ordenar en memoria.
+
+**10. El XML hay que escribirlo a mano.** `XMLStreamWriter`, lo obvio, no escapa lo que un
+lector de XML **normaliza** al leer: un `\r` del cuerpo vuelve como `\n` y un salto de
+línea en un atributo vuelve como un espacio. `TasksXmlWriter` escapa como JDOM y se
+comprueba leyendo lo escrito con **los dos** lectores. Y lo que XML 1.0 no admite ni
+escapado —el `ESC` de una salida de terminal pegada— se cambia por `U+FFFD` y se cuenta:
+el códec de JDOM tumbaba la exportación entera por una sola tarea.
+
+### 5-bis.4 Lo que esta fase destapó de las anteriores
+
+Cinco fallos, todos en caminos que esta fase tenía que recorrer, y ninguno con síntoma
+hasta que se recorrían:
+
+1. **Un repositorio ausente desaparecía con sus tareas dentro** (Fase 3). El catálogo
+   decidía si una entrada que ya no se detecta «tiene tareas» mirando si existe su
+   `tasks.xml`, y desde la 2.0 ese fichero se renombra a `.migrated` al importarlo —y los
+   repositorios creados después no lo tienen nunca—. Renombrar una carpeta hacía
+   desaparecer el repositorio del selector, y con él la única puerta para sacar sus
+   tareas: «Exportar y quitar». El catálogo pregunta ahora también a la base.
+2. **Exportar a XML un repositorio nuevo acababa en un error de fichero corrupto** (Fase 3).
+   Sin fila en `imported`, el `tasks.xml` recién escrito parecía uno pendiente de importar;
+   la siguiente detección lo importaba encima de lo que ya había, chocaba con los mismos
+   identificadores y lo mandaba a cuarentena. Exportar apunta ahora el repositorio como
+   importado **antes** de que el fichero exista.
+3. **Exportar a XML con una migración a medias sobrescribía el original** (Fase 3). Con
+   una importación cancelada, la base tiene una parte del repositorio; escribirla encima
+   del `tasks.xml` que la migración iba a retomar perdía el resto. Ahora se niega y lo dice.
+4. **Borrar una selección era cuadrático** (Fase 3). `Delete` filtraba con
+   `it in command.ids.toSet()`, que construye el conjunto **por cada tarea**: diez mil
+   filas seleccionadas eran cien millones de inserciones en un `HashSet`.
+5. **El aviso de migración enseñaba `{1}` en vez de la ruta** (Fase 3). `project's` en un
+   mensaje con parámetros abre una cita de `MessageFormat` que se come el resto.
+
+### 5-bis.5 Lo que sigue creciendo con N, y por qué se acepta
+
+**Escribir muchas filas repartidas.** Un comando suelto cuesta lo mismo a 10.000 que a
+100.000 —0,33 y 0,34 ms—, pero un lote de dos mil filas pasa de 330 a 965 ms. Por fila, lo
+que crece es escribir **páginas de índice que ya no caben en la caché**: dos mil tareas de
+la especificación son unas ochenta mil filas hijas repartidas por todos los índices. La
+caché grande recupera un cuarto; el resto es disco. Se acepta porque ocurre en segundo
+plano, en una selección que por construcción está acotada por lo que el usuario ha
+cargado, y porque la alternativa —mantener en SQL una segunda copia de la semántica del
+reducer para cada operación masiva— es exactamente lo que el proyecto evita desde la
+Fase 3. Es la razón de que el umbral en el acto sea diez y no veinte.
+
+**Copiar y comprobar la base.** Son O(tamaño de la base) por definición: 1,4 s y 4 s a
+100.000 tareas, diez veces lo de 10.000. Van en segundo plano, una vez al día la primera y
+sólo tras una caída la segunda, y **no se pueden interrumpir a mitad** —la plataforma no
+expone `sqlite3_interrupt`—: cancelar espera a que acabe la sentencia en marcha.
+
+### 5-bis.6 Qué cambia para quien lo usa
+
+- **Copiar una pestaña de más de 10.000 tareas ofrece un fichero** en vez de llenar el
+  portapapeles. Exportar va siempre en segundo plano, con barra y cancelable, y lo que sale
+  es la pestaña en el momento de pulsar.
+- **Mover, completar, marcar, cambiar la prioridad o borrar muchas tareas a la vez** es una
+  sola operación: un repintado en vez de uno por fila, y por encima de diez filas en
+  segundo plano con barra. **Cancelar deshace**: no queda media selección movida.
+- **«Exportar y quitar» funciona con repositorios de cualquier tamaño**, y vuelve a
+  aparecer: un repositorio renombrado o borrado del disco se queda en el selector mientras
+  tenga tareas. Por encima de 10.000 las guarda en un fichero, comprueba que salieron todas
+  y sólo entonces borra, sin congelar nada.
+- **Exportar a XML** ya no se lleva la memoria del IDE, escribe entero o nada, y deja de
+  acabar en un aviso de fichero corrupto.
+- **Hay una copia de la base**, `tasklane.db.backup`, de como mucho un día. Tras un cierre
+  inesperado del IDE la base se comprueba sola y, si tiene daños, se avisa con la fecha de
+  esa copia. *Diagnostics* enseña las dos cosas.
+- Lo que **no** cambia: el formato de lo que se copia, el orden de la lista, el esquema de
+  la base —sigue en la versión 1, y una 2.1 abre un proyecto usado por la 2.2 sin notar
+  nada—.
+
+### 5-bis.7 Lo que quedó construido
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `TaskExporter.Stream` | `main/…/domain/export/` | El formato, tarea a tarea sobre cualquier `Appendable`. La versión `String` está construida encima |
+| `TaskPager.each` · `snapshot` | `main/…/paging/` | La lista entera a tandas, sin la ventana que retiene; y congelada mientras dura |
+| `RepoSnapshot` | `main/…/data/sqlite/` | Un repositorio entero en un instante: cuenta, estados en uso y sus tareas, por estado o en orden manual |
+| `TasksXmlWriter` | `main/…/data/sqlite/` | El `tasks.xml` en *streaming*, con el escapado que los lectores necesitan |
+| `TaskStore.upsertAll` | `main/…/data/sqlite/` | La escritura por lotes: una sentencia por tabla y el índice de texto sólo si cambió el texto |
+| `TaskStore.forgetBatch` · `bulk(checkpointPages)` | `main/…/data/sqlite/` | Quitar por tandas con contadores exactos en cada una, y sin volcar el diario en cada tanda |
+| `TaskDb.backupTo` · `checkIntegrity` · `dirty` | `main/…/data/sqlite/` | La copia con `VACUUM INTO`, la comprobación, y el cierre sucio leído del diario |
+| `StoreMaintenance` | `main/…/data/sqlite/` | Cuándo se copia y cuándo se comprueba. Puro |
+| `TaskCommand.Batch` | `main/…/domain/command/` | Muchos comandos como uno: una transacción, un snapshot, la semántica de los sueltos |
+| `ExportService` · `TaskService.applyAll` · `removeRepo` | `main/…/service/` | El destino, la foto, la comprobación antes de borrar, y la barra |
+| `MaintenanceActivity` | `main/…/startup/` | Antes `AttachmentMaintenanceActivity`: la base primero y los adjuntos después |
+| `TasksXmlWriterTest` · `RepoSnapshotTest` · `StoreMaintenanceTest` | `test/…/data/sqlite/` | Los dos lectores leen lo que se escribe; la foto no se mueve y lo cuenta todo; las dos políticas |
+| `TaskDbTest` · `TaskStoreTest` · `SqlitePagerTest` · `PlanTest` | `test/…` | La caída simulada, la copia que se abre, la base dañada, el centinela de los planes; tandas y contadores; exportar da la lista de la ventana; el lote hace lo que los sueltos |
+| `ScaleBenchmark` (5 escenarios) | `test/…/bench/` | Las operaciones grandes con el camino de la 2.1 al lado, y el experimento del diario |
+
+### 5-bis.8 Qué sigue siendo el techo
+
+| | Coste a 100.000 | Dónde se arregla |
+|---|---:|---|
+| Recuperar sola una base dañada | se avisa con la copia; no se restaura | **Fase 6** (backup + aviso + cuarentena) |
+| Probar que una caída a mitad deja todo sano | simulada en un test, no provocada | **Fase 6** |
+| Escribir un lote grande | 739 ms para 2.000 filas, y crece con la base | Acotado por la selección — §5-bis.5 |
+| La migración desde `tasks.xml` | confirma una tanda cada 2.000 tareas | Probablemente gana lo mismo que quitar con el diario espaciado (§5-bis.3.5); **sin medir** |
+| EDT | nada por encima del presupuesto | — |
+
+---
+
 ### Fase 6 — Endurecimiento *(~2 semanas)*
 
 1. **Pruebas de caída**: matar el proceso a mitad de una transacción, a mitad de la

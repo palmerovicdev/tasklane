@@ -405,6 +405,171 @@ class TaskStoreTest {
         assertTrue(store.anchorsIn("src/NoExiste.kt").isEmpty())
     }
 
+    // ------------------------------------------------------------- Fase 5
+
+    /**
+     * La escritura se salta el índice de texto cuando el texto no cambió. Lo que tiene que
+     * seguir siendo cierto: que lo que no se reindexa se sigue encontrando, y que lo que sí
+     * cambió —el cuerpo, las etiquetas— se reindexa.
+     */
+    @Test
+    fun `saltarse el indice de texto no lo deja atras`() = withStore { store, db ->
+        store.put(task("a", body = "Revision del login", tags = listOf("api")))
+
+        store.put(task("a", body = "Revision del login", tags = listOf("api"), state = TasklaneConfig.DOING, bookmarked = true))
+        assertEquals("mover y marcar no pierden la entrada", 1, matches(db, "revision"))
+
+        store.put(task("a", body = "Revision del login", tags = listOf("urgente"), state = TasklaneConfig.DOING))
+        assertEquals("cambiar una etiqueta sí reindexa", 1, matches(db, "tags_text:urgente"))
+        assertEquals(0, matches(db, "tags_text:api"))
+
+        store.put(task("a", body = "Pulir la tarjeta", tags = listOf("urgente")))
+        assertEquals(0, matches(db, "revision"))
+        assertEquals(1, matches(db, "tarjeta"))
+        assertEquals("una sola entrada por tarea", 1, db.writer.count("SELECT count(*) FROM task_fts WHERE task_fts MATCH 'tarjeta OR revision OR urgente'"))
+        assertCountersMatch(db)
+    }
+
+    /**
+     * La misma tarea dos veces en un lote: gana la última, como ganaba escribiéndolas una
+     * detrás de otra. Sin eso, una tarea nueva repetida recibía dos `seq` y el índice de
+     * texto se quedaba apuntando a una fila que no existe.
+     */
+    @Test
+    fun `una tarea repetida en el mismo lote la escribe la ultima`() = withStore { store, db ->
+        store.apply(CONFIG, listOf(Mutation.Upsert(listOf(task("n", body = "Primera version"), task("n", body = "Segunda version", tags = listOf("x"))))))
+
+        assertEquals(1, db.writer.count("SELECT count(*) FROM task"))
+        assertEquals("Segunda version", store.task(TaskId("n"))!!.body)
+        assertEquals(0, matches(db, "primera"))
+        assertEquals(1, matches(db, "segunda"))
+        assertEquals(
+            "el índice de texto apunta a la fila de verdad",
+            db.writer.count("SELECT seq FROM task WHERE id = 'n'"),
+            db.writer.count("SELECT rowid FROM task_fts WHERE task_fts MATCH 'segunda'"),
+        )
+        assertCountersMatch(db)
+    }
+
+    /**
+     * **Quitar un repositorio por tandas deja los contadores exactos en cada tanda.** Si
+     * el IDE se cae a mitad, lo que queda tiene que ser un repositorio con menos tareas y
+     * unas pestañas que lo cuentan bien — no uno con contadores que ya no cuadran.
+     */
+    @Test
+    fun `quitar por tandas deja los contadores exactos en cada tanda`() = withStore { store, db ->
+        val otro = com.tasklane.domain.model.RepoKey("otro")
+        store.importBatch(
+            (0 until 25).map {
+                task(
+                    "t$it",
+                    body = "Zarandaja numero $it",
+                    state = if (it % 3 == 0) TasklaneConfig.DONE else TasklaneConfig.TODO,
+                    completedAt = if (it % 3 == 0) Instant.parse("2026-01-02T00:00:00Z") else null,
+                    bookmarked = it % 4 == 0,
+                    tags = listOf("a", "b"),
+                    anchors = listOf(CodeAnchor.of("A.kt", it)),
+                )
+            } + task("keep", body = "Lo del otro repo", repo = otro),
+            CONFIG,
+        )
+
+        var batches = 0
+        while (true) {
+            val removed = store.forgetBatch(REPO, limit = 7)
+            if (removed == 0) break
+            batches++
+            assertTrue(removed <= 7)
+            assertCountersMatch(db)
+        }
+
+        assertEquals("25 tareas de 7 en 7", 4, batches)
+        assertEquals(0, db.writer.count("SELECT count(*) FROM task WHERE repo = 'root'"))
+        assertEquals("las tablas hijas se van en cascada", 0, db.writer.count("SELECT count(*) FROM tag WHERE repo = 'root'"))
+        assertEquals(0, db.writer.count("SELECT count(*) FROM anchor"))
+        assertEquals("y el índice de texto a mano", 0, matches(db, "zarandaja"))
+        assertTrue(store.hasTasks(otro))
+        assertTrue("sin tareas, el repositorio deja de tener datos", !store.hasTasks(REPO))
+    }
+
+    @Test
+    fun `las filas de blob de un repositorio se quitan a tandas`() = withStore { store, db ->
+        val born = Instant.parse("2026-01-01T00:00:00Z")
+        store.write {
+            store.adoptBlobs(
+                REPO,
+                (0 until 12).map {
+                    com.tasklane.data.attachment.BlobRecord(
+                        com.tasklane.domain.model.AttachmentId("%064d".format(it)),
+                        10,
+                        1,
+                        1,
+                        born,
+                    )
+                },
+                born.toEpochMilli(),
+            )
+            store.adoptBlobs(
+                com.tasklane.domain.model.RepoKey("otro"),
+                listOf(com.tasklane.data.attachment.BlobRecord(com.tasklane.domain.model.AttachmentId("f".repeat(64)), 10, 1, 1, born)),
+                born.toEpochMilli(),
+            )
+        }
+
+        assertEquals(5, store.forgetBlobRows(REPO, limit = 5))
+        assertEquals(5, store.forgetBlobRows(REPO, limit = 5))
+        assertEquals(2, store.forgetBlobRows(REPO, limit = 5))
+        assertEquals(0, store.forgetBlobRows(REPO, limit = 5))
+        assertEquals("lo del otro repositorio no se toca", 1, db.writer.count("SELECT count(*) FROM blob"))
+    }
+
+    /**
+     * Una operación masiva es **una** transacción aunque dure: si quien mira el progreso
+     * cancela a mitad, no queda media selección escrita.
+     */
+    @Test
+    fun `cancelar desde el progreso deshace la transaccion entera`() = withStore { store, db ->
+        val tasks = (0 until 300).map { task("t$it") }
+        store.importBatch(tasks, CONFIG)
+        val moved = tasks.map { it.copy(stateId = TasklaneConfig.DOING) }
+
+        val calls = mutableListOf<Int>()
+        val result = runCatching {
+            store.apply(CONFIG, listOf(Mutation.Upsert(moved))) { done, total ->
+                calls += done
+                assertEquals(300, total)
+                if (done >= 200) throw IllegalStateException("cancelado")
+            }
+        }
+
+        assertTrue(result.isFailure)
+        assertTrue("el progreso se avisa por el camino", calls.isNotEmpty())
+        assertEquals("nada movido", 0, db.writer.count("SELECT count(*) FROM task WHERE state = 's-doing'"))
+        assertCountersMatch(db)
+    }
+
+    /**
+     * El orden del `tasks.xml` es el manual, y por *keyset* sobre `(ord, seq)`: con
+     * órdenes repetidos —un fichero editado a mano— una tanda que corte en mitad del
+     * empate no puede perder ni repetir.
+     */
+    @Test
+    fun `leer por orden a tandas no pierde ni repite con ordenes empatados`() = withStore { store, db ->
+        val tasks = (0 until 23).map { task("t%02d".format(it), order = (it / 4) * 1000L) }.shuffled(java.util.Random(7))
+        store.importBatch(tasks, CONFIG)
+
+        val read = mutableListOf<String>()
+        TaskStore.eachInOrder(db.reader, REPO, chunk = 5) { chunk ->
+            assertTrue(chunk.size <= 5)
+            chunk.forEach { read += it.id.value }
+        }
+
+        assertEquals(23, read.size)
+        assertEquals(23, read.toSet().size)
+        val orders = read.map { id -> tasks.single { it.id.value == id }.order }
+        assertEquals("en orden manual", orders.sorted(), orders)
+    }
+
     private fun sortDateOf(db: TaskDb, id: String): Long =
         db.writer.first("SELECT sort_date FROM task WHERE id = ?", id) { it.getLong(0) }!!
 

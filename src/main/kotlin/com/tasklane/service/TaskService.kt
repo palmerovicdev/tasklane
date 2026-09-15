@@ -6,18 +6,22 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task as ProgressTask
 import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
+import com.tasklane.data.attachment.AttachmentChore
 import com.tasklane.data.attachment.BlobRecord
 import com.tasklane.data.attachment.Chore
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.data.sqlite.Fts5Index
+import com.tasklane.data.sqlite.RepoSnapshot
 import com.tasklane.data.sqlite.SqlitePager
+import com.tasklane.data.sqlite.StoreMaintenance
 import com.tasklane.data.sqlite.TaskDb
 import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.data.sqlite.TasksXmlReader
@@ -53,11 +57,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.util.Collections
+import java.util.concurrent.CancellationException
 
 /**
  * Punto único de mutación del modelo y única capa que habla con el almacén.
@@ -147,7 +153,10 @@ class TaskService(
     private val _reveal = MutableSharedFlow<Set<TaskId>>(replay = 1, extraBufferCapacity = 8)
     val reveal: SharedFlow<Set<TaskId>> = _reveal.asSharedFlow()
 
-    /** Repos cuyo `tasks.xml` viene de una versión futura del formato. */
+    /**
+     * Repos en los que no se escribe: su `tasks.xml` viene de una versión futura del
+     * formato, o se están exportando para quitarlos. Ver [beginRemoval].
+     */
     private val readOnly: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
 
     /** Repos cuya migración ya se ha lanzado, para no lanzarla dos veces. */
@@ -166,6 +175,14 @@ class TaskService(
     private val gate = Any()
 
     init {
+        // La sesión anterior no cerró la base: se apunta que hay que comprobarla, y lo
+        // hace el mantenimiento en segundo plano. Apuntado en la base y no en memoria
+        // para que una comprobación que no llegue a terminar se repita.
+        val store = store
+        if (db?.dirty == true && store != null && !store.readOnly) {
+            runCatching { store.write { store.saveChore(StoreMaintenance.INTEGRITY_PENDING, nowMillis(), 0) } }
+                .onFailure { thisLogger().warn("Tasklane: no se pudo apuntar la comprobación de la base", it) }
+        }
         // La selección guardada se restaura ANTES de que llegue el catálogo: así la
         // tool window no llega a pintar el repositorio equivocado.
         workspace.selectedRepo?.let { apply(TaskCommand.SelectRepo(RepoKey(it))) }
@@ -184,9 +201,58 @@ class TaskService(
 
     fun apply(command: TaskCommand) = metrics.time(TasklaneMetrics.Op.COMMAND) { applyNow(command) }
 
+    /**
+     * La misma edición sobre varias tareas: **una** transacción y **un** snapshot.
+     *
+     * Es la operación masiva de la Fase 5. Hasta la 2.1 la pestaña mandaba un comando por
+     * fila seleccionada, y cada uno era su transacción y su repintado. Ahora:
+     *
+     * - **Una sola**, tal cual: es el camino de siempre y no hay nada que componer.
+     * - **Hasta [BULK_INLINE] filas**, en el acto: una transacción así cabe en el gesto.
+     * - **Más**, en segundo plano, con barra y cancelable. Cancelar **deshace**: la
+     *   transacción es una, y lo que un «cancelar» significa en una selección es que no
+     *   quede la mitad movida.
+     *
+     * Lo que se aplica es [TaskCommand.Batch], así que la semántica es la de los comandos
+     * sueltos por construcción.
+     */
+    fun applyAll(commands: List<RepoScoped>) {
+        when {
+            commands.isEmpty() -> return
+            commands.size == 1 -> apply(commands.single())
+            commands.size <= BULK_INLINE -> apply(TaskCommand.Batch(commands))
+            else -> ProgressManager.getInstance().run(
+                object : ProgressTask.Backgroundable(
+                    project,
+                    TasklaneBundle.message("bulk.progress", commands.size),
+                    true,
+                ) {
+                    override fun run(indicator: ProgressIndicator) {
+                        indicator.isIndeterminate = false
+                        metrics.time(TasklaneMetrics.Op.COMMAND) {
+                            synchronized(gate) {
+                                // La caché grande: una transacción de miles de filas
+                                // repartidas por todos los índices. Medido sobre 100.000
+                                // tareas, dos mil filas pasan de 965 ms a 739.
+                                inBulk {
+                                    applyLocked(TaskCommand.Batch(commands)) { done, total ->
+                                        indicator.checkCanceled()
+                                        indicator.fraction = done.toDouble() / total.coerceAtLeast(1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+        }
+    }
+
     private fun applyNow(command: TaskCommand) = synchronized(gate) { applyLocked(command) }
 
-    private fun applyLocked(command: TaskCommand) {
+    private fun <T> inBulk(block: () -> T): T = store?.bulk(block = block) ?: block()
+
+    private fun applyLocked(command: TaskCommand, progress: (Int, Int) -> Unit = { _, _ -> }) {
         val before = _snapshot.value
         val view = reducer.view(before, command)
         val store = store
@@ -202,7 +268,7 @@ class TaskService(
         // Es lo que sustituye al bucle de compare-and-set: la atomicidad la da ahora
         // quien de verdad guarda el dato.
         val applied = metrics.time(TasklaneMetrics.Op.SAVE) {
-            runCatching {
+            try {
                 store.write {
                     val subject = TaskReducer.Subject(
                         // La configuración de **antes** del comando, no la de después.
@@ -216,9 +282,16 @@ class TaskService(
                         nextOrder = { store.nextOrder(repo) },
                     )
                     val plan = reducer.plan(subject, command)
-                    if (plan.isEmpty) null else store.apply(plan.config, plan.mutations)
+                    if (plan.isEmpty) null else store.apply(plan.config, plan.mutations, progress)
                 }
-            }.onFailure { report(it) }.getOrNull()
+            } catch (e: Exception) {
+                // Cancelar una operación masiva no es un fallo al guardar: la transacción
+                // ya se deshizo y la barra ya dice que se canceló. Avisar de un error aquí
+                // sería decirle al usuario que se perdió algo que él mismo pidió deshacer.
+                if (e is ControlFlowException || e is CancellationException) throw e
+                report(e)
+                null
+            }
         }
 
         val touched = applied != null && applied.rows > 0
@@ -227,8 +300,13 @@ class TaskService(
     }
 
     /** Un comando sobre un repositorio abierto en solo lectura no se aplica. */
-    private fun isReadOnly(command: TaskCommand): Boolean =
-        command is RepoScoped && command.repo in readOnly
+    private fun isReadOnly(command: TaskCommand): Boolean = when (command) {
+        is RepoScoped -> command.repo in readOnly
+        // Un lote con **una** fila de un repositorio en solo lectura no se aplica entero:
+        // aplicar el resto dejaría la selección a medias sin decir por qué.
+        is TaskCommand.Batch -> command.commands.any { it.repo in readOnly }
+        else -> false
+    }
 
     fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly || store?.readOnly == true
 
@@ -257,15 +335,60 @@ class TaskService(
             filter == TaskFilter.OVERDUE ->
                 MemoryPager(store.overdue(snapshot.activeRepo, now), snapshot.config, found, filter, now)
 
-            else -> SqlitePager(db.reader, snapshot.activeRepo, snapshot.config, filter, now)
+            // `detach` es lo que deja a la exportación congelar la lista: ver
+            // `TaskPager.snapshot`.
+            else -> SqlitePager(db.reader, snapshot.activeRepo, snapshot.config, filter, now, detach = db::openReader)
         }
     }
 
     /** Una tarea por id. La pide la ventana para saber si una petición de enseñar es suya. */
     fun task(id: TaskId): Task? = store?.task(id)
 
-    /** Todo lo de un repositorio. Sólo la exportación, que es O(n) por definición. */
-    fun tasksOf(repo: RepoKey): List<Task> = store?.allOf(repo).orEmpty()
+    /**
+     * ¿Le quedan tareas a este repositorio en la base?
+     *
+     * Lo pregunta el catálogo para decidir si un repositorio que ya no se detecta sigue
+     * mereciendo un sitio en el selector. Hasta la 2.1 lo decidía mirando si existía su
+     * `tasks.xml`, y desde la Fase 3 ese fichero se renombra a `.migrated` al importarlo:
+     * un repositorio renombrado o borrado del disco **desaparecía del selector con sus
+     * tareas dentro**, y con él la única puerta —«Exportar y quitar»— para sacarlas.
+     */
+    fun hasTasks(repo: RepoKey): Boolean = store?.hasTasks(repo) == true
+
+    /** Cuántas tareas tiene un repositorio. De `counter`: cinco filas, no un recorrido. */
+    fun countOf(repo: RepoKey): Int = store?.countOf(repo) ?: 0
+
+    /**
+     * Un repositorio entero, congelado, para sacarlo de la base. Ver [RepoSnapshot].
+     *
+     * @return `null` si no hay base.
+     */
+    internal fun <T> snapshotOf(repo: RepoKey, block: (RepoSnapshot) -> T): T? {
+        val db = db ?: return null
+        return RepoSnapshot.open(db, repo, _snapshot.value.config, block)
+    }
+
+    /**
+     * Apunta que el `tasks.xml` de un repositorio ya está dentro de la base.
+     *
+     * Lo pide la exportación a XML, y arregla algo que la 2.0 dejó roto: exportar un
+     * repositorio **creado después de la migración** —que no tiene fila en `imported`—
+     * dejaba un `tasks.xml` que la siguiente detección de repositorios tomaba por uno
+     * pendiente de importar. Importarlo chocaba con las tareas que ya estaban, el
+     * fichero acababa en cuarentena como corrupto y el usuario recibía un error por
+     * haber exportado.
+     */
+    fun markExported(repo: RepoKey, tasks: Int) {
+        val store = store ?: return
+        if (store.readOnly) return
+        runCatching {
+            store.write {
+                if (!store.isImported(repo)) {
+                    store.markImported(repo, TasksCodec.CURRENT_VERSION, tasks, complete = true, at = nowMillis())
+                }
+            }
+        }.onFailure { thisLogger().warn("Tasklane: no se pudo apuntar la exportación de $repo", it) }
+    }
 
     /** Qué tareas cuelgan de un fichero. Es el §3.6: un salto de índice, no el modelo entero. */
     fun anchorsIn(path: String): List<AnchoredTask> = store?.anchorsIn(path).orEmpty()
@@ -276,6 +399,19 @@ class TaskService(
      */
     fun referencedAmong(repo: RepoKey, ids: List<AttachmentId>): Set<String> =
         store?.referencedAmong(repo, ids).orEmpty()
+
+    /**
+     * ¿Hay un `tasks.xml` de este repositorio que todavía no está entero dentro de la base?
+     *
+     * Mientras lo haya, lo que hay en la base es **una parte** del repositorio: exportarlo
+     * a XML escribiría encima del original con esa parte, y quitarlo se llevaría por
+     * delante lo que no llegó a importarse.
+     */
+    fun migrationPending(repo: RepoKey): Boolean {
+        val store = store ?: return false
+        val layout = layout ?: return false
+        return repo in importing || (!store.isImported(repo) && Files.exists(layout.tasksFile(repo)))
+    }
 
     // ------------------------------------------------------- adjuntos (Fase 4)
 
@@ -408,26 +544,149 @@ class TaskService(
         requestReveal(tasks.map { it.id }.toSet())
     }
 
+    // ------------------------------------------------------ quitar un repositorio
+
     /**
-     * Saca un repositorio del modelo y borra sus datos. Es la mitad destructiva de
-     * «Exportar y quitar», y quien llama ya ha confirmado con el usuario y ha dejado el
-     * texto en el portapapeles.
+     * Pone un repositorio en solo lectura mientras se exporta para quitarlo.
+     *
+     * Es la garantía de «Exportar y quitar»: lo que se borra es **exactamente** lo que se
+     * exportó. Sin esto, una tarea creada en ese repositorio mientras se escribe el
+     * fichero —son minutos con un millón— se borraría sin haber salido. La pestaña ve el
+     * repositorio en solo lectura y apaga lo que escribe, que es lo que tiene que ver.
+     *
+     * @return `false` si ya lo estaba —otra operación en curso, o una base del futuro—, y
+     *   entonces no se toca.
      */
-    fun forgetRepo(repo: RepoKey) {
+    fun beginRemoval(repo: RepoKey): Boolean {
+        if (store?.readOnly != false) return false
+        return readOnly.add(repo)
+    }
+
+    /** Lo devuelve a su estado si la exportación falló o se canceló: no se borró nada. */
+    fun cancelRemoval(repo: RepoKey) {
+        readOnly -= repo
+        synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
+    }
+
+    /**
+     * Saca un repositorio de la base y del disco. Es la mitad destructiva de «Exportar y
+     * quitar», y quien llama ya ha confirmado, ha exportado y ha comprobado que salió
+     * todo. **Bloqueante**: llamar desde una tarea de fondo.
+     *
+     * **Por tandas**, que es lo que lo hace posible con un millón de tareas: cada tanda es
+     * su transacción —ver [TaskStore.forgetBatch]—, así que ningún otro comando espera más
+     * de lo que dura una, y la lista se va vaciando mientras ocurre en vez de congelarse.
+     * Después, las filas de `blob` y el directorio del repositorio, que se recorre con
+     * memoria constante aunque tenga diez millones de capturas.
+     *
+     * [onProgress] recibe la fase y cuánto va hecho de ella. **No se cancela a medias**:
+     * lo que se pidió ya está a salvo fuera, y parar a mitad dejaría un repositorio con
+     * parte de sus tareas y un fichero exportado que ya no dice lo que queda.
+     */
+    fun removeRepo(repo: RepoKey, onProgress: (Removal, Long) -> Unit = { _, _ -> }) {
+        val store = store
+        if (store != null && !store.readOnly) {
+            var removed = 0L
+            // Con la caché grande y el volcado del diario espaciado: son cientos de
+            // transacciones pequeñas seguidas, justo el caso de `TaskStore.bulk`.
+            store.bulk(TaskStore.REMOVAL_CHECKPOINT_PAGES) {
+                while (true) {
+                    val batch = store.forgetBatch(repo)
+                    if (batch == 0) break
+                    removed += batch
+                    onProgress(Removal.TASKS, removed)
+                    synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
+                }
+                do {
+                    val rows = store.forgetBlobRows(repo)
+                } while (rows > 0)
+            }
+            forgetChore(AttachmentChore.relocation(repo.value))
+            forgetChore(AttachmentChore.reconcile(repo.value))
+        }
+
         importing -= repo
         readOnly -= repo
         apply(TaskCommand.ForgetRepo(repo))
         if (workspace.selectedRepo == repo.value) {
             workspace.selectedRepo = _snapshot.value.activeRepo.value
         }
-        scope.launch(Dispatchers.IO) {
-            runCatching { files?.delete(repo) }.onFailure { e ->
-                thisLogger().warn("Tasklane: no se pudo borrar el directorio de $repo", e)
-            }
-            // Sin datos en disco, el catalogo deja de conservar la entrada huerfana.
-            registry.refresh()
+        runCatching { runBlocking { files?.delete(repo) { onProgress(Removal.FILES, it) } } }.onFailure { e ->
+            thisLogger().warn("Tasklane: no se pudo borrar el directorio de $repo", e)
         }
+        // Sin datos en disco ni en la base, el catálogo deja de conservar la entrada.
+        registry.refresh()
     }
+
+    /** En qué va [removeRepo]. */
+    enum class Removal { TASKS, FILES }
+
+    // ------------------------------------------------------ mantenimiento (Fase 5)
+
+    /** Lo que dijo una comprobación de integridad. */
+    data class Integrity(val problems: List<String>)
+
+    /**
+     * Comprueba la base si hay motivo —ver [StoreMaintenance.checkIntegrity]— y apunta el
+     * resultado. **Bloqueante y caro**: lo lanza el mantenimiento en segundo plano.
+     *
+     * @return `null` si no hacía falta.
+     */
+    fun checkIntegrityIfNeeded(): Integrity? {
+        val db = db ?: return null
+        val store = store ?: return null
+        if (store.readOnly) return null
+        val pending = store.chore(StoreMaintenance.INTEGRITY_PENDING)
+        val last = store.chore(StoreMaintenance.INTEGRITY)
+        if (!StoreMaintenance.checkIntegrity(db.dirty, pending, last)) return null
+
+        val problems = db.checkIntegrity()
+        runCatching {
+            store.write {
+                store.saveChore(StoreMaintenance.INTEGRITY, nowMillis(), problems.size.toLong())
+                store.forgetChore(StoreMaintenance.INTEGRITY_PENDING)
+            }
+        }.onFailure { thisLogger().warn("Tasklane: no se pudo apuntar la comprobación de la base", it) }
+        return Integrity(problems)
+    }
+
+    /** Lo que hizo [backupIfDue]: dónde, cuánto, o por qué no. */
+    internal data class Backup(val file: Path, val bytes: Long = 0, val skipped: StoreMaintenance.Skip? = null)
+
+    /**
+     * La copia diaria de la base, si toca. Ver [StoreMaintenance.backup] para cuándo toca
+     * y [TaskDb.backupTo] para cómo se hace. **Bloqueante**: segundo plano.
+     */
+    internal fun backupIfDue(): Backup? {
+        val db = db ?: return null
+        val store = store ?: return null
+        if (store.readOnly) return null
+        val target = backupFile() ?: return null
+
+        val backupAt = runCatching { Files.getLastModifiedTime(target).toMillis() }.getOrNull()
+        val modifiedAt = maxOf(modified(db.file), modified(TaskDb.walOf(db.file)))
+        val dbBytes = runCatching { Files.size(db.file) }.getOrDefault(0L)
+        val free = runCatching { Files.getFileStore(db.file.parent).usableSpace }.getOrDefault(Long.MAX_VALUE)
+        val healthy = StoreMaintenance.healthy(
+            store.chore(StoreMaintenance.INTEGRITY_PENDING),
+            store.chore(StoreMaintenance.INTEGRITY),
+        )
+
+        StoreMaintenance.backup(backupAt, modifiedAt, nowMillis(), healthy, free, dbBytes)?.let {
+            return Backup(target, skipped = it)
+        }
+        return Backup(target, db.backupTo(target))
+    }
+
+    /** `tasklane.db.backup`. Ver [StoreMaintenance.BACKUP_SUFFIX]. */
+    fun backupFile(): Path? = db?.file?.let { it.resolveSibling("${it.fileName}${StoreMaintenance.BACKUP_SUFFIX}") }
+
+    /** La última comprobación de integridad que terminó, y si hay una pendiente. Para el informe. */
+    fun integrityState(): Pair<Chore?, Boolean> =
+        store?.let { it.chore(StoreMaintenance.INTEGRITY) to (it.chore(StoreMaintenance.INTEGRITY_PENDING) != null) }
+            ?: (null to false)
+
+    private fun modified(file: Path): Long = runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0L)
 
     // --------------------------------------------------------------- migración
 
@@ -642,6 +901,20 @@ class TaskService(
 
     companion object {
         const val NOTIFICATION_GROUP = "Tasklane"
+
+        /**
+         * Hasta cuántas filas se aplica un lote en el acto, sin barra. Ver [applyAll].
+         *
+         * **Diez y no una página, y lo decidió el banco.** La primera versión decía
+         * cincuenta —«lo que cabe en una selección sin desplazarse»— y medido sobre el
+         * corpus de la especificación un lote de cincuenta son 23 ms a 10.000 tareas y
+         * 31 ms a 100.000: fuera del presupuesto de 16 del EDT antes de repintar nada.
+         * Veinte cabían a 10.000 (4,1 ms, p99 12) y dejaban de caber con holgura a 100.000
+         * (p99 de 14 a 17 ms), porque escribir filas repartidas por la base cuesta más
+         * cuanto menos cabe en la caché. Diez son 2,3 ms y p99 9 a 100.000. Por encima, la
+         * barra: aparecer un instante cuesta menos que congelar.
+         */
+        const val BULK_INLINE = 10
 
         fun getInstance(project: Project): TaskService = project.service()
     }

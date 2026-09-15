@@ -85,6 +85,8 @@ object TasklaneDiagnostics {
         val quotaBytes: Long = 0,
         /** El tope de escalado vigente: es contra él contra lo que se cuenta lo sobredimensionado. */
         val imageMaxSize: Int = 0,
+        /** La copia diaria y la última comprobación de la base (Fase 5). */
+        val store: StoreHealth = StoreHealth(),
     ) {
         val tasks: Int get() = repos.sumOf { it.tasks }
         val blobCount: Int get() = repos.sumOf { it.blobCount }
@@ -92,7 +94,8 @@ object TasklaneDiagnostics {
         val missingBlobs: Int get() = repos.sumOf { it.blobs.missing }
         val oversizedBlobs: Int get() = repos.sumOf { it.blobs.oversized }
         val oversizedBytes: Long get() = repos.sumOf { it.blobs.oversizedBytes }
-        val totalBytes: Long get() = repos.sumOf { it.totalBytes }
+        /** Con la copia diaria de la base: también es sitio que ocupa `.idea/tasklane`. */
+        val totalBytes: Long get() = repos.sumOf { it.totalBytes } + store.backupBytes
         val pending: Boolean get() = repos.any { !it.reconciled }
         val overQuota: Boolean get() = quotaBytes > 0 && blobBytes >= quotaBytes
     }
@@ -111,6 +114,7 @@ object TasklaneDiagnostics {
         quotaBytes: Long = 0,
         imageMaxSize: Int = 0,
         metrics: List<TasklaneMetrics.Sample> = emptyList(),
+        store: StoreHealth = StoreHealth(),
     ): Report {
         val runtime = Runtime.getRuntime()
         // La base es **un fichero por proyecto** (§2.3), así que su peso se le atribuye
@@ -127,6 +131,7 @@ object TasklaneDiagnostics {
             latencies = metrics,
             quotaBytes = quotaBytes,
             imageMaxSize = imageMaxSize,
+            store = store,
         )
     }
 
@@ -225,6 +230,25 @@ data class BlobStats(
     /** Los que de verdad están en disco. */
     val present: Int get() = (count - missing).coerceAtLeast(0)
 }
+
+/**
+ * Cómo está la base: su copia diaria y su última comprobación (Fase 5).
+ *
+ * Va en el informe porque son las dos cosas que alguien necesita saber **antes** de
+ * tocar nada a mano en `.idea/tasklane`: si hay una copia y de cuándo, y si la base se
+ * dio por sana la última vez que hubo motivo para dudar.
+ */
+data class StoreHealth(
+    /** Cuándo se escribió `tasklane.db.backup`, o `null` si todavía no hay. */
+    val backupAt: Long? = null,
+    val backupBytes: Long = 0,
+    /** Cuándo terminó la última comprobación de integridad, o `null` si nunca hizo falta. */
+    val checkedAt: Long? = null,
+    /** Cuántos problemas encontró. */
+    val problems: Long = 0,
+    /** Hay una pendiente: la última sesión no cerró la base y todavía no se ha mirado. */
+    val pending: Boolean = false,
+)
 
 data class TaskStats(
     val tasks: Int = 0,

@@ -234,4 +234,63 @@ class TaskExporterTest {
         )
         assertEquals("- Titulo\n  Mira la captura:\n", text)
     }
+
+    // ------------------------------------------------------------ en streaming
+
+    /**
+     * La exportación de la Fase 5 escribe tarea a tarea. Lo que la hace de fiar es que
+     * **no hay un segundo formato**: la versión `String` está construida encima del
+     * *stream*, así que todos los casos de arriba ya lo prueban. Éste añade lo que sólo
+     * existe en *streaming*: que las tandas lleguen partidas por cualquier sitio.
+     */
+    @Test
+    fun `escribir a tandas da los mismos bytes que escribir de golpe`() {
+        val sections = listOf(
+            TaskExporter.Section("Done · Today", listOf(task("Uno\n\nCon detalle"), task("Dos")), day),
+            TaskExporter.Section("Done · Yesterday", emptyList()),
+            TaskExporter.Section("Done · This week", listOf(task("Tres", tags = listOf("api")))),
+            TaskExporter.Section(null, listOf(task("Cuatro\n![](tasklane:$sha)\nfin"))),
+        )
+        for (format in ExportFormat.entries) {
+            val out = StringBuilder()
+            val stream = TaskExporter.Stream(out, config, format)
+            for (section in sections) {
+                stream.section(section.heading, section.date)
+                // Una tarea por tanda: el caso más partido posible.
+                section.tasks.chunked(1).forEach { chunk -> chunk.forEach(stream::task) }
+            }
+            assertEquals("formato $format", TaskExporter.export(sections, config, format), out.toString())
+            assertEquals(4, stream.written)
+        }
+    }
+
+    /** Una sección que no llega a recibir tareas no escribe nada, ni su separador. */
+    @Test
+    fun `una seccion que nunca recibe tareas no deja rastro`() {
+        val out = StringBuilder()
+        val stream = TaskExporter.Stream(out, config, ExportFormat.MARKDOWN)
+        stream.section("Vacía")
+        stream.section("Llena")
+        stream.task(task("Uno"))
+        stream.section("Vacía al final")
+
+        assertEquals("## Llena\n\n- [x] Uno\n", out.toString())
+    }
+
+    /**
+     * La numeración del parte del día vuelve a uno en cada sección, aunque el *stream* sea
+     * el mismo objeto de principio a fin.
+     */
+    @Test
+    fun `la numeracion no se arrastra de una seccion a la siguiente`() {
+        val out = StringBuilder()
+        val stream = TaskExporter.Stream(out, config, ExportFormat.MARKDOWN)
+        stream.section("Hoy", day)
+        stream.task(task("Uno"))
+        stream.task(task("Dos"))
+        stream.section("Ayer", day.minusDays(1))
+        stream.task(task("Tres"))
+
+        assertEquals("## 2026-09-11\n\n1. Uno\n2. Dos\n\n## 2026-09-10\n\n1. Tres\n", out.toString())
+    }
 }

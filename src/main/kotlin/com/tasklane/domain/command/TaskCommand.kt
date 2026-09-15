@@ -151,6 +151,38 @@ sealed interface TaskCommand {
      * estado que ya tenía tareas dentro y acepta el ofrecimiento.
      */
     data class BackfillCompletedAt(val states: Set<StateId>) : TaskCommand
+
+    /**
+     * Muchos comandos sobre tareas que ya existen, **como si fueran uno**: una
+     * transacción y un snapshot.
+     *
+     * Es la operación masiva de la Fase 5 (`docs/plan-escala.md`, Fase 5.3). Mover de
+     * estado, completar, marcar o cambiar la prioridad de una selección mandaba **un
+     * comando por fila**, y cada uno era su transacción y su snapshot: quinientas filas
+     * seleccionadas eran quinientos repintados encolados. Es exactamente la lección de
+     * [UpdateTask] en la Fase 1 —seis comandos por un clic en *Guardar*—, un orden de
+     * magnitud más arriba.
+     *
+     * **Se describe con los comandos sueltos, y no con un comando nuevo por operación.**
+     * Así la semántica de mover cuarenta tareas es, por construcción, la de mover cada
+     * una: sellar `completedAt` al entrar en un estado terminal, no tocar `updatedAt` al
+     * marcar, quitar la marca de aparcada al elegir a mano. Un test fija que el lote da
+     * **las mismas tareas** que los comandos uno detrás de otro.
+     *
+     * Alcance de proyecto y no de repositorio porque la selección puede cruzarlos:
+     * buscando en todos, una misma lista mezcla filas de varios. Cada comando de dentro
+     * sigue diciendo el suyo.
+     *
+     * Sólo comandos que **tocan tareas existentes**: [Create] y [ForgetRepo] no caben,
+     * porque ni tienen una fila que leer antes ni se componen con nada.
+     */
+    data class Batch(val commands: List<RepoScoped>) : TaskCommand {
+        init {
+            require(commands.none { it is Create || it is ForgetRepo }) {
+                "Batch sólo compone comandos sobre tareas existentes"
+            }
+        }
+    }
 }
 
 /** Comando acotado a un único repositorio. */

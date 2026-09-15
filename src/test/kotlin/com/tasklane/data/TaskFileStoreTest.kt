@@ -140,4 +140,30 @@ class TaskFileStoreTest {
         }
         assertEquals(0L, leftovers)
     }
+
+    /**
+     * Quitar un repositorio borra su árbol entero —tareas, copias, adjuntos fragmentados en
+     * `ab/cd/`— y cuenta lo que borra. Desde la Fase 5 lo recorre sin ordenar, que es lo que
+     * hacía falta para no materializar diez millones de rutas.
+     */
+    @Test
+    fun `borrar un repositorio se lleva el arbol entero y va contando`() = runBlocking {
+        val layout = layout()
+        store().write(repo, listOf(task("a", "x")))
+        val attachments = layout.attachmentsDir(repo)
+        for (i in 0 until 12) {
+            val leaf = attachments.resolve("%02x".format(i % 3)).resolve("%02x".format(i))
+            Files.createDirectories(leaf)
+            Files.writeString(leaf.resolve("blob-$i.png"), "png")
+        }
+        val other = RepoKey("otro")
+        store().write(other, listOf(task("b", "y")))
+
+        val counted = mutableListOf<Long>()
+        store().delete(repo) { counted += it }
+
+        assertFalse(Files.exists(layout.repoDir(repo)))
+        assertTrue("el de al lado no se toca", Files.exists(layout.tasksFile(other)))
+        assertEquals("doce capturas y el tasks.xml", 13L, counted.last())
+    }
 }

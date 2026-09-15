@@ -320,4 +320,99 @@ class PlanTest {
             assertTrue("$command no necesita leer ninguna tarea", reducer.targetsOf(command).isEmpty())
         }
     }
+
+    // ------------------------------------------------------ operaciones masivas (Fase 5)
+
+    /**
+     * **Un lote tiene que dar exactamente las mismas tareas que sus comandos uno detrás
+     * de otro.** Es el mismo test que fija `UpdateTask` en la Fase 1, un orden de magnitud
+     * más arriba: la operación masiva sólo vale si hace lo mismo que las sueltas.
+     *
+     * El lote está hecho para que el acuerdo cueste: la misma tarea sale dos veces
+     * —marcarla y después completarla—, una se borra, otra cambia de prioridad dos veces,
+     * y hay un comando que no hace nada.
+     */
+    @Test
+    fun `un lote hace lo mismo que sus comandos uno detras de otro`() {
+        val tasks = listOf(
+            task("a"),
+            task("b", stateId = TasklaneConfig.DONE).copy(completedAt = t0.minusSeconds(3600)),
+            task("c", priorityId = TasklaneConfig.LOW),
+            task("d"),
+            task("e", repo = other),
+        )
+        val commands = listOf(
+            TaskCommand.ToggleBookmark(repo, TaskId("a")),
+            TaskCommand.ToggleComplete(repo, TaskId("a")),
+            TaskCommand.ToggleComplete(repo, TaskId("b")),
+            TaskCommand.ChangePriority(repo, TaskId("c"), TasklaneConfig.HIGH),
+            TaskCommand.ChangePriority(repo, TaskId("c"), TasklaneConfig.NORMAL),
+            TaskCommand.Delete(repo, listOf(TaskId("d"))),
+            TaskCommand.ChangeState(other, TaskId("e"), TasklaneConfig.DOING),
+            // Ya está en ToDo: no hace nada, y no puede hacer que el lote haga algo.
+            TaskCommand.ChangeState(repo, TaskId("b"), TasklaneConfig.TODO),
+        )
+
+        var uno = tasks
+        for (command in commands) {
+            val subject = TaskReducer.Subject(config, uno.filter { it.id in reducer.targetsOf(command).toSet() })
+            uno = TaskReducer.applyTo(uno, reducer.plan(subject, command).mutations)
+        }
+
+        val batch = TaskCommand.Batch(commands)
+        val plan = reducer.plan(TaskReducer.Subject(config, tasks.filter { it.id in reducer.targetsOf(batch) }), batch)
+        val deGolpe = TaskReducer.applyTo(tasks, plan.mutations)
+
+        assertEquals(uno.sortedBy { it.id.value }, deGolpe.sortedBy { it.id.value })
+        // Y lo que se comparó no era la lista sin tocar.
+        assertTrue(deGolpe.none { it.id == TaskId("d") })
+        assertTrue(deGolpe.single { it.id == TaskId("a") }.bookmarked)
+        assertEquals(TasklaneConfig.DONE, deGolpe.single { it.id == TaskId("a") }.stateId)
+    }
+
+    /** Un lote es **una** escritura: una mutación por tipo, no una por comando. */
+    @Test
+    fun `un lote pide una mutacion por tipo y no una por comando`() {
+        val tasks = (1..50).map { task("t$it") }
+        val commands = tasks.map { TaskCommand.ChangeState(repo, it.id, TasklaneConfig.DONE) } +
+            tasks.take(10).map { TaskCommand.Delete(repo, listOf(it.id)) }
+
+        val mutations = plan(TaskCommand.Batch(commands), *tasks.toTypedArray()).mutations
+
+        assertEquals(2, mutations.size)
+        assertEquals(40, (mutations[0] as Mutation.Upsert).tasks.size)
+        assertEquals(10, (mutations[1] as Mutation.Delete).ids.size)
+    }
+
+    @Test
+    fun `un lote de comandos sin efecto no pide nada`() {
+        val a = task("a")
+        val batch = TaskCommand.Batch(
+            listOf(
+                TaskCommand.ChangeState(repo, a.id, TasklaneConfig.TODO),
+                TaskCommand.SetTags(repo, a.id, emptyList()),
+                TaskCommand.Delete(repo, listOf(TaskId("no-existe"))),
+            ),
+        )
+        assertTrue(plan(batch, a).isEmpty)
+    }
+
+    /** Lo que se lee antes de un lote son sus tareas, cada una una vez. */
+    @Test
+    fun `un lote lee cada tarea una sola vez`() {
+        val batch = TaskCommand.Batch(
+            listOf(
+                TaskCommand.ToggleBookmark(repo, TaskId("a")),
+                TaskCommand.ToggleComplete(repo, TaskId("a")),
+                TaskCommand.Delete(repo, listOf(TaskId("b"), TaskId("a"))),
+            ),
+        )
+        assertEquals(listOf(TaskId("a"), TaskId("b")), reducer.targetsOf(batch))
+    }
+
+    /** Crear no se compone: no hay fila que leer antes, y el orden de dos creadas chocaría. */
+    @Test(expected = IllegalArgumentException::class)
+    fun `un lote no admite crear`() {
+        TaskCommand.Batch(listOf(TaskCommand.Create(repo, "Algo")))
+    }
 }

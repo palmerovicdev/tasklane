@@ -9,6 +9,7 @@ import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.store.RepoLayoutStore
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.domain.model.RepositoryRef
+import com.tasklane.service.TaskService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -107,7 +108,15 @@ class RepositoryRegistry(
             detected = detected,
             known = layoutStore?.read().orEmpty(),
             maxDepth = TasklaneConfigService.getInstance(project).config.value.repoDepth,
-            hasTasks = storage::hasTasks,
+            // Las dos mitades, y la segunda es la que importa desde la 2.0: las tareas
+            // viven en la base y el `tasks.xml` sólo existe mientras no se ha importado.
+            // Mirando sólo el fichero, un repositorio renombrado o borrado del disco
+            // desaparecía del selector **con sus tareas dentro**. Se pregunta al
+            // servicio aquí y no se le inyecta un predicado desde él porque esto corre
+            // en el arranque, y un predicado puesto después llegaría tarde a la primera
+            // detección: el selector perdería esas entradas y el repositorio activo
+            // guardado se iría con ellas.
+            hasTasks = { storage.hasTasks(it) || TaskService.getInstance(project).hasTasks(it) },
             exists = ::exists,
         )
 

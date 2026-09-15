@@ -358,14 +358,22 @@ class ListSyncTest {
         assertEquals(0, tree.rowCount)
     }
 
-    /** Lo que la exportación necesita: la lista entera, no la página cargada. */
+    /**
+     * Lo que la exportación necesita saber **antes de leer nada**: cuántas filas tiene lo
+     * que va a exportar, para decidir si cabe en el portapapeles. La cabecera ya lo dice, y
+     * la raíz lo cuenta la pestaña; la página cargada no tiene nada que ver.
+     */
     @Test
-    fun `el contenido de un grupo se pide sin tope`() {
-        val sync = list(many(1_000, tags = listOf("api")), Grouping.BY_TAG)
-        sync.sync()
+    fun `lo que se va a exportar se cuenta sin leerlo`() {
+        val grouped = list(many(1_000, tags = listOf("api")), Grouping.BY_TAG)
+        grouped.sync()
 
-        assertEquals(1_000, sync.contents(GroupKey.OfTag("api")).size)
-        assertNotNull(sync.outline.firstOrNull())
-        assertNull(sync.contents(GroupKey.OfTag("no-existe")).firstOrNull())
+        assertEquals(1_000, grouped.sizeOf(GroupKey.OfTag("api")))
+        assertNotNull(grouped.outline.firstOrNull())
+        assertEquals(0, grouped.sizeOf(GroupKey.OfTag("no-existe")))
+
+        val flat = list(many(1_000))
+        flat.sync()
+        assertEquals(1_000, flat.sizeOf(null))
     }
 }

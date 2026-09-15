@@ -189,7 +189,7 @@ class MemoryPagerTest {
         val pager = pager(many(7) + many(4, done))
 
         assertEquals(mapOf(todo to 7, done to 4), pager.counts())
-        assertEquals(7, pager.all(PageQuery(todo)).size)
+        assertEquals(7, everything(pager, PageQuery(todo)).size)
     }
 
     /**
@@ -260,7 +260,7 @@ class MemoryPagerTest {
     fun `exportar pide la lista sin tope y en el mismo orden`() {
         val pager = pager(many(1_000))
 
-        val all = pager.all(PageQuery(todo))
+        val all = everything(pager, PageQuery(todo))
 
         assertEquals(1_000, all.size)
         assertEquals(ids(pager.page(PageQuery(todo))), all.take(TaskPager.PAGE).map { it.id.value })
@@ -272,9 +272,13 @@ class MemoryPagerTest {
         val pager = pager(many(300) + listOf(task("z-marcada", bookmarked = true)))
 
         assertSame(
-            pager.all(PageQuery(todo)).first(),
+            everything(pager, PageQuery(todo)).first(),
             pager.page(PageQuery(todo)).items.first(),
         )
         assertEquals("z-marcada", pager.page(PageQuery(todo)).items.first().id.value)
     }
+
+    /** La lista entera, juntando las tandas de `each`: lo que exporta la pestaña. */
+    private fun everything(pager: TaskPager, query: PageQuery): List<Task> =
+        buildList { pager.each(query, chunk = 7) { addAll(it) } }
 }

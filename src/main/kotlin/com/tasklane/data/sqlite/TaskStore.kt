@@ -114,6 +114,14 @@ internal class TaskStore(private val db: TaskDb) {
     fun countOf(repo: RepoKey): Int =
         sql.count("SELECT coalesce(sum(n), 0) FROM counter WHERE repo = ?", repo.value)
 
+    /**
+     * ¿Le queda alguna tarea a este repositorio? Por la conexión de lectura, porque lo
+     * pregunta el catálogo desde su propia corrutina y no tiene por qué esperar a que
+     * termine una escritura.
+     */
+    fun hasTasks(repo: RepoKey): Boolean =
+        db.reader.count("SELECT count(*) FROM counter WHERE repo = ? AND n > 0", repo.value) > 0
+
     // ------------------------------------------------------------------- escritura
 
     /** Qué pasó al aplicar unas mutaciones. Es el recibo que el servicio convierte en avisos. */
@@ -138,21 +146,46 @@ internal class TaskStore(private val db: TaskDb) {
         }
     }
 
-    /** Aplica las mutaciones en **una** transacción. */
-    fun apply(config: TasklaneConfig, mutations: List<Mutation>): Applied {
+    /**
+     * Aplica las mutaciones en **una** transacción.
+     *
+     * [progress] recibe cuántas filas van escritas de cuántas, y es para las operaciones
+     * masivas de la Fase 5: una selección de miles de filas es una transacción de
+     * segundos, y la barra tiene que moverse **dentro** de ella. Si lanza —cancelar—, la
+     * transacción se deshace entera, que es lo que un «cancelar» significa: no queda media
+     * selección movida.
+     */
+    fun apply(
+        config: TasklaneConfig,
+        mutations: List<Mutation>,
+        progress: (done: Int, total: Int) -> Unit = NO_PROGRESS,
+    ): Applied {
         if (mutations.isEmpty() || db.readOnly) return Applied(0)
+        val total = mutations.sumOf {
+            when (it) {
+                is Mutation.Upsert -> it.tasks.size
+                is Mutation.Delete -> it.ids.size
+                else -> 0
+            }
+        }
         return sql.transaction {
             val deltas = Deltas()
             var rows = 0
+            var done = 0
             var parked = Parked.NONE
             for (mutation in mutations) {
                 when (mutation) {
                     is Mutation.Upsert -> {
-                        for (task in mutation.tasks) upsert(task, config, deltas)
+                        upsertAll(mutation.tasks, config, deltas) {
+                            if (++done % PROGRESS_EVERY == 0) progress(done, total)
+                        }
                         rows += mutation.tasks.size
                     }
 
-                    is Mutation.Delete -> rows += delete(mutation.ids, deltas)
+                    is Mutation.Delete -> {
+                        rows += delete(mutation.ids, deltas) { if (++done % PROGRESS_EVERY == 0) progress(done, total) }
+                    }
+
                     is Mutation.Reassign -> rows += reassign(config, mutation, deltas)
                     is Mutation.Reprioritize -> rows += reprioritize(config, mutation, deltas)
                     is Mutation.Backfill -> rows += backfill(config, mutation.states)
@@ -171,22 +204,124 @@ internal class TaskStore(private val db: TaskDb) {
 
     // ----------------------------------------------------------------- fila a fila
 
-    private fun upsert(task: Task, config: TasklaneConfig, deltas: Deltas) {
-        val old = previous(task.id)
-        if (old != null) {
-            deltas.remove(old)
-            ftsDelete(old)
+    private fun upsert(task: Task, config: TasklaneConfig, deltas: Deltas) = upsertAll(listOf(task), config, deltas)
+
+    /**
+     * Escribe muchas tareas **con una sentencia preparada por tipo de fila**, no con
+     * treinta por tarea.
+     *
+     * Es la escritura de las operaciones masivas de la Fase 5, y la de cualquier comando
+     * suelto. Medido sobre el corpus de la especificación, escribir una tarea tarea a
+     * tarea eran ~240 µs, y **el 90 % no era el índice de texto**: eran las sentencias que
+     * se preparaban y se cerraban por fila —la tarea, sus ocho etiquetas, sus cinco anclas,
+     * sus diez referencias a imágenes y los tres borrados de delante—. Es exactamente lo que
+     * la migración ya resolvía con [Sql.batch], y aquí se hace igual: una lectura de lo que
+     * había por tanda, y un lote por tabla.
+     *
+     * **El índice de texto sólo se toca si el texto cambió.** Mover, completar, marcar o
+     * cambiar la prioridad no cambian ni el título, ni el cuerpo, ni las etiquetas, ni las
+     * rutas —las cuatro columnas de `task_fts`—, y hasta ahora se borraban y se volvían a
+     * tokenizar igual.
+     *
+     * Si la misma tarea viene dos veces **gana la última**, que es lo que pasaba
+     * escribiéndolas una detrás de otra; sin eso, una tarea nueva repetida recibiría dos
+     * `seq` y el índice de texto quedaría apuntando a una fila que no existe.
+     */
+    private fun upsertAll(input: List<Task>, config: TasklaneConfig, deltas: Deltas, onRow: () -> Unit = {}) {
+        if (input.isEmpty()) return
+        val tasks = if (input.size == 1) input else input.associateByTo(LinkedHashMap()) { it.id }.values.toList()
+
+        for (chunk in tasks.chunked(Sql.MAX_VARIABLES)) {
+            val ids = chunk.map { it.id.value as Any }.toTypedArray()
+            val holes = Sql.placeholders(chunk.size)
+            val olds = HashMap<String, Fts>(chunk.size * 2)
+            sql.rows("SELECT $FTS_COLUMNS, id FROM task WHERE id IN ($holes)", *ids) {
+                olds[it.getString(10).orEmpty()] = ftsRow(it)
+            }
+
+            val seqs = LongArray(chunk.size)
+            val ftsGone = ArrayList<Array<Any>>()
+            val ftsNew = ArrayList<Array<Any>>()
+            chunk.forEachIndexed { i, task ->
+                val old = olds[task.id.value]
+                val tags = TaskRows.tagsText(task)
+                val files = TaskRows.filesText(task)
+                seqs[i] = old?.seq ?: nextSeq.getAndIncrement()
+                if (old != null) deltas.remove(old)
+                val sameText = old != null && old.title == task.title && old.body == task.body &&
+                    old.tags == tags && old.files == files
+                if (!sameText) {
+                    if (old != null) ftsGone += arrayOf(old.seq, old.title, old.body, old.tags, old.files)
+                    ftsNew += arrayOf(seqs[i], task.title, task.body, tags, files)
+                }
+            }
+
+            if (ftsGone.isNotEmpty()) sql.batch(FTS_DELETE, 5, ftsGone.asSequence())
+            sql.batch(
+                TaskRows.UPSERT.trimIndent(),
+                TaskRows.INSERT_PARAMS,
+                chunk.asSequence().mapIndexed { i, task -> TaskRows.values(seqs[i], task, config) },
+            )
+            if (ftsNew.isNotEmpty()) sql.batch(FTS_INSERT, 5, ftsNew.asSequence())
+
+            // Las filas hijas se rehacen enteras: tres borrados por tanda y un lote por tabla.
+            sql.update("DELETE FROM tag WHERE task_id IN ($holes)", *ids)
+            sql.update("DELETE FROM anchor WHERE task_id IN ($holes)", *ids)
+            sql.update("DELETE FROM blob_ref WHERE task_id IN ($holes)", *ids)
+            insertSides(chunk, config)
+
+            for (task in chunk) {
+                deltas.add(task, config)
+                onRow()
+            }
         }
-        val seq = old?.seq ?: nextSeq.getAndIncrement()
-        sql.update(TaskRows.UPSERT.trimIndent(), *TaskRows.values(seq, task, config))
-        ftsInsert(seq, task)
-        writeSides(task, config)
-        deltas.add(task, config)
     }
 
-    private fun delete(ids: List<TaskId>, deltas: Deltas): Int {
+    /**
+     * Las filas de `tag`, `anchor` y `blob_ref` de unas tareas **que ya no tienen
+     * ninguna**, en tres lotes. La comparten la escritura normal y la migración: son las
+     * mismas filas, y dos copias de cómo se escriben divergirían.
+     */
+    private fun insertSides(tasks: List<Task>, config: TasklaneConfig) {
+        val tags = tasks.flatMap { task ->
+            if (task.tags.isEmpty()) return@flatMap emptyList()
+            val rank = TaskRows.rankOf(task, config)
+            val sortDate = TaskRows.sortDate(task, config)
+            val undated = if (TaskRows.undated(task, config)) 1 else 0
+            task.tags.map { tag ->
+                arrayOf<Any>(
+                    task.id.value,
+                    tag,
+                    task.repo.value,
+                    task.stateId.value,
+                    if (task.bookmarked) 1 else 0,
+                    rank,
+                    sortDate,
+                    undated,
+                    TaskRows.millis(task.completedAt),
+                    TaskRows.millis(task.dueDate),
+                )
+            }
+        }
+        if (tags.isNotEmpty()) sql.batch(TAG_INSERT, 10, tags.asSequence())
+
+        val anchors = tasks.flatMap { task ->
+            task.anchors.mapIndexed { pos, anchor ->
+                arrayOf<Any>(task.id.value, pos, anchor.path, anchor.line, anchor.column, anchor.text)
+            }
+        }
+        if (anchors.isNotEmpty()) sql.batch(ANCHOR_INSERT, 6, anchors.asSequence())
+
+        val refs = tasks.flatMap { task ->
+            task.attachments.map { it.id.value }.distinct().map { blob -> arrayOf<Any>(task.id.value, blob, task.repo.value) }
+        }
+        if (refs.isNotEmpty()) sql.batch(BLOB_REF_INSERT, 3, refs.asSequence())
+    }
+
+    private fun delete(ids: List<TaskId>, deltas: Deltas, onRow: () -> Unit = {}): Int {
         var removed = 0
         for (id in ids) {
+            onRow()
             val old = previous(id) ?: continue
             ftsDelete(old)
             deltas.remove(old)
@@ -196,54 +331,6 @@ internal class TaskStore(private val db: TaskDb) {
             removed++
         }
         return removed
-    }
-
-    /** Las filas de `tag`, `anchor` y `blob_ref` de una tarea: se rehacen enteras. */
-    private fun writeSides(task: Task, config: TasklaneConfig) {
-        val id = task.id.value
-        sql.update("DELETE FROM tag WHERE task_id = ?", id)
-        sql.update("DELETE FROM anchor WHERE task_id = ?", id)
-        sql.update("DELETE FROM blob_ref WHERE task_id = ?", id)
-
-        if (task.tags.isNotEmpty()) {
-            val rank = TaskRows.rankOf(task, config)
-            val sortDate = TaskRows.sortDate(task, config)
-            for (tag in task.tags) {
-                sql.update(
-                    "INSERT INTO tag (task_id, tag, repo, state, bookmarked, priority_rank, sort_date, " +
-                        "undated, completed_at, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    id,
-                    tag,
-                    task.repo.value,
-                    task.stateId.value,
-                    if (task.bookmarked) 1 else 0,
-                    rank,
-                    sortDate,
-                    if (TaskRows.undated(task, config)) 1 else 0,
-                    TaskRows.millis(task.completedAt),
-                    TaskRows.millis(task.dueDate),
-                )
-            }
-        }
-        task.anchors.forEachIndexed { index, anchor ->
-            sql.update(
-                "INSERT INTO anchor (task_id, pos, path, line, col, text) VALUES (?, ?, ?, ?, ?, ?)",
-                id,
-                index,
-                anchor.path,
-                anchor.line,
-                anchor.column,
-                anchor.text,
-            )
-        }
-        for (blob in task.attachments.map { it.id.value }.distinct()) {
-            sql.update(
-                "INSERT INTO blob_ref (task_id, blob_id, repo) VALUES (?, ?, ?)",
-                id,
-                blob,
-                task.repo.value,
-            )
-        }
     }
 
     // ------------------------------------------------------------------ operaciones masivas
@@ -367,33 +454,82 @@ internal class TaskStore(private val db: TaskDb) {
 
     private fun forget(repo: RepoKey, deltas: Deltas): Int {
         val total = countOf(repo)
-        // El índice de texto no cascadea: sus filas se borran a mano, a tandas, con el
-        // contenido que la tabla virtual necesita para localizarlas.
         while (true) {
-            val batch = sql.rows(
-                "SELECT seq, title, body, tags_text, files_text FROM task WHERE repo = ? LIMIT 2000",
-                repo.value,
-            ) {
-                Fts(
-                    it.getLong(0),
-                    it.getString(1).orEmpty(),
-                    it.getString(2).orEmpty(),
-                    it.getString(3).orEmpty(),
-                    it.getString(4).orEmpty(),
-                )
-            }
-            if (batch.isEmpty()) break
-            for (row in batch) ftsDelete(row)
-            sql.update(
-                "DELETE FROM task WHERE seq IN (${Sql.placeholders(batch.size)})",
-                *batch.map { it.seq as Any }.toTypedArray(),
-            )
+            val batch = forgetRows(repo, FORGET_BATCH, deltas)
+            if (batch == 0) break
         }
         sql.update("DELETE FROM counter WHERE repo = ?", repo.value)
         sql.update("DELETE FROM priority_counter WHERE repo = ?", repo.value)
         sql.update("DELETE FROM imported WHERE repo = ?", repo.value)
         deltas.forget(repo)
         return total
+    }
+
+    /**
+     * Borra **una tanda** de las tareas de un repositorio, en su propia transacción, y
+     * devuelve cuántas.
+     *
+     * Es la mitad destructiva de «Exportar y quitar» a escala (Fase 5). [Mutation.Forget]
+     * lo hace todo en **una** transacción, y con un millón de tareas eso es tener el
+     * escritor tomado durante minutos: cualquier otro comando —marcar una tarea de otro
+     * repositorio desde el EDT— esperaría a que acabase. Por tandas, lo más que espera
+     * alguien es una tanda.
+     *
+     * **Cada tanda deja los contadores exactos**, que es la regla del almacén: si el IDE
+     * se cae a mitad, lo que queda es un repositorio con menos tareas y unas pestañas que
+     * lo cuentan bien, no uno con contadores que no cuadran con nada.
+     */
+    fun forgetBatch(repo: RepoKey, limit: Int = FORGET_BATCH): Int {
+        if (db.readOnly) return 0
+        return sql.transaction {
+            val deltas = Deltas()
+            val removed = forgetRows(repo, limit, deltas)
+            deltas.flush(sql)
+            removed
+        }
+    }
+
+    /**
+     * Las filas de `blob` de un repositorio, a tandas. Lo que queda después de quitar sus
+     * tareas: sin ellas nadie las nombra, y el directorio se va a borrar entero.
+     */
+    fun forgetBlobRows(repo: RepoKey, limit: Int = FORGET_BATCH): Int {
+        if (db.readOnly) return 0
+        return sql.transaction {
+            val before = sql.count("SELECT total_changes()")
+            sql.update(
+                "DELETE FROM blob WHERE rowid IN (SELECT rowid FROM blob WHERE repo = ? LIMIT ?)",
+                repo.value,
+                limit,
+            )
+            sql.count("SELECT total_changes()") - before
+        }
+    }
+
+    /**
+     * El índice de texto no cascadea: sus filas se borran a mano, con el contenido que la
+     * tabla virtual necesita para localizarlas. Y los contadores se descuentan fila a fila
+     * porque la tanda puede cruzar estados.
+     */
+    private fun forgetRows(repo: RepoKey, limit: Int, deltas: Deltas): Int {
+        val batch = sql.rows(
+            "SELECT $FTS_COLUMNS FROM task WHERE repo = ? LIMIT ?",
+            repo.value,
+            limit,
+            read = ::ftsRow,
+        )
+        if (batch.isEmpty()) return 0
+        for (row in batch) {
+            ftsDelete(row)
+            deltas.remove(row)
+        }
+        for (chunk in batch.chunked(Sql.MAX_VARIABLES)) {
+            sql.update(
+                "DELETE FROM task WHERE seq IN (${Sql.placeholders(chunk.size)})",
+                *chunk.map { it.seq as Any }.toTypedArray(),
+            )
+        }
+        return batch.size
     }
 
     // ------------------------------------------------------- configuración desincronizada
@@ -646,13 +782,24 @@ internal class TaskStore(private val db: TaskDb) {
      * Son megabytes **nativos**, no del heap de la JVM, así que no tocan el presupuesto
      * del §2.6; y se devuelven al terminar, porque una caché así en reposo sería memoria
      * reservada para nada.
+     *
+     * **[checkpointPages] es de la Fase 5**, y es para trabajo de **muchas transacciones
+     * pequeñas seguidas** —quitar un repositorio por tandas—. SQLite vuelca el diario a la
+     * base cada mil páginas; con una confirmación cada quinientas tareas eso es un volcado
+     * por tanda, copiando una y otra vez las mismas páginas interiores de los índices.
+     * Medido sobre 100.000 tareas: quitarlas por tandas eran 33,9 s; con la caché grande
+     * sola, 32,4 s; y espaciando el volcado a veinte mil páginas, **20,7 s**, con la tanda
+     * típica de 172 ms a 80. El diario crece hasta ~80 MB entre volcados, y en cuanto
+     * termina el bloque vuelve a su ritmo de siempre.
      */
-    fun <T> bulk(block: () -> T): T {
+    fun <T> bulk(checkpointPages: Int = 0, block: () -> T): T {
         sql.execute("PRAGMA cache_size = -$BULK_CACHE_KB")
+        if (checkpointPages > 0) sql.execute("PRAGMA wal_autocheckpoint = $checkpointPages")
         return try {
             block()
         } finally {
             runCatching { sql.execute(TaskSchema.PRAGMAS.first { it.contains("cache_size") }) }
+            if (checkpointPages > 0) runCatching { sql.execute("PRAGMA wal_autocheckpoint = $DEFAULT_CHECKPOINT_PAGES") }
         }
     }
 
@@ -674,51 +821,13 @@ internal class TaskStore(private val db: TaskDb) {
                 tasks.asSequence().mapIndexed { i, task -> TaskRows.values(seqs[i], task, config) },
             )
             sql.batch(
-                "INSERT INTO task_fts(rowid, title, body, tags_text, files_text) VALUES (?, ?, ?, ?, ?)",
+                FTS_INSERT,
                 5,
                 tasks.asSequence().mapIndexed { i, task ->
                     arrayOf<Any>(seqs[i], task.title, task.body, TaskRows.tagsText(task), TaskRows.filesText(task))
                 },
             )
-            sql.batch(
-                "INSERT INTO tag (task_id, tag, repo, state, bookmarked, priority_rank, sort_date, " +
-                    "undated, completed_at, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                10,
-                tasks.asSequence().flatMap { task ->
-                    task.tags.asSequence().map { tag ->
-                        arrayOf<Any>(
-                            task.id.value,
-                            tag,
-                            task.repo.value,
-                            task.stateId.value,
-                            if (task.bookmarked) 1 else 0,
-                            TaskRows.rankOf(task, config),
-                            TaskRows.sortDate(task, config),
-                            if (TaskRows.undated(task, config)) 1 else 0,
-                            TaskRows.millis(task.completedAt),
-                            TaskRows.millis(task.dueDate),
-                        )
-                    }
-                },
-            )
-            sql.batch(
-                "INSERT INTO anchor (task_id, pos, path, line, col, text) VALUES (?, ?, ?, ?, ?, ?)",
-                6,
-                tasks.asSequence().flatMap { task ->
-                    task.anchors.asSequence().mapIndexed { pos, anchor ->
-                        arrayOf<Any>(task.id.value, pos, anchor.path, anchor.line, anchor.column, anchor.text)
-                    }
-                },
-            )
-            sql.batch(
-                "INSERT INTO blob_ref (task_id, blob_id, repo) VALUES (?, ?, ?)",
-                3,
-                tasks.asSequence().flatMap { task ->
-                    task.attachments.asSequence().map { it.id.value }.distinct().map { blob ->
-                        arrayOf<Any>(task.id.value, blob, task.repo.value)
-                    }
-                },
-            )
+            insertSides(tasks, config)
             for (task in tasks) deltas.add(task, config)
             deltas.flush(sql)
         }
@@ -774,19 +883,6 @@ internal class TaskStore(private val db: TaskDb) {
         return hydrate(db.reader, rows)
     }
 
-    /**
-     * Todo lo de un repositorio. Lo piden la exportación y «Exportar y quitar», que son
-     * O(n) por definición: exportar un millón de tareas es leer un millón de tareas.
-     * Escribirlo en *streaming* es la Fase 5.
-     */
-    fun allOf(repo: RepoKey): List<Task> = hydrate(
-        db.reader,
-        db.reader.rows(
-            "SELECT ${TaskRows.COLUMNS} FROM task WHERE repo = ? ORDER BY ord",
-            repo.value,
-            read = TaskRows::read,
-        ),
-    )
 
     /**
      * Qué tareas cuelgan de un fichero, para marcar sus líneas en el editor.
@@ -1093,43 +1189,23 @@ internal class TaskStore(private val db: TaskDb) {
         val marked: Boolean = false,
     )
 
-    private fun previous(id: TaskId): Fts? = sql.first(
-        "SELECT seq, title, body, tags_text, files_text, state, repo, priority, completed_at, bookmarked " +
-            "FROM task WHERE id = ?",
-        id.value,
-    ) {
-        Fts(
-            seq = it.getLong(0),
-            title = it.getString(1).orEmpty(),
-            body = it.getString(2).orEmpty(),
-            tags = it.getString(3).orEmpty(),
-            files = it.getString(4).orEmpty(),
-            state = it.getString(5).orEmpty(),
-            repo = it.getString(6).orEmpty(),
-            priority = it.getString(7).orEmpty(),
-            open = it.getLong(8) == TaskSchema.NO_DATE,
-            marked = it.getInt(9) != 0,
-        )
-    }
+    private fun previous(id: TaskId): Fts? = sql.first("SELECT $FTS_COLUMNS FROM task WHERE id = ?", id.value, read = ::ftsRow)
 
-    private fun ftsDelete(old: Fts) = sql.update(
-        "INSERT INTO task_fts(task_fts, rowid, title, body, tags_text, files_text) " +
-            "VALUES ('delete', ?, ?, ?, ?, ?)",
-        old.seq,
-        old.title,
-        old.body,
-        old.tags,
-        old.files,
+    /** Lo que hace falta de una fila para quitarla del índice de texto y de los contadores. */
+    private fun ftsRow(row: org.jetbrains.sqlite.SqliteResultSet) = Fts(
+        seq = row.getLong(0),
+        title = row.getString(1).orEmpty(),
+        body = row.getString(2).orEmpty(),
+        tags = row.getString(3).orEmpty(),
+        files = row.getString(4).orEmpty(),
+        state = row.getString(5).orEmpty(),
+        repo = row.getString(6).orEmpty(),
+        priority = row.getString(7).orEmpty(),
+        open = row.getLong(8) == TaskSchema.NO_DATE,
+        marked = row.getInt(9) != 0,
     )
 
-    private fun ftsInsert(seq: Long, task: Task) = sql.update(
-        "INSERT INTO task_fts(rowid, title, body, tags_text, files_text) VALUES (?, ?, ?, ?, ?)",
-        seq,
-        task.title,
-        task.body,
-        TaskRows.tagsText(task),
-        TaskRows.filesText(task),
-    )
+    private fun ftsDelete(old: Fts) = sql.update(FTS_DELETE, old.seq, old.title, old.body, old.tags, old.files)
 
     /** Pone al día la copia de la tupla de orden que vive en `tag`. Ver la nota 4 del esquema. */
     private fun syncTags(repo: RepoKey, from: StateId, to: StateId) = sql.update(
@@ -1278,6 +1354,82 @@ internal class TaskStore(private val db: TaskDb) {
 
         /** Lo que se le presta a SQLite mientras se importa, en KiB. Ver [bulk]. */
         const val BULK_CACHE_KB = 256_000
+
+        /** Lo que [ftsRow] lee, en su orden: lo de una fila que el índice de texto y los contadores necesitan. */
+        private const val FTS_COLUMNS =
+            "seq, title, body, tags_text, files_text, state, repo, priority, completed_at, bookmarked"
+
+        /** Quitar una fila del índice de texto: con contenido externo, hay que decirle qué había. */
+        private const val FTS_DELETE =
+            "INSERT INTO task_fts(task_fts, rowid, title, body, tags_text, files_text) VALUES ('delete', ?, ?, ?, ?, ?)"
+
+        private const val FTS_INSERT = "INSERT INTO task_fts(rowid, title, body, tags_text, files_text) VALUES (?, ?, ?, ?, ?)"
+
+        private const val TAG_INSERT = "INSERT INTO tag (task_id, tag, repo, state, bookmarked, priority_rank, " +
+            "sort_date, undated, completed_at, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+
+        private const val ANCHOR_INSERT = "INSERT INTO anchor (task_id, pos, path, line, col, text) VALUES (?, ?, ?, ?, ?, ?)"
+
+        private const val BLOB_REF_INSERT = "INSERT INTO blob_ref (task_id, blob_id, repo) VALUES (?, ?, ?)"
+
+        /** El volcado del diario mientras se quita un repositorio. Ver [bulk]. */
+        const val REMOVAL_CHECKPOINT_PAGES = 20_000
+
+        /** El de SQLite, al que se vuelve. */
+        private const val DEFAULT_CHECKPOINT_PAGES = 1_000
+
+        /**
+         * Tareas por transacción al quitar un repositorio. Ver [forgetBatch].
+         *
+         * Es lo que decide cuánto puede llegar a esperar cualquier otro comando mientras
+         * se borra, y se midió: sobre 10.000 tareas, con dos mil la tanda más larga eran
+         * 170 ms y con quinientas 87 ms. Sobre 100.000 cada tanda cuesta más —la base ya no
+         * cabe en la caché— y con el volcado espaciado de [bulk] la típica son 80 ms. El
+         * precio de tantas confirmaciones se paga en el total, en segundo plano y una vez.
+         */
+        const val FORGET_BATCH = 500
+
+        /** Cada cuántas filas se avisa del progreso de una transacción. Ver [apply]. */
+        const val PROGRESS_EVERY = 64
+
+        private val NO_PROGRESS: (Int, Int) -> Unit = { _, _ -> }
+
+        /**
+         * Todo un repositorio en el orden del `tasks.xml` —el orden manual—, **a tandas**.
+         *
+         * Lo pide la exportación a XML. Hasta la Fase 5 era `allOf`, que devolvía la lista
+         * entera: un millón de `Task` vivas —12,9 GB— antes de escribir el primer byte.
+         * Ahora es *keyset* sobre `task_ord` —`(ord, seq)`, que el índice ya lleva en ese
+         * orden porque el rowid va detrás de toda clave— y lo retenido es la tanda.
+         *
+         * Recibe la conexión porque quien exporta la abre propia y con una transacción:
+         * ver `SqlitePager.snapshot`.
+         */
+        fun eachInOrder(sql: Sql, repo: RepoKey, chunk: Int, block: (List<Task>) -> Unit) {
+            var ord = Long.MIN_VALUE
+            var seq = Long.MIN_VALUE
+            while (true) {
+                var lastOrd = ord
+                var lastSeq = seq
+                val rows = sql.rows(
+                    "SELECT ${TaskRows.COLUMNS} FROM task WHERE repo = ? AND (ord, seq) > (?, ?) " +
+                        "ORDER BY ord, seq LIMIT ?",
+                    repo.value,
+                    ord,
+                    seq,
+                    chunk,
+                ) {
+                    lastOrd = it.getLong(6)
+                    lastSeq = TaskRows.seqOf(it)
+                    TaskRows.read(it)
+                }
+                if (rows.isEmpty()) break
+                block(hydrate(sql, rows))
+                if (rows.size < chunk) break
+                ord = lastOrd
+                seq = lastSeq
+            }
+        }
 
         /** Etiquetas y anclas de un puñado de tareas, con dos consultas en total. */
         fun hydrate(sql: Sql, tasks: List<Task>): List<Task> {

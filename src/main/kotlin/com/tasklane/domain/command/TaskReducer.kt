@@ -138,11 +138,19 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 )
             }
 
+            is TaskCommand.Batch -> batch(subject, command)
+
             is TaskCommand.Delete -> {
                 // Sólo las que existían. Antes esto se notaba en que borrar un id
                 // inexistente reconstruía la lista igualmente: un repintado y un volcado
                 // a disco por un borrado que no borraba nada.
-                val ids = subject.tasks.map { it.id }.filter { it in command.ids.toSet() }
+                //
+                // El conjunto se construye UNA vez. Estaba dentro del `filter`, o sea se
+                // reconstruía por cada tarea: borrar diez mil filas seleccionadas eran
+                // cien millones de inserciones en un `HashSet`. Con una fila no se nota,
+                // y la Fase 5 es la que borra selecciones enteras.
+                val wanted = command.ids.toHashSet()
+                val ids = subject.tasks.map { it.id }.filter { it in wanted }
                 if (ids.isEmpty()) nothing(config) else Plan(listOf(Mutation.Delete(ids)), config)
             }
 
@@ -292,12 +300,64 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         is TaskCommand.ToggleBookmark -> listOf(command.id)
         is TaskCommand.SetTags -> listOf(command.id)
         is TaskCommand.ToggleComplete -> listOf(command.id)
+        is TaskCommand.Batch -> command.commands.flatMapTo(LinkedHashSet()) { targetsOf(it) }.toList()
         else -> emptyList()
     }
 
     // ------------------------------------------------------------------- privado
 
     private fun nothing(config: TasklaneConfig) = Plan(emptyList(), config)
+
+    /**
+     * Los comandos de un [TaskCommand.Batch], uno detrás de otro, sobre **las tareas
+     * como las dejó el anterior**.
+     *
+     * Eso es lo que hace que el lote sea la misma cosa que los comandos sueltos: si la
+     * misma tarea sale dos veces —marcar y después completar—, el segundo ve la tarea ya
+     * marcada, igual que la vería leyéndola del almacén. Lo que cambia es que al final
+     * sale **una** mutación por tipo y no una por comando.
+     *
+     * Cada comando se planifica con su propio [Subject] de una tarea. No es por elegancia:
+     * `Subject.task(id)` busca recorriendo, y con el lote entero dentro serían diez mil
+     * recorridos de diez mil tareas.
+     */
+    private fun batch(subject: Subject, command: TaskCommand.Batch): Plan {
+        val config = subject.config
+        val current = HashMap<TaskId, Task>(subject.tasks.size * 2)
+        subject.tasks.associateByTo(current) { it.id }
+        val changed = LinkedHashSet<TaskId>()
+        val deleted = LinkedHashSet<TaskId>()
+
+        for (sub in command.commands) {
+            val mine = targetsOf(sub).mapNotNull { current[it] }
+            if (mine.isEmpty()) continue
+            for (mutation in plan(Subject(config, mine, subject.nextOrder), sub).mutations) {
+                when (mutation) {
+                    is Mutation.Upsert -> mutation.tasks.forEach {
+                        current[it.id] = it
+                        changed += it.id
+                    }
+
+                    is Mutation.Delete -> mutation.ids.forEach {
+                        current -= it
+                        changed -= it
+                        deleted += it
+                    }
+
+                    // Ningún comando sobre tareas existentes describe un cambio de
+                    // proyecto; si alguno empezara a hacerlo, un lote que lo tragara en
+                    // silencio sería un cambio que no llega al disco.
+                    else -> error("Batch no sabe componer $mutation")
+                }
+            }
+        }
+
+        val mutations = buildList {
+            if (changed.isNotEmpty()) add(Mutation.Upsert(changed.map { current.getValue(it) }))
+            if (deleted.isNotEmpty()) add(Mutation.Delete(deleted.toList()))
+        }
+        return Plan(mutations, config)
+    }
 
     private fun upsert(config: TasklaneConfig, task: Task) =
         Plan(listOf(Mutation.Upsert(listOf(task))), config)
@@ -375,12 +435,13 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 out = when (mutation) {
                     is Mutation.Upsert -> {
                         val byId = mutation.tasks.associateBy { it.id }
+                        val known = out.mapTo(HashSet()) { it.id }
                         val kept = out.map { byId[it.id] ?: it }
-                        val fresh = mutation.tasks.filter { task -> out.none { it.id == task.id } }
+                        val fresh = mutation.tasks.filter { it.id !in known }
                         kept + fresh
                     }
 
-                    is Mutation.Delete -> out.filterNot { it.id in mutation.ids.toSet() }
+                    is Mutation.Delete -> mutation.ids.toHashSet().let { gone -> out.filterNot { it.id in gone } }
                     else -> out
                 }
             }

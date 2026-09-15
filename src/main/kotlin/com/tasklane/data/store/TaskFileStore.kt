@@ -6,7 +6,11 @@ import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 import java.nio.channels.FileChannel
+import java.nio.file.FileVisitResult
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -140,16 +144,45 @@ class TaskFileStore(private val layout: StorageLayout) {
      *
      * Se recorre el árbol en vez de usar `deleteRecursively` de la VFS por la misma
      * razón que el resto de la clase: esto no son fuentes del proyecto.
+     *
+     * **Con memoria constante desde la Fase 5.** Hasta la 2.1 esto era `Files.walk` más
+     * `sorted(reverseOrder())` —la forma corta de borrar hijos antes que padres—, y
+     * ordenar un *stream* es **materializarlo**: con diez millones de capturas, una lista
+     * de diez millones de `Path` antes de borrar la primera. `walkFileTree` entrega cada
+     * directorio **después** de sus hijos sin tener que recordar nada más que la rama en
+     * la que está, que en el árbol de adjuntos son tres niveles.
+     *
+     * [onFile] recibe cuántos ficheros van borrados, para la barra de progreso.
      */
-    suspend fun delete(repo: RepoKey) = lockFor(repo).withLock {
+    suspend fun delete(repo: RepoKey, onFile: (Long) -> Unit = {}) = lockFor(repo).withLock {
         val dir = layout.repoDir(repo)
         if (!Files.exists(dir)) return@withLock
-        Files.walk(dir).use { paths ->
-            paths.sorted(Comparator.reverseOrder()).forEach { path ->
-                runCatching { Files.deleteIfExists(path) }
-                    .onFailure { thisLogger().warn("Tasklane: no se pudo borrar $path", it) }
-            }
-        }
+        var files = 0L
+        Files.walkFileTree(
+            dir,
+            object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    remove(file)
+                    onFile(++files)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult {
+                    thisLogger().warn("Tasklane: no se pudo visitar $file", exc)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                    remove(dir)
+                    return FileVisitResult.CONTINUE
+                }
+            },
+        )
+    }
+
+    private fun remove(path: Path) {
+        runCatching { Files.deleteIfExists(path) }
+            .onFailure { thisLogger().warn("Tasklane: no se pudo borrar $path", it) }
     }
 
     sealed interface ReadResult {

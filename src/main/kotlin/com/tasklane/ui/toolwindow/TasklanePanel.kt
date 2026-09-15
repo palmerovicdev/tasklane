@@ -46,6 +46,7 @@ import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.paging.GroupOutline
+import com.tasklane.paging.PageQuery
 import com.tasklane.paging.TaskPager
 import com.tasklane.service.SearchResults
 import com.tasklane.service.SearchService
@@ -846,8 +847,13 @@ internal class TasklanePanel(
      * entero.
      *
      * Así que se parte en dos: **en el EDT** se decide qué secciones hay —que es leer el
-     * árbol, y sólo el EDT puede— y **en segundo plano** se leen. Lo que la Fase 5 cambie
-     * es cómo se escribe lo leído, no quién decide qué leer.
+     * árbol, y sólo el EDT puede— y **en segundo plano** se leen.
+     *
+     * Desde la Fase 5 cada sección dice además **cuántas filas tiene** —la cabecera ya lo
+     * sabía— y no trae una lista sino **cómo leerse a tandas** de un paginador: la
+     * exportación decide el destino con [size] antes de leer nada, y lee sobre una foto del
+     * [pager] —ver `TaskPager.snapshot`— para que lo que salga sea la pestaña en el
+     * momento de pulsar.
      *
      * Las **cabeceras** salen de aquí y no del exportador porque son lo que el usuario ve
      * escrito en la pestaña: el nombre del estado y, si agrupa, el del grupo de fecha. Con
@@ -855,13 +861,26 @@ internal class TasklanePanel(
      * dice «Hoy»— sino lo que ese texto significa: en Markdown el exportador lo prefiere a
      * la cabecera, porque «Hoy» deja de ser verdad mañana y lo exportado se guarda.
      */
-    class ExportRequest(val sections: List<Pending>) {
-        class Pending(val heading: String, val date: LocalDate?, val load: () -> List<Task>)
+    class ExportRequest(
+        val pager: TaskPager,
+        /** Un nombre para el fichero, si hace falta uno: el repositorio y el estado. */
+        val name: String,
+        val sections: List<Pending>,
+    ) {
+        class Pending(
+            val heading: String,
+            val date: LocalDate?,
+            val size: Int,
+            /** Lee la sección de [TaskPager] —el congelado— a tandas. */
+            val read: (TaskPager, (List<Task>) -> Unit) -> Unit,
+        )
+
+        val size: Int get() = sections.sumOf { it.size }
     }
 
     /**
-     * Las secciones a exportar, resueltas a medias: la cabecera y de dónde salen las
-     * tareas. Ver [ExportRequest].
+     * Las secciones a exportar, resueltas a medias: la cabecera, cuántas filas y de dónde
+     * salen. Ver [ExportRequest].
      */
     fun exportRequest(scope: ExportScope): ExportRequest {
         val state = snapshot.config.state(stateId)?.name.orEmpty()
@@ -873,10 +892,15 @@ internal class TasklanePanel(
         val today = LocalDate.now(ZoneId.systemDefault())
         fun day(key: GroupKey?): LocalDate? = (key as? GroupKey.OfDate)?.group?.dayOn(today)
 
-        fun pending(key: GroupKey?) = ExportRequest.Pending(heading(key), day(key)) { list.contents(key) }
+        fun pending(key: GroupKey?) = ExportRequest.Pending(heading(key), day(key), list.sizeOf(key)) { pager, sink ->
+            pager.each(PageQuery(stateId, key), block = sink)
+        }
 
         val outline = list.outline
+        val name = listOfNotNull(snapshot.activeRepository?.displayName, state.ifEmpty { null }).joinToString("-")
         return ExportRequest(
+            list.pager,
+            name,
             when (scope) {
                 ExportScope.STATE ->
                     if (outline.isEmpty()) listOf(pending(null)) else outline.map { pending(it.key) }
@@ -887,7 +911,7 @@ internal class TasklanePanel(
                 // así que sale como un bloque único bajo el nombre del estado. Y ya está
                 // leída: son las filas que el usuario tiene señaladas.
                 ExportScope.SELECTION -> selectedTasks().let { tasks ->
-                    listOf(ExportRequest.Pending(heading(null), null) { tasks })
+                    listOf(ExportRequest.Pending(heading(null), null, tasks.size) { _, sink -> sink(tasks) })
                 }
             },
         )
@@ -998,24 +1022,29 @@ internal class TasklanePanel(
         service.apply(TaskCommand.ToggleBookmark(task.repo, task.id))
     }
 
+    /**
+     * Las operaciones sobre la selección van **todas** por [TaskService.applyAll]: una
+     * transacción y un repintado por gesto, no uno por fila. Ver `TaskCommand.Batch`.
+     *
+     * Cada fila lleva **su** repositorio. Con la búsqueda en todos los repositorios una
+     * misma selección puede tener filas de varios, y mandarlas todas con la clave del
+     * activo tocaría sólo unas cuantas, y en silencio.
+     */
     fun toggleBookmarkSelected() {
-        selectedTasks().forEach { service.apply(TaskCommand.ToggleBookmark(it.repo, it.id)) }
+        service.applyAll(selectedTasks().map { TaskCommand.ToggleBookmark(it.repo, it.id) })
     }
 
     /**
-     * Se agrupa por repositorio antes de borrar. Con la búsqueda en todos los
-     * repositorios una misma selección puede tener filas de varios, y `Delete` está
-     * acotado a uno: mandarlas todas con la clave del activo borraría sólo unas
-     * cuantas y en silencio.
+     * Un `Delete` por fila y no uno por repositorio con todos los ids: así el lote cuenta
+     * **filas**, que es lo que decide si cabe en el gesto o va en segundo plano. Un único
+     * `Delete` con cinco mil ids sería un comando suelto que se aplicaría en el acto.
      */
     fun deleteSelected() {
-        selectedTasks()
-            .groupBy { it.repo }
-            .forEach { (repo, tasks) -> service.apply(TaskCommand.Delete(repo, tasks.map { it.id })) }
+        service.applyAll(selectedTasks().map { TaskCommand.Delete(it.repo, listOf(it.id)) })
     }
 
     fun toggleSelected() {
-        selectedTasks().forEach { service.apply(TaskCommand.ToggleComplete(it.repo, it.id)) }
+        service.applyAll(selectedTasks().map { TaskCommand.ToggleComplete(it.repo, it.id) })
     }
 
     // ----------------------------------------------------- mover entre estados
@@ -1038,7 +1067,7 @@ internal class TasklanePanel(
      * varios repositorios.
      */
     fun setPrioritySelected(target: PriorityId) {
-        selectedTasks().forEach { service.apply(TaskCommand.ChangePriority(it.repo, it.id, target)) }
+        service.applyAll(selectedTasks().map { TaskCommand.ChangePriority(it.repo, it.id, target) })
     }
 
     /**
@@ -1050,7 +1079,7 @@ internal class TasklanePanel(
      * selección puede mezclar filas de varios.
      */
     fun moveSelectedTo(target: StateId) {
-        selectedTasks().forEach { service.apply(TaskCommand.ChangeState(it.repo, it.id, target)) }
+        service.applyAll(selectedTasks().map { TaskCommand.ChangeState(it.repo, it.id, target) })
     }
 
     /**

@@ -67,6 +67,13 @@ Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 Un proyecto sin `.idea/tasklane.xml` se siembra desde la plantilla al abrirse, así que
 configurar por proyecto no obliga a reconfigurar cada proyecto.
 
+**Una copia de seguridad al día, como mucho.** Las tareas viven en
+`.idea/tasklane/tasklane.db`, y a su lado queda `tasklane.db.backup`: una copia entera y
+compacta que se rehace en segundo plano si pasó un día y hubo cambios. Si el IDE se cerró
+de golpe, la apertura siguiente además **comprueba la base**, y si encuentra daños lo dice
+—con la fecha de la última copia— y deja de copiar encima de ella. *Tasklane: Diagnostics*
+enseña las dos cosas.
+
 ## Repositorios
 
 Cada repositorio de la ventana tiene su propio conjunto de tareas. No se escanea el
@@ -390,11 +397,23 @@ cuando el grupo entero ya significa «esto se hizo ese día». Sólo con los gru
 **un día concreto** —hoy, ayer, un día suelto—: «esta semana», un mes y «sin fecha» no
 tienen fecha que poner, así que conservan la cabecera de la pestaña y su casilla.
 
+**Hasta 10.000 tareas al portapapeles.** Por encima se ofrece guardarlas en un fichero
+—`.md` o `.txt`, según el formato—: un portapapeles de varios gigas no es una exportación,
+es un cuelgue del IDE y de donde se pegue. Exportar va siempre en segundo plano, con
+barra y cancelable, y lo que sale es la pestaña **en el momento de pulsar**, aunque se
+siga editando mientras se escribe.
+
 **Exportar y quitar.** Un repositorio marcado como ausente —su carpeta ya no está en
-disco— es el único que se puede quitar de la lista, y sólo por esta vía: primero sus
-tareas van al portapapeles, se confirma, y después se borra la carpeta de datos. Es
-la salida que hace honesto el trato con los repositorios ausentes, que nunca ocultan
-ni borran nada por su cuenta.
+disco— es el único que se puede quitar de la lista, y sólo por esta vía: se confirma,
+sus tareas salen al portapapeles —o a un fichero, si son más de 10.000—, se comprueba que
+salieron **todas**, y sólo entonces se borran sus datos. Mientras dura, el repositorio
+queda en solo lectura: lo que se borra es exactamente lo que se exportó. Es la salida que
+hace honesto el trato con los repositorios ausentes, que nunca ocultan ni borran nada por
+su cuenta.
+
+**Exportar el repositorio a XML** devuelve sus tareas al `tasks.xml` de siempre, el
+formato que cualquier versión del plugin sabe leer. Se escribe entero o no se escribe:
+a un temporal que sólo sustituye al fichero cuando está completo.
 
 ## Requisitos
 
@@ -515,7 +534,7 @@ puerta y su versión.
 | E2 | UI acotada | `1.6.0` | ✅ |
 | E3 | El almacén (SQLite + FTS5) | `2.0.0` | ✅ |
 | E4 | Adjuntos a escala | `2.1.0` | ✅ |
-| E5 | Las operaciones grandes | | |
+| E5 | Las operaciones grandes | `2.2.0` | ✅ |
 | E6 | Endurecimiento | | |
 
 Las dos primeras salieron juntas en la `1.5.0`: la acción *Tasklane: Diagnostics*, que
@@ -544,6 +563,17 @@ una— y **las que ya estaban no se tocan**: el nombre de un blob es el hash de 
 contenido, así que reescalarlo sería reescribir las tareas que lo nombran. Lo que no se
 puede resolver con ingeniería —que diez millones de capturas ocupan lo que ocupan— se
 resuelve avisando: hay una cuota con aviso, configurable, que no borra nada.
+
+La `2.2.0` cierra la **Fase 5**: lo que es O(n) por definición. Exportar va en
+*streaming* y sobre una foto de la base —con 100.000 tareas, sacar el repositorio a
+`tasks.xml` retenía 1,5 GB y ahora 15 MB—, el portapapeles tiene tope y por encima se
+ofrece un fichero, las operaciones sobre muchas filas son una transacción y un repintado,
+y «Exportar y quitar» comprueba que salió todo antes de borrar y borra por tandas, así que
+nadie espera más de un cuarto de segundo. El `.bak` de cada guardado tiene por fin
+sustituto: una copia diaria con `VACUUM INTO` y una comprobación de la base tras cada
+cierre inesperado. De paso aparecieron cinco fallos de la Fase 3 en los caminos que esta
+recorría —el más serio, que un repositorio renombrado desaparecía del selector con sus
+tareas dentro— y están corregidos.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -582,7 +612,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.1.0 && git push origin v2.1.0
+git tag v2.2.0 && git push origin v2.2.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

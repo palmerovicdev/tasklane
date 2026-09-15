@@ -22,6 +22,18 @@ import java.time.LocalDate
  * cabecera que dijera «Done · Hoy» sería falsa mañana, y la casilla `- [x]` es ruido
  * cuando el grupo entero ya significa «esto se hizo ese día». En texto plano no cambia
  * nada: ahí el destino es un correo, no un documento.
+ *
+ * ## En *streaming* desde la Fase 5
+ *
+ * Hasta la 2.1 esto devolvía un `String`, y quien exportaba tenía que tener **todas** las
+ * tareas en una lista antes de empezar: un estado con 300.000 filas eran 3,9 GB de `Task`
+ * vivas más el texto entero. [Stream] escribe tarea a tarea sobre cualquier [Appendable]
+ * —un `StringBuilder` para el portapapeles, un `Writer` para un fichero— y lo que retiene
+ * es la tarea que está escribiendo.
+ *
+ * La versión que devuelve un `String` sigue existiendo, y **está construida encima de
+ * [Stream]**: hay un único sitio donde se decide el formato, y los tests que lo fijan
+ * prueban a la vez las dos puertas.
  */
 object TaskExporter {
 
@@ -37,36 +49,74 @@ object TaskExporter {
 
     private const val INDENT = "  "
 
-    fun export(sections: List<Section>, config: TasklaneConfig, format: ExportFormat): String {
-        val blocks = sections
-            .filter { it.tasks.isNotEmpty() }
-            .map { section -> render(section, config, format) }
-
-        // Sin tareas no se devuelve una cabecera huérfana: quien llama distingue
-        // «no había nada» de «aquí tienes» mirando si la cadena está vacía.
-        if (blocks.isEmpty()) return ""
-        return blocks.joinToString(separator = "\n\n", postfix = "\n")
+    fun export(sections: List<Section>, config: TasklaneConfig, format: ExportFormat): String = buildString {
+        val stream = Stream(this, config, format)
+        for (section in sections) {
+            stream.section(section.heading, section.date)
+            section.tasks.forEach(stream::task)
+        }
     }
 
     fun export(heading: String?, tasks: List<Task>, config: TasklaneConfig, format: ExportFormat): String =
         export(listOf(Section(heading, tasks)), config, format)
 
-    private fun render(section: Section, config: TasklaneConfig, format: ExportFormat): String = buildString {
-        val markdown = format == ExportFormat.MARKDOWN
-        // El día manda sobre la cabecera de la pestaña: ver la nota de arriba.
-        val day = section.date.takeIf { markdown }
-        (day?.toString() ?: section.heading)?.takeIf { it.isNotBlank() }?.let { heading ->
-            appendLine(if (markdown) "## $heading" else heading)
-            appendLine()
-        }
-        if (day != null) {
-            section.tasks.forEachIndexed { index, task -> appendNumbered(index + 1, task) }
-        } else {
-            section.tasks.forEach { appendTask(it, config, format) }
-        }
-    }.trimEnd('\n')
+    /**
+     * El exportador tarea a tarea.
+     *
+     * Se abre una sección con [section] y se le echan tareas con [task]; la cabecera no
+     * se escribe hasta que llega la primera. Es lo que antes hacía el filtro de
+     * «secciones vacías fuera», y en *streaming* no se puede hacer de otra forma: no se
+     * sabe si una sección está vacía hasta que se ha terminado de leer.
+     *
+     * **El separador va delante, no detrás.** El texto de antes era «los bloques unidos
+     * por una línea en blanco, con un salto al final», y cada bloque acaba en su propio
+     * salto de línea; así que escribir un salto **antes** de cada bloque que no sea el
+     * primero da exactamente los mismos bytes sin tener que saber cuál será el último.
+     */
+    class Stream(
+        private val out: Appendable,
+        private val config: TasklaneConfig,
+        private val format: ExportFormat,
+    ) {
+        /** Cuántas tareas se han escrito. Es lo que se le dice al usuario al terminar. */
+        var written: Int = 0
+            private set
 
-    private fun StringBuilder.appendTask(task: Task, config: TasklaneConfig, format: ExportFormat) {
+        private var blocks = 0
+        private var heading: String? = null
+        private var day: LocalDate? = null
+        private var opened = false
+        private var number = 0
+
+        fun section(heading: String?, date: LocalDate? = null) {
+            this.heading = heading
+            // El día manda sobre la cabecera de la pestaña, y sólo en Markdown: ver la
+            // nota de la clase.
+            this.day = date.takeIf { format == ExportFormat.MARKDOWN }
+            opened = false
+            number = 0
+        }
+
+        fun task(task: Task) {
+            if (!opened) open()
+            val day = day
+            if (day != null) out.appendNumbered(++number, task) else out.appendTask(task, config, format)
+            written++
+        }
+
+        private fun open() {
+            opened = true
+            if (blocks++ > 0) out.append('\n')
+            (day?.toString() ?: heading)?.takeIf { it.isNotBlank() }?.let { text ->
+                out.append(if (format == ExportFormat.MARKDOWN) "## $text" else text).append('\n')
+                out.append('\n')
+            }
+        }
+    }
+
+    private fun Appendable.appendLine(text: CharSequence = ""): Appendable = append(text).append('\n')
+
+    private fun Appendable.appendTask(task: Task, config: TasklaneConfig, format: ExportFormat) {
         val done = config.stateOrDefault(task.stateId).terminal
         append(
             when (format) {
@@ -98,7 +148,7 @@ object TaskExporter {
      * `1.`, cuatro a partir de `10.`— para que Markdown lo siga leyendo como parte del
      * mismo punto y no como un párrafo suelto que rompe la numeración.
      */
-    private fun StringBuilder.appendNumbered(number: Int, task: Task) {
+    private fun Appendable.appendNumbered(number: Int, task: Task) {
         val marker = "$number. "
         append(marker).append(task.title)
         task.tags.forEach { append(" #").append(it) }
