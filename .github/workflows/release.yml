@@ -45,7 +45,7 @@ jobs:
       - name: Test
         run: ./gradlew test -PlocalIdePath=
 
-      - name: Verify plugin against 2025.2 and 2026.2
+      - name: Verify plugin against 2026.1.5 and 2026.2
         run: ./gradlew verifyPlugin -PlocalIdePath=
 
       - name: Sign plugin

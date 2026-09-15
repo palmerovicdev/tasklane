@@ -9,6 +9,32 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.5.0] — IntelliJ IDEA 2026.1.5 en adelante
+
+Menor aunque sube el mínimo de plataforma: quien siga en un IDE anterior no pierde nada, se
+queda en la 2.4.0. No hay nada nuevo que usar; lo que cambia es contra qué IDE se promete
+funcionar.
+
+### Cambiado
+- **El IDE mínimo pasa de 2025.2 a 2026.1.5** (`sinceBuild = 261.27258.48`, antes `252`).
+  Quien siga en 2025.2, 2025.3 o 2026.1.0–2026.1.4 se queda en la 2.4.0.
+- CI compila, prueba y verifica contra **IntelliJ IDEA 2026.1.5** (`IU`) en vez de la
+  Community 2025.2: desde la 2025.3 no hay Community que descargar. El Plugin Verifier fija
+  los extremos en 2026.1.5 y 2026.2.
+
+### Corregido
+- Los tres avisos del Plugin Verifier del Marketplace sobre la 2.4.0:
+  - `ReadAction.compute` (deprecada) → `ReadAction.computeBlocking`, la misma read action
+    síncrona, al saltar a un ancla de código.
+  - `DynamicBundle(String)` (deprecado) → `TasklaneBundle` **delega** en un
+    `DynamicBundle(Class, String)` en vez de heredar.
+  - `SimpleListCellRenderer.create` (marcada para eliminarse) → subclase con `customize`,
+    como ya hacían los otros tres desplegables, en el de la marca del editor de los ajustes.
+
+### Compatibilidad
+- Sin cambio de formato: el esquema sigue en la versión 1, y la 2.4.0 abre un proyecto usado
+  por la 2.5.0 y al revés.
+
 ## [2.4.0] — Endurecimiento
 
 La **Fase 6** del plan de escala (`docs/plan-escala.md`), la última: comprobar a la fuerza

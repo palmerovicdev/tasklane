@@ -400,6 +400,10 @@ corpus de `SyntheticCorpus`, en un MacBook con JBR 25, y se reproduce con:
 
 ### 0-bis.1 La decisión del §2.3 cambia: **no hace falta `sqlite-jdbc`**
 
+> **Revertido en la Fase 6 (2.4.0).** El módulo funcionaba, pero su paquete es API interna
+> (`@ApiStatus.Internal`) y el Marketplace rechaza el plugin por usarlo. Se empaqueta
+> `sqlite-jdbc` sobre el mismo fichero y el mismo esquema; lo que costó, en el §6-bis.3.
+
 El spike (§0.5) encontró algo que el plan no contemplaba: **la plataforma ya trae
 SQLite**, con su nativa para las seis combinaciones de sistema y arquitectura.
 
@@ -1802,6 +1806,200 @@ expone `sqlite3_interrupt`—: cancelar espera a que acabe la sentencia en march
 5. **Documentar en `architecture.html`**: §8 pasa a contar por qué la decisión de no
    indexar era correcta y qué la revirtió. Esa sección es buena y merece envejecer bien,
    no desaparecer.
+
+---
+
+## 6-bis. Resultados de la Fase 6 · CERRADA
+
+> Cerrada en la **2.4.0**. Lo que las cinco fases anteriores daban por hecho se comprueba a
+> la fuerza: se mata el proceso a mitad de escribir, se pisa la base con basura, se aplican
+> cien mil comandos seguidos y cada noche se mide un millón de tareas con techos que rompen
+> el build. Por el camino hubo que cambiar de driver de SQLite, y la recuperación que el
+> plan pedía resultó perder demasiado.
+
+```
+./gradlew test --tests '*CrashTest' -PcrashRounds=50
+./gradlew test --tests '*StoreRecoveryTest'
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=100000 -PtestHeap=4g
+```
+
+### 6-bis.1 La puerta, comprobada
+
+La puerta de esta fase no es una cifra sino cinco comprobaciones, y cada una es un test:
+
+| §6 | Qué se comprueba | Dónde |
+|---|---|---|
+| 6.1 Caídas | Muerte real del proceso a mitad de una transacción, de la migración, del recolector, de la copia diaria **y de la propia recuperación** | `CrashTest` |
+| 6.2 Corrupción | Cabecera, página de índice, hoja de la tabla, índice de texto y diario pisados con basura; recuperación interrumpida y reanudada | `StoreRecoveryTest` |
+| 6.3 Techos | p99 y heap contra el presupuesto de cada fase; a 100.000 en local y a un millón cada noche | `ScaleBenchmark` + `nightly.yml` |
+| 6.4 Longevidad | 100.000 comandos seguidos: heap retenido, diario y latencia | `ScaleBenchmark` |
+| 6.5 Documentar | Por qué no indexar era correcto y qué lo revirtió | `architecture.html` §8 |
+
+**Las caídas, con `-PcrashRounds=10`:** cincuenta muertes, diez por escenario, **todas a
+mitad** de lo que se mataba —en el de comandos se comprueba: 10 de 10 cayeron dentro de una
+transacción— y las cincuenta dejaron la base sana y la contabilidad cuadrada. Lo confirmado
+siempre sobrevivió entero; la transacción en marcha, nunca dejó una fila; la migración siguió
+donde iba sin repetir ninguna tarea; ninguna imagen que una tarea nombrara se borró; la copia
+quedó siempre entera, vieja o nueva; y reabrir terminó cada recuperación interrumpida sin una
+segunda cuarentena. La suite completa, 654 tests, en verde sobre `sqlite-jdbc`.
+
+**Los techos, a 100.000 tareas.** Todos en p99. Son **presupuestos del plan y no cifras de
+este portátil**: un techo sacado de la medida de hoy saltaría en un runner más lento sin que
+nada hubiera empeorado; uno sacado de la puerta de cada fase salta cuando el plugin deja de
+cumplir lo que prometió, que es justo lo que tiene que romper el build.
+
+| Techo | De dónde sale | Escenario | Medido |
+|---|---|---|---:|
+| **16 ms** en el EDT | un fotograma a 60 Hz | primer pintado · repintar · desplazarse · pintar · lote de 10 | 8,4 · 6,8 · 8,7 · 4,5 · 8,3 ms |
+| **50 ms** de interfaz | puerta de la Fase 3 | editar una tarea: comando + repintado | 23,1 ms |
+| **20 ms** de escritura | puerta de la Fase 3 | un comando con su transacción | 2,5 ms |
+| **300 ms** al abrir | puerta de la Fase 3 | contadores y cabeceras, en frío | 13,4 ms |
+| **100 ms** por tecla | puerta de la Fase 3 | «revision del despliegue» | 0,13 ms |
+| **5 µs por tarea** | 10× lo medido, §3-bis.5 | «token» · «is:done token» · «#api token» | 50,9 · 67,7 · 42,4 ms |
+| **150 MB** de heap | §2.6 | plugin abierto · exportar un estado · exportar a XML | 2,7 · 0,8 · 15,4 MB |
+| **300 MB** migrando | puerta de la Fase 3 | pico de la migración | 14,7 MB |
+
+**Longevidad**, con 100.000 comandos —marcar, editar el cuerpo, cambiar de estado, crear y
+borrar— y repintados y búsquedas entre medias, en diez tramos:
+
+| | Primer tramo | Último tramo | Techo |
+|---|---:|---:|---:|
+| p99 de un comando | 10,9 ms | 11,1 ms | el doble del primero |
+| Heap retenido | 45,6 MB | 45,3 MB | +16 MB |
+| Diario (`-wal`) | 5 MB | 6,4 MB | 32 MB |
+
+Plano en las tres. El diario es la que no se ve en el heap: una lectura que se quedara con
+una transacción abierta impediría el volcado y lo haría crecer sin techo, y el plugin tiene
+tres sitios que abren una a propósito —exportar, copiar, comprobar—.
+
+**A un millón** lo mide la CI nocturna (`nightly.yml`) con los mismos techos y el heap de
+fábrica del IDE; no se midió en local: construir las dos bases de un millón son horas y
+~25 GB de disco, y lo que las puertas afirman —que la cifra no crece con N— ya se ve entre
+10.000 y 100.000.
+
+### 6-bis.3 Dónde el plan se quedó corto — y qué cambió
+
+**1. SQLite de la plataforma no era API pública.** El §0-bis.1 celebró que el IDE traía
+SQLite y lo usó cinco fases. El Marketplace rechazó el plugin: el módulo se declara
+`visibility="public"`, pero su paquete lleva `@ApiStatus.Internal` en el `package-info`, y
+eso no se ve compilando contra él. Se empaqueta `org.xerial:sqlite-jdbc` —lo que el §2.3
+proponía desde el principio—, sobre **el mismo fichero y el mismo esquema**. El cambio cupo
+en `Sql.kt`, que ya separaba el almacén del driver, y las tres suites de equivalencia pasaron
+sin tocar una línea. Lo que costó, medido lado a lado en la misma máquina y dos vueltas de
+cada uno (§1-bis.5):
+
+| Con 100.000 tareas, p50 | Plataforma (2.3) | `sqlite-jdbc` (2.4) |
+|---|---:|---:|
+| Un comando con su transacción | 0,33 · 0,34 ms | 0,41 · 0,40 ms |
+| Editar una tarea: comando + repintado *(EDT)* | 14,8 · 14,6 ms | 17,6 · 17,9 ms |
+| Abrir: contadores y cabeceras | 9,9 · 9,7 ms | 12,4 · 12,5 ms |
+| Primer pintado *(EDT)* | 6,6 · 5,8 ms | 6,4 · 7,7 ms |
+| Desplazarse una página *(EDT)* | 8,1 · 7,6 ms | 7,8 · 6,7 ms |
+| Buscar «token» | 41,2 · 40,9 ms | 46,1 · 46,8 ms |
+| Migrar 100.000 desde `tasks.xml` | 22,0 · 22,3 s | 23,7 · 24,6 s |
+| Escribir un lote de 2.000 | 956 · 950 ms | 980 · 1.016 ms |
+
+Entre un 5 % y un 20 % más lento en los caminos de lectura, y nada cerca de un techo. Se
+acepta sin más discusión porque la alternativa no es otro driver: es no publicar. A cambio
+llega lo que el módulo interno no exponía, `sqlite3_interrupt`, así que la copia y la
+comprobación de integridad dejan de ser sentencias que no se pueden cortar.
+
+**2. «Backup + aviso + cuarentena» perdía un día.** Es lo que pedía el §6.2 y lo que hacía
+un `tasks.xml` ilegible. Pero el `.bak` se escribía **en cada guardado**, y la copia de la
+base es **diaria**: restaurarla entera tiraría un día de trabajo por una página rota que casi
+siempre es de un índice. La recuperación (`StoreRecovery`) salva primero **todo lo legible**,
+tabla a tabla y por rangos de rowid —sin tocar un solo índice del fichero dañado—, rehace lo
+derivado y sólo pide a la copia las tareas cuyo `seq` no se deja leer. Medido en los casos de
+`StoreRecoveryTest`, sobre 600 tareas en la copia y 120 cambios después:
+
+| Daño | Del fichero dañado | De la copia | Lo de después de la copia |
+|---|---:|---:|---|
+| Página raíz de un índice | 620 | 0 | **todo** |
+| Índice de texto | 620 | 0 | **todo** |
+| Una hoja de la tabla de tareas | 617 | 3 | todo salvo esas tres, que vuelven en su versión de la copia |
+| Cabecera del fichero | 0 | 600 | nada: no había de dónde |
+
+**3. Una hoja rota no siempre da error.** La trampa que costó un test en rojo y que decide
+cómo se salva. Con la hoja de la tarea 125 pisada, preguntar fila a fila dio: la 124,
+`SQLITE_CORRUPT`; la 125 y la 126, **vacío y sin error**; la 127, bien. La búsqueda binaria
+sobre punteros basura sale por un lado, y un rango que las abarca devuelve las de alrededor
+saltándoselas en silencio. Partir en mitades lo que falla —lo obvio— se fía de esos vacíos y
+pierde las tareas sin decir nada. Por eso un rango que falla se sondea fila a fila, y un vacío
+cerca de una fila que falla cuenta como hueco que la copia rellena si lo tiene.
+
+**4. `integrity_check` no ve la contabilidad del plugin.** Mira que los árboles de SQLite
+estén sanos, y nada de lo que el almacén mantiene a mano en la misma transacción: los
+contadores de las pestañas, el índice de texto de contenido externo —que no cascadea—, la
+tupla de orden copiada en `tag` y los `has_*` de la tarea. Una base puede pasarlo y tener las
+pestañas contando mal para siempre. `StoreAudit` comprueba eso, y es lo que dan por bueno las
+pruebas de caída y la recuperación.
+
+**5. La caída simulada no probaba lo que importa.** La Fase 5 copiaba la base y su diario con
+las conexiones abiertas, y eso sólo fija la señal del cierre sucio: la copia se hace entre
+dos sentencias, justo cuando no hay nada a medias. `ChildJvm` lanza el bucle **de producción**
+en otro proceso —mismo classpath y mismas propiedades— y lo mata con `SIGKILL` dentro de una
+transacción, con el retraso sorteado dentro de lo que el propio hijo midió que dura una.
+
+**6. Daño con el proyecto abierto: dejar de escribir, no cambiar el fichero en caliente.** El
+plan no distinguía el daño al abrir del que aparece después. La conexión la comparten la
+lista, la búsqueda y las marcas del editor; sustituirles el fichero por debajo es mucho más
+frágil que reabrir el proyecto, que es el camino que ya está probado. Así que se deja de
+escribir —lo que se escribiera en un fichero roto se perdería con él—, se apunta la
+recuperación en una marca **fuera** de la base y se ofrece reabrir.
+
+**7. Tras una recuperación con huecos, las imágenes esperan.** Una tarea que no se pudo leer
+puede nombrar imágenes que ya no nombra nadie en la base reconstruida, y el recolector las
+borraría: la última forma de rescatarla a mano. Mientras siga en disco su fichero dañado, no
+se recoge nada en ese proyecto.
+
+**8. La hipótesis del §5-bis.8 era falsa.** Espaciar el volcado del diario ganaba un 40 % al
+quitar un repositorio, y se anotó que la migración probablemente ganaría lo mismo. Medido en
+las mismas dos vueltas: 23,7 → 23,4 s y 24,6 → 23,8 s, del orden del ruido. Quitar hacía
+tandas de 500 tareas que reescribían una y otra vez las mismas páginas interiores; importar
+confirma cada 2.000 y escribe sobre todo páginas nuevas, así que no hay volcados repetidos
+que ahorrar. `TaskImport.CHECKPOINT_PAGES` se queda en el de SQLite.
+
+**9. El techo de la búsqueda no puede ser el de la puerta.** Las consultas del banco que
+llevan «token» —presente en el 98 % del corpus sintético— crecen con los aciertos, que crecen
+con N (§3-bis.5): con el techo de 100 ms, la noche del millón nacería en rojo sin que nada
+hubiera empeorado. Tienen un techo **por tarea**, diez veces lo medido.
+
+### 6-bis.4 Qué cambia para quien lo usa
+
+- **Una base dañada se repara sola** al abrir: el fichero dañado se aparta como
+  `tasklane.db.corrupt-<fecha>` y nunca se borra, todo lo legible se rescata y sólo lo que no
+  se lee sale de la copia. Mientras dura, solo lectura; al terminar, un aviso dice si fue sin
+  pérdidas, con huecos —cuántas y de qué copia— o sin nada que rescatar.
+- **Daño visto con el proyecto abierto**: no se escribe más y el aviso ofrece reabrir.
+- **SQLite va dentro del plugin.** El zip crece lo que pesa el driver; el fichero de datos no
+  cambia.
+- *Tasklane: Diagnostics* dice si hay una reparación pendiente y cuándo fue la última.
+- Lo que **no** cambia: el esquema, la copia diaria, la comprobación tras un cierre sucio y
+  todo lo que se ve en la ventana.
+
+### 6-bis.5 Lo que quedó construido
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `Sql` sobre `sqlite-jdbc` | `main/…/data/sqlite/` | El mismo contrato de cuatro operaciones, con `Sql.Row` numerando columnas desde cero, y `interrupt()` |
+| `StoreAudit` | `main/…/data/sqlite/` | Las invariantes que `integrity_check` no ve, y cómo rehacerlas |
+| `StoreRecovery` | `main/…/data/sqlite/` | Cuarentena, salvar por rangos de rowid, huecos desde la copia, rehacer, comprobar; reanudable |
+| `TaskDb.openChecked` | `main/…/data/sqlite/` | Abrir distinguiendo una base dañada de una que no abre por otra razón |
+| `TaskImport` | `main/…/data/sqlite/` | El bucle de la migración, fuera del servicio: es el que las caídas matan |
+| `BlobSweeper` | `main/…/data/attachment/` | El bucle del recolector, fuera del servicio, por lo mismo |
+| `TaskService` (recuperación) | `main/…/service/` | Arrancar sin almacén, recuperar en segundo plano, dejar de escribir ante daño, avisar |
+| `ChildJvm` · `CrashWorker` · `CrashTest` | `test/…/hardening/` | Un proceso al que matar, el bucle de producción dentro, y cinco escenarios de muerte |
+| `StoreAuditTest` · `StoreRecoveryTest` | `test/…/data/sqlite/` | Que el auditor ve lo roto; que cada daño se recupera como debe |
+| `ScaleBenchmark` | `test/…/bench/` | Techos en cada escenario, longevidad, CSV por ejecución |
+| `nightly.yml` | `.github/workflows/` | El banco a un millón con 2 GB de heap, y las caídas en los tres sistemas |
+
+### 6-bis.6 Lo que sigue abierto
+
+| | Por qué |
+|---|---|
+| La primera noche de `nightly.yml` | No se puede ejecutar desde aquí. Lo que no se sabe hasta que corra: si el disco del runner alojado da para las dos bases de un millón y si seis horas bastan. El workflow admite un N menor a mano |
+| Corte de luz | `synchronous = NORMAL` no promete sobrevivir a uno, y no se puede provocar desde un test. Es para lo que existe la recuperación |
+| El coste de `sqlite-jdbc` | Un 5–20 % en lectura, medido y aceptado. Si algún día molesta, lo primero es mirar si es el driver o la versión de SQLite: la plataforma traía la 3.42 y el driver, la 3.53 |
 
 ---
 

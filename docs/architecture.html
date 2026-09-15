@@ -214,7 +214,7 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
   <p class="lede">Gestión de TODOs por repositorio dentro del IDE: una Tool Window nativa, estados y prioridades configurables, creación por teclado y persistencia local por proyecto. Este documento cierra las decisiones técnicas antes de escribir código.</p>
   <dl class="meta">
     <div><dt>Lenguaje</dt><dd>Kotlin 2.x · JVM 21</dd></div>
-    <div><dt>Plataforma</dt><dd>IC 2025.2 · sinceBuild 252</dd></div>
+    <div><dt>Plataforma</dt><dd>IU 2026.1.5 · sinceBuild 261.27258.48</dd></div>
     <div><dt>Build</dt><dd>IntelliJ Platform Gradle 2.x</dd></div>
     <div><dt>Dependencias externas</dt><dd>Ninguna</dd></div>
   </dl>
@@ -1166,7 +1166,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
       <tr><td>Ubicación de los datos</td><td><code>.idea/tasklane/</code> con <code>.gitignore</code> propio</td><td>Nada se escribe fuera del proyecto abierto. Guardar dentro de cada repo queda como ajuste opcional, no como default.</td></tr>
       <tr><td>Atajo de creación rápida</td><td><code>⌘⌥R</code>, asumiendo el choque con <em>Resume Program</em></td><td>Se documenta el conflicto. <code>⌘K</code> no lo tiene porque se instala sobre el panel.</td></tr>
       <tr><td>Ámbito de estados y prioridades</td><td>Por proyecto, en <code>.idea/tasklane.xml</code></td><td>Añade la plantilla de defaults a nivel aplicación y una siembra en el primer arranque de cada proyecto. Entra en la Fase 2.</td></tr>
-      <tr><td>Versión mínima del IDE</td><td><code>sinceBuild = 252</code> (2025.2)</td><td>Kotlin 2.x/K2 obligatorio y todas las APIs modernas disponibles sin condicionales. <code>verifyPlugin</code> cubre 2025.2 → 2026.2.</td></tr>
+      <tr><td>Versión mínima del IDE</td><td><code>sinceBuild = 261.27258.48</code> (2026.1.5), desde la <code>2.5.0</code>; hasta la <code>2.4.0</code> fue <code>252</code> (2025.2)</td><td>Kotlin 2.x/K2 obligatorio y todas las APIs modernas disponibles sin condicionales. <code>verifyPlugin</code> cubre 2026.1.5 → 2026.2.</td></tr>
     </tbody>
   </table></div>
 </section>

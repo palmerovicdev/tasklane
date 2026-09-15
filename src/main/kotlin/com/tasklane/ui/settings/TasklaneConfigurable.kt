@@ -39,6 +39,7 @@ import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.service.AttachmentService
 import com.tasklane.service.TaskService
+import javax.swing.JList
 import javax.swing.SwingConstants
 
 /**
@@ -109,8 +110,18 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
     private val markers = AnchorMarkers.getInstance(project)
 
-    private val markerRenderer =
-        SimpleListCellRenderer.create<AnchorMarkerStyle?>("") { it?.label().orEmpty() }
+    // Subclase y no SimpleListCellRenderer.create, que la 2026.2 marca para eliminarse.
+    private val markerRenderer = object : SimpleListCellRenderer<AnchorMarkerStyle?>() {
+        override fun customize(
+            list: JList<out AnchorMarkerStyle?>,
+            value: AnchorMarkerStyle?,
+            index: Int,
+            selected: Boolean,
+            hasFocus: Boolean,
+        ) {
+            text = value?.label().orEmpty()
+        }
+    }
 
     /**
      * Destinos elegidos en los diálogos de borrado, pendientes de aplicarse.

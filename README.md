@@ -49,7 +49,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Exportar a XML y quitar repositorios** | La salida al formato de intercambio, y quitar un repositorio que ya no está en disco comprobando antes que salieron todas |
 | **Imágenes a su tamaño** | Guardadas sin duplicar, con miniaturas en la lista, su peso a la vista, limpieza en un botón y aviso por umbral |
 | **Configurable por proyecto** | Estados y prioridades con nombre, orden arrastrando, colores, triggers y agrupación; plantilla para proyectos nuevos |
-| **Datos a salvo** | Base local, copia diaria, comprobación tras un cierre inesperado y *Tasklane: Diagnostics* |
+| **Datos a salvo** | Base local, copia diaria, comprobación tras un cierre inesperado, reparación automática de una base dañada y *Tasklane: Diagnostics* |
 | **Teclado y accesibilidad** | La ventana se maneja entera con el teclado, y lista, buscador y diálogo tienen nombre para un lector de pantalla |
 | **Hecho para listas enormes** | Un millón de tareas se abren, se buscan y se recorren sin congelar el IDE |
 
@@ -65,12 +65,12 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.4.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.5.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
 
-Necesita IntelliJ IDEA 2025.2 o posterior —cualquier IDE de la plataforma— y Java 21.
+Necesita IntelliJ IDEA 2026.1.5 o posterior —cualquier IDE de la plataforma— y Java 21.
 Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 
 ## Qué se versiona y qué no
@@ -80,6 +80,7 @@ Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 | `.idea/tasklane.xml` | estados y prioridades del proyecto | **sí** — compartible con el equipo |
 | `.idea/tasklane/tasklane.db` | las tareas, en una base SQLite local | no — la carpeta lleva su propio `.gitignore` con `*` |
 | `.idea/tasklane/tasklane.db.backup` | la copia diaria de la base | no |
+| `.idea/tasklane/tasklane.db.corrupt-<fecha>` | una base dañada que se reparó; se conserva y se puede borrar a mano | no |
 | `.idea/tasklane/repos/<repo>/attachments/` | las imágenes de cada repositorio | no |
 | `.idea/tasklane/layout.xml` | el registro de repositorios | no |
 | `workspace.xml` | tus preferencias: pestaña abierta, filtro, repositorio activo, buscar en todos, formato de copia y marca del editor | no |
@@ -91,9 +92,11 @@ configurar por proyecto no obliga a reconfigurar cada proyecto.
 **Una copia de seguridad al día, como mucho.** Las tareas viven en
 `.idea/tasklane/tasklane.db`, y a su lado queda `tasklane.db.backup`: una copia entera y
 compacta que se rehace en segundo plano si pasó un día y hubo cambios. Si el IDE se cerró
-de golpe, la apertura siguiente además **comprueba la base**, y si encuentra daños lo dice
-—con la fecha de la última copia— y deja de copiar encima de ella. *Tasklane: Diagnostics*
-enseña las dos cosas.
+de golpe, la apertura siguiente además **comprueba la base**; si encuentra daños deja de
+escribir en ella y de copiar encima de la última copia buena, y al reabrir **la repara**:
+aparta el fichero dañado como `tasklane.db.corrupt-<fecha>`, rescata todo lo que se deja leer
+y sólo pide a la copia lo que no. Ver [Datos y seguridad](#datos-y-seguridad).
+*Tasklane: Diagnostics* enseña la copia, la última comprobación y la última reparación.
 
 ## Repositorios
 
@@ -585,8 +588,8 @@ actúan al pulsarlos.
 
 | | |
 |---|---|
-| IDE mínimo | 2025.2 (`sinceBuild = 252`), sin cota superior |
-| Bytecode | JVM 21 — lo que ejecuta la plataforma 2025.2 |
+| IDE mínimo | 2026.1.5 (`sinceBuild = 261.27258.48`), sin cota superior |
+| Bytecode | JVM 21 — lo que ejecuta la plataforma 2026.1 |
 | Toolchain | JBR de la IDEA instalada (`org.gradle.java.installations.paths`) |
 | Kotlin | 2.4.20 |
 | Gradle | 9.5.0 vía wrapper |
@@ -604,24 +607,24 @@ Compilar contra un IDE local más nuevo que `sinceBuild` tiene un coste: el comp
 no puede garantizar el suelo. `verifyPluginProjectConfiguration` lo avisa con dos
 mensajes que en local son **esperados**:
 
-- `since-build 252 < plataforma 262`
+- `since-build 261.27258.48 < plataforma 262`
 - `sourceCompatibility 21, la plataforma pide 25` — no se sube a 25 a propósito:
-  generaría bytecode que no arranca en 2025.2.
+  generaría bytecode que no arranca en 2026.1, que todavía corre sobre Java 21.
 
-CI compila con `-PlocalIdePath=` contra la 2025.2 real, y ahí sí se detecta
-cualquier uso accidental de una API posterior.
+CI compila con `-PlocalIdePath=` contra la 2026.1.5 real —`IU`: desde la 2025.3 no hay
+Community que descargar—, y ahí sí se detecta cualquier uso accidental de una API posterior.
 
 > **Nota sobre la versión de Kotlin.** Debe ser >= la que usa el IDE contra el que
 > se compila, porque el compilador tiene que poder *leer* sus metadatos. IDEA 2026.2
 > trae metadatos 2.4.0 y Kotlin 2.1.x falla con
 > `Module was compiled with an incompatible version of Kotlin`. Al revés no hay
-> problema: 2.4.20 lee también los metadatos de 2025.2.
+> problema: 2.4.20 lee también los metadatos 2.3 de 2026.1.
 
 ## Comandos
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.4.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.5.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -764,6 +767,14 @@ una tarjeta se pulsan donde están; el ancla de código y la prioridad se quedan
 en vez de caerse de una tarjeta estrecha; y en los ajustes las prioridades van de la más
 alta a la más baja, las filas se arrastran y cambiar un color por fin cambia el color.
 
+La `2.4.0` cierra la **Fase 6**, y con ella el plan de escala: comprobar a la fuerza lo que
+las anteriores daban por hecho. Se mata el proceso a mitad de escribir —de una edición, de la
+migración, de la limpieza de imágenes, de la copia y de la propia reparación— y la base queda
+sana siempre; una base dañada **se repara sola** rescatando todo lo que todavía se lee y
+pidiendo a la copia sólo lo que no; cien mil comandos seguidos no mueven ni el heap ni la
+latencia; y cada noche la CI mide un millón de tareas con techos que rompen el build. SQLite
+pasa a ir empaquetado, porque el del IDE resultó ser API interna, sobre el mismo fichero.
+
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
 **cerrado** en la `0.6.6`; cada iteración subió la versión baja y dejó un plugin
@@ -790,7 +801,7 @@ los desconocidos, así que una versión vieja del plugin abre el fichero sin per
 
 Publicar es un acto deliberado: lo dispara **una etiqueta**, no un push a `main`. El
 workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiqueta y
-`pluginVersion` dicen lo mismo, pasa los tests y el Plugin Verifier contra 2025.2 y
+`pluginVersion` dicen lo mismo, pasa los tests y el Plugin Verifier contra 2026.1.5 y
 2026.2, firma el zip y lo sube al Marketplace.
 
 **Antes de etiquetar**, tres sitios y en este orden:
@@ -801,7 +812,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.4.0 && git push origin v2.4.0
+git tag v2.5.0 && git push origin v2.5.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

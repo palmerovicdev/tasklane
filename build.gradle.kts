@@ -14,12 +14,12 @@ version = providers.gradleProperty("pluginVersion").get()
 // El toolchain apunta al JBR que ya trae la IDEA instalada (ver
 // org.gradle.java.installations.paths en gradle.properties), asi no hay que
 // descargar ningun JDK. El bytecode se emite para 21, que es lo que ejecuta
-// la plataforma 2025.2 -> el minimo que soportamos.
+// la plataforma 2026.1 -> el minimo que soportamos.
 kotlin {
     jvmToolchain(25)
     compilerOptions {
-        // 21 y no 25: es lo que ejecuta la plataforma 2025.2, nuestro minimo.
-        // Bytecode 21 corre sin problema sobre el JBR 25 de un IDE 2026.x.
+        // 21 y no 25: es lo que ejecuta la plataforma 2026.1, nuestro minimo; Java 25
+        // llega con la 262. Bytecode 21 corre sin problema sobre el JBR 25 de la 2026.2.
         jvmTarget = JvmTarget.JVM_21
         // Sin puentes hacia los metodos por defecto de las interfaces de la plataforma.
         // En el modo por defecto Kotlin escribe en cada clase que implementa una
@@ -40,10 +40,10 @@ kotlin {
 // "Module was compiled with an incompatible version of Kotlin".
 //
 // Al reves no hay problema: un compilador nuevo lee metadatos viejos, asi que el
-// mismo 2.4.20 sirve para el build de CI contra 2025.2.
+// mismo 2.4.20 sirve para el build de CI contra 2026.1.
 //
 // El stdlib NO se empaqueta (kotlin.stdlib.default.dependency=false), viene del
-// IDE. Por eso el build de CI contra 2025.2 es el que detecta si usamos alguna
+// IDE. Por eso el build de CI contra 2026.1 es el que detecta si usamos alguna
 // API de stdlib mas nueva que la que trae el IDE minimo soportado.
 
 tasks.withType<JavaCompile>().configureEach {
@@ -118,6 +118,19 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.5.0 &mdash; IntelliJ IDEA 2026.1.5 or newer</h3>
+            <ul>
+              <li><b>Requires IntelliJ IDEA 2026.1.5 or newer</b> (build 261.27258.48), or any
+                  IDE of the platform from that build on. 2025.2, 2025.3 and 2026.1.0&ndash;2026.1.4
+                  are no longer supported: they keep 2.4.0, which works as before.</li>
+              <li><b>No deprecated or scheduled-for-removal API</b>: the Plugin Verifier
+                  findings of 2.4.0 are gone &mdash; <code>ReadAction.compute</code>, the
+                  <code>DynamicBundle(String)</code> constructor and
+                  <code>SimpleListCellRenderer.create</code>.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.4.0 and 2.5.0 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.4.0 &mdash; hardening</h3>
             <p><b>What the previous releases took for granted is now tested by force:</b>
                crashes, damaged databases and long sessions.</p>
@@ -479,12 +492,13 @@ intellijPlatform {
     // Reservado para CI; en local no se invoca.
     //
     // Los dos extremos van EXPLICITOS y no solo `recommended()`: lo que se promete es
-    // «2025.2 en adelante», y `recommended()` comprueba la ultima de cada rama viva,
-    // que no tiene por que incluir el suelo declarado en sinceBuild.
+    // «2026.1.5 en adelante», y `recommended()` comprueba la ultima de cada rama viva,
+    // que no tiene por que incluir el suelo declarado en sinceBuild. IntellijIdea y no
+    // Community: desde la 2025.3 no hay IC que descargar.
     pluginVerification {
         ides {
-            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.2")
-            create(IntelliJPlatformType.IntellijIdeaCommunity, "2026.2")
+            create(IntelliJPlatformType.IntellijIdea, "2026.1.5")
+            create(IntelliJPlatformType.IntellijIdea, "2026.2")
             recommended()
         }
     }

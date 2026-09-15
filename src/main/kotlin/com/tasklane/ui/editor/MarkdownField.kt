@@ -155,8 +155,9 @@ internal class MarkdownField(
      */
     fun chooseImage() {
         if (inserter == null) return
-        // `withFileFilter` y no `withExtensionFilter`: el segundo es reciente y este
-        // plugin se compila contra 2025.2, que es el suelo declarado en sinceBuild.
+        // `withFileFilter` filtra con la misma lista que el pegado. `withExtensionFilter`,
+        // que ya existe en el suelo (261), ocultaria ademas lo que no es imagen en el
+        // selector nativo: cambiarlo seria un cambio de comportamiento, no de compatibilidad.
         val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
             .withTitle(TasklaneBundle.message("dialog.task.attach.choose"))
             .withFileFilter { file -> file.extension?.lowercase() in ImageInserter.IMAGE_EXTENSIONS }

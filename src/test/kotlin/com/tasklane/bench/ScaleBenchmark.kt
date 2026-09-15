@@ -213,15 +213,15 @@ class ScaleBenchmark {
         val index = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(config)) }
 
         for (query in listOf("token", "revision del despliegue", "is:done token", "#api token")) {
-            // «token» está en el 98 % del corpus sintético: es el peor término posible y su
-            // coste crece con los aciertos, no con las tareas (§3-bis.5). Su techo es el de
-            // una regresión, no el de la puerta.
-            val worst = query == "token"
+            // «token» está en el 98 % del corpus sintético: es el peor término posible, y
+            // cualquier consulta que lo lleve cuesta lo que cuestan sus aciertos, que crecen con
+            // N (§3-bis.5). Su techo es el de una regresión, no el de la puerta.
+            val worst = "token" in query
             record(
                 Bench.measure("buscar · «$query»", runs = 20, warmup = 5) {
                     index.search(QueryParser.parse(query), SearchScope.Repo(repo))
                 },
-                ceiling = if (worst) SEARCH_WORST_MILLIS else SEARCH_MILLIS,
+                ceiling = if (worst) searchWorstMillis else SEARCH_MILLIS,
                 why = if (worst) "el término presente en casi todo" else "tecla en el buscador, puerta de la Fase 3",
             )
         }
@@ -1484,10 +1484,12 @@ class ScaleBenchmark {
 
         /**
          * El término que está en casi todas las tareas. Crece con los aciertos (§3-bis.5), así
-         * que no puede tener el techo de la puerta; tiene el de una regresión de un orden de
-         * magnitud.
+         * que no puede tener el techo de la puerta: tiene uno **por tarea**, diez veces lo
+         * medido —0,5 µs por tarea a 100.000—, con un suelo de un segundo.
          */
-        const val SEARCH_WORST_MILLIS = 1_000.0
+        val searchWorstMillis: Double get() = maxOf(1_000.0, n * SEARCH_WORST_MICROS_PER_TASK / 1_000.0)
+
+        const val SEARCH_WORST_MICROS_PER_TASK = 5.0
 
         /** El heap del plugin, §2.6. */
         const val PLUGIN_HEAP_MB = 150.0

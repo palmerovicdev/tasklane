@@ -16,7 +16,7 @@ jobs:
   # Es la otra mitad del spike de la Fase 0 (docs/plan-escala.md §0.5): el almacen de
   # la Fase 3 se apoya en `org.jetbrains.sqlite`, que la plataforma trae con su nativa
   # para las seis combinaciones de os/arquitectura. Que este en el IDE 2026.2 de un
-  # portatil no prueba que este en el 2025.2 que declara sinceBuild, ni que la nativa
+  # portatil no prueba que este en el 2026.1.5 que declara sinceBuild, ni que la nativa
   # cargue en Windows. SqliteSpikeTest falla ruidosamente si alguna de las dos cosas
   # deja de ser cierta, y aqui es donde se entera.
   #

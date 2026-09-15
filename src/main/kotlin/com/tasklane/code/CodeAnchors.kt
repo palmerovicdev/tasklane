@@ -107,12 +107,16 @@ object CodeAnchors {
      * read-action only* y el clic no llevaba a ningún sitio. Pedirla aquí y no en quien
      * llama es lo que evita que el próximo que la use vuelva a olvidarse; anidada dentro
      * de otra no cuesta nada.
+     *
+     * `computeBlocking` y no `compute`, que la 261 ya marca deprecada: es la misma read
+     * action síncrona, con nombre explícito. La alternativa, `nonBlocking`, se reinicia si
+     * llega una escritura y está pensada para hilos de fondo, no para un clic en el EDT.
      */
-    fun positionOf(anchor: CodeAnchor, file: VirtualFile): Pair<Int, Int> = ReadAction.compute<Pair<Int, Int>, RuntimeException> {
+    fun positionOf(anchor: CodeAnchor, file: VirtualFile): Pair<Int, Int> = ReadAction.computeBlocking<Pair<Int, Int>, RuntimeException> {
         // Un fichero binario o demasiado grande no da `Document`. Ahí no hay nada que
         // reencontrar y se va al número guardado, que es lo que se sabe.
         val document = FileDocumentManager.getInstance().getDocument(file)
-            ?: return@compute anchor.line to anchor.column
+            ?: return@computeBlocking anchor.line to anchor.column
         val line = AnchorResolver.resolve(anchor, document.lineCount) { index ->
             document.getText(TextRange(document.getLineStartOffset(index), document.getLineEndOffset(index)))
         }
