@@ -9,6 +9,24 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.5.2]
+
+Parche sin cambio de formato: mejoras de uso diario y correcciones de contraste en el editor.
+
+### Añadido
+- **Copiar el texto completo de una tarea con un clic**, sin metadatos de la tarjeta ni marcas
+  Markdown.
+- **Borrar desde el menú contextual todas las tareas de un grupo** seleccionado.
+
+### Corregido
+- El buscador ya no revierte ni borra caracteres cuando se escribe rápido y hay varios paneles
+  de estado abiertos.
+- El texto del editor de tareas conserva contraste y fondo correctos en temas oscuros del IDE.
+
+### Compatibilidad
+- Sin cambio de formato: el esquema sigue en la versión 1, y la 2.5.1 abre un proyecto usado
+  por la 2.5.2 y al revés.
+
 ## [2.5.1]
 
 Parche sin cambio de formato: capturas de la ficha (`docs/screenshots/`, README y

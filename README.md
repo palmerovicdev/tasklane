@@ -85,7 +85,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.5.1.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.5.2.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -832,7 +832,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.5.1 && git push origin v2.5.1
+git tag v2.5.2 && git push origin v2.5.2
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

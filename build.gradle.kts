@@ -118,6 +118,16 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.5.2 &mdash; task workflow fixes</h3>
+            <ul>
+              <li><b>Copy task text with one click</b>, without card metadata or Markdown markers.</li>
+              <li><b>Delete complete grouped views</b> from the context menu.</li>
+              <li><b>Search stays stable while typing</b> across state panels.</li>
+              <li><b>Task editor text remains readable</b> on dark IDE themes.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.5.1 and 2.5.2 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.5.1 &mdash; new screenshots</h3>
             <ul>
               <li><b>New listing screenshots</b>: the tool window, an expanded card, the
