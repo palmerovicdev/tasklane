@@ -12,8 +12,7 @@ import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
-import com.tasklane.domain.model.TasklaneSnapshot
-import com.tasklane.paging.InMemoryPager
+import com.tasklane.paging.MemoryPager
 import com.tasklane.paging.TaskPager
 import com.tasklane.service.SearchResults
 import com.tasklane.ui.toolwindow.EmptyGroupNode
@@ -90,12 +89,9 @@ class ListSyncTest {
             )
         }
 
-    private fun pager(tasks: List<Task>, grouping: Grouping) = InMemoryPager(
-        snapshot = TasklaneSnapshot(
-            config = config(grouping),
-            tasksByRepo = mapOf(RepoKey.ROOT to tasks),
-            activeRepo = RepoKey.ROOT,
-        ),
+    private fun pager(tasks: List<Task>, grouping: Grouping) = MemoryPager(
+        tasks = tasks,
+        config = config(grouping),
         found = SearchResults.NONE,
         filter = TaskFilter.ALL,
         now = now,

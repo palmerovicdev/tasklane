@@ -11,7 +11,6 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskLink
 import com.tasklane.domain.model.TasklaneConfig
-import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.domain.query.QueryParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -48,14 +47,13 @@ class LinearScanIndexTest {
         anchors = anchors,
     )
 
-    private fun snapshot(vararg tasks: Task) = TasklaneSnapshot(
+    private fun snapshot(vararg tasks: Task) = SearchCorpus(
         config = config,
-        tasksByRepo = tasks.groupBy { it.repo },
-        activeRepo = RepoKey.ROOT,
         repositories = listOf(
             RepositoryRef(RepoKey.ROOT, "proyecto", "/p", RepositoryRef.Kind.PROJECT_ROOT),
             RepositoryRef(other, "web", "/p/web", RepositoryRef.Kind.GIT, depth = 1),
         ),
+        tasks = tasks.toList(),
     )
 
     private fun index(vararg tasks: Task) = LinearScanIndex().apply { setCorpus(snapshot(*tasks)) }

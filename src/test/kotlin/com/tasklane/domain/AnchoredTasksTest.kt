@@ -42,15 +42,16 @@ class AnchoredTasksTest {
         anchors = listOf(CodeAnchor.of(path, line)),
     )
 
-    private fun snapshot(vararg tasks: Task) = TasklaneSnapshot(
-        config = config,
-        tasksByRepo = tasks.groupBy { it.repo },
-        activeRepo = RepoKey.ROOT,
-    )
+    /**
+     * Las tareas sueltas, que es lo que [AnchoredTasks.byPath] recibe desde la Fase 3:
+     * la vuelta al modelo la da ahora el índice `anchor_by_path`, y lo que queda aquí
+     * es la decisión de qué se marca y cuál manda.
+     */
+    private fun snapshot(vararg tasks: Task) = tasks.toList()
 
     @Test
     fun `agrupa por ruta`() {
-        val index = AnchoredTasks.byPath(snapshot(task("a", "src/Auth.kt"), task("b", "src/Main.kt")))
+        val index = AnchoredTasks.byPath(config = config, tasks = snapshot(task("a", "src/Auth.kt"), task("b", "src/Main.kt")))
 
         assertEquals(setOf("src/Auth.kt", "src/Main.kt"), index.keys)
         assertEquals(TaskId("a"), index.getValue("src/Auth.kt").single().task.id)
@@ -58,8 +59,7 @@ class AnchoredTasksTest {
 
     @Test
     fun `lo terminal no se marca`() {
-        val index = AnchoredTasks.byPath(
-            snapshot(
+        val index = AnchoredTasks.byPath(config = config, tasks = snapshot(
                 task("abierta", "src/Auth.kt"),
                 task("hecha", "src/Auth.kt", state = TasklaneConfig.DONE),
             ),
@@ -71,7 +71,7 @@ class AnchoredTasksTest {
     /** Si el único que apuntaba al fichero está hecho, el fichero desaparece del índice. */
     @Test
     fun `un fichero solo con tareas hechas no entra`() {
-        val index = AnchoredTasks.byPath(snapshot(task("hecha", "src/Auth.kt", state = TasklaneConfig.DONE)))
+        val index = AnchoredTasks.byPath(config = config, tasks = snapshot(task("hecha", "src/Auth.kt", state = TasklaneConfig.DONE)))
 
         assertTrue(index.isEmpty())
     }
@@ -79,8 +79,7 @@ class AnchoredTasksTest {
     /** El fichero abierto no sabe de repositorios: una nota sobre él vale venga de donde venga. */
     @Test
     fun `entran las tareas de todos los repositorios`() {
-        val index = AnchoredTasks.byPath(
-            snapshot(task("a", "src/Auth.kt"), task("b", "src/Auth.kt", repo = otro)),
+        val index = AnchoredTasks.byPath(config = config, tasks = snapshot(task("a", "src/Auth.kt"), task("b", "src/Auth.kt", repo = otro)),
         )
 
         assertEquals(setOf(TaskId("a"), TaskId("b")), index.getValue("src/Auth.kt").map { it.task.id }.toSet())
@@ -89,8 +88,7 @@ class AnchoredTasksTest {
     /** Manda la prioridad: es la que da color a la marca cuando hay varias en la misma línea. */
     @Test
     fun `la de mas prioridad encabeza`() {
-        val index = AnchoredTasks.byPath(
-            snapshot(
+        val index = AnchoredTasks.byPath(config = config, tasks = snapshot(
                 task("baja", "src/Auth.kt", priority = TasklaneConfig.LOW),
                 task("alta", "src/Auth.kt", priority = TasklaneConfig.HIGH),
             ),
@@ -101,8 +99,7 @@ class AnchoredTasksTest {
 
     @Test
     fun `a igual prioridad manda la mas reciente`() {
-        val index = AnchoredTasks.byPath(
-            snapshot(
+        val index = AnchoredTasks.byPath(config = config, tasks = snapshot(
                 task("vieja", "src/Auth.kt", updatedAt = now.minusSeconds(3600)),
                 task("nueva", "src/Auth.kt"),
             ),
@@ -118,7 +115,7 @@ class AnchoredTasksTest {
             anchors = listOf(CodeAnchor.of("src/Auth.kt", 10), CodeAnchor.of("src/Auth.kt", 40)),
         )
 
-        val entries = AnchoredTasks.byPath(snapshot(dos)).getValue("src/Auth.kt")
+        val entries = AnchoredTasks.byPath(config = config, tasks = snapshot(dos)).getValue("src/Auth.kt")
 
         assertEquals(listOf(10, 40), entries.map { it.anchor.line }.sorted())
     }

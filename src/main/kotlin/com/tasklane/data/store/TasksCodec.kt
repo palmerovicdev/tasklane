@@ -38,7 +38,13 @@ object TasksCodec {
     private const val BODY = "body"
     private const val ANCHOR = "anchor"
 
-    private val KNOWN_ATTRS = setOf(
+    /**
+     * Los atributos que este códec conoce. Público porque el lector en streaming de la
+     * Fase 3 —`TasksXmlReader`— tiene que decidir lo mismo que [decodeTask]: lo que no
+     * está aquí es de una versión futura y va a `Task.extra`. Dos listas mantenidas a
+     * mano divergirían, y la forma de divergir sería perder datos del usuario.
+     */
+    val KNOWN_ATTRS = setOf(
         "id", "state", "priority", "order", "createdAt", "updatedAt", "completedAt", "tags",
         "dueDate", "bookmarked",
     )

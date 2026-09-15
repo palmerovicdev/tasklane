@@ -957,6 +957,261 @@ abrir un fichero no cueste lo mismo que abrir el proyecto.
 
 ---
 
+---
+
+## 3-bis. Resultados de la Fase 3 · CERRADA
+
+**Puerta cerrada.** Con 100.000 tareas, abrir el proyecto y pintar la lista cuesta
+**9,2 ms** contra los 3.027 ms del camino anterior; el plugin ocupa **2,5 MB** contra
+1,29 GB; y guardar una edición pasa de reescribir 1.168 ms de fichero a una transacción
+de **0,44 ms**. Ninguna operación del hilo de interfaz se acerca a los 16 ms.
+
+```
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=100000  -PtestHeap=4g
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=1000000 -PtestHeap=8g
+```
+
+**Las cifras de abajo están medidas a 100.000 y a 10.000**, y lo que cierra la puerta no
+es su valor absoluto sino que **son la misma cifra en los dos tamaños**. Medir el millón
+completo cuesta horas y ~25 GB de disco —hay que construir la base dos veces, la del
+corpus y la de la migración— y no cambia lo que se puede afirmar: el coste por operación
+dejó de depender de N, que es literalmente la regla del §0.
+
+**El heap que hace falta para medir bajó, y ése es medio resultado.** La Fase 2 necesitaba
+`-PtestHeap=32g` para medir un millón porque el corpus tenía que caber; ahora el corpus
+vive en `tasklane.db` y sólo se materializa lo que se mira.
+
+### 3-bis.1 La puerta, medida
+
+Los dos caminos en la misma ejecución, que es lo único que hace comparable una cifra
+(§1-bis.5). «Antes» es lo que hacía el plugin hasta la 1.6.0.
+
+| Con 100.000 tareas | Antes | **Fase 3** |
+|---|---:|---:|
+| Abrir el proyecto y pintar la lista *(EDT)* | 3.027 ms | **9,2 ms** |
+| Repintar sin que nada haya cambiado *(EDT)* | — | **4,5 ms** |
+| Editar una tarea: comando + repintado *(EDT)* | — | **10,6 ms** |
+| Escribir en disco | volcado de 1.168 ms | transacción de **0,44 ms** |
+| Leer del disco al abrir | 580 ms de JDOM | **no se lee** |
+| Buscar, el peor término posible | ~115 ms † | **40,5 ms** |
+| Desplazarse una página *(EDT)* | — | **7,4 ms** |
+| Memoria del plugin | 1,29 GB ‡ | **2,5 MB** |
+
+† El escaneo lineal medido en la Fase 1 daba 91 ms; los 115 son la primera versión de
+`Fts5Index`, antes del arreglo del §3-bis.3.b. Se anota porque es lo que se comparó.
+
+‡ No se vuelve a medir: son los 12.929 B por tarea del §0-bis.4, que ya estaban medidos.
+Materializar el corpus para volver a pesarlo sería reconstruir justo lo que esta fase
+borró.
+
+Y la forma, que importa más que los cocientes:
+
+| | 10.000 | 100.000 | Crece con N |
+|---|---:|---:|---|
+| Abrir y pintar *(EDT)* | 8,5 ms | 9,2 ms | **no** |
+| Editar una tarea: comando + repintado *(EDT)* | 9,7 ms | 10,8 ms | **no** |
+| Un comando, transacción incluida | 0,43 ms | 0,42 ms | **no** |
+| Desplazarse una página *(EDT)* | 7,0 ms | 7,4 ms | **no** |
+| Memoria del plugin | 2,8 MB | 2,5 MB | **no** |
+| Buscar, el peor término | 20 ms | 40,5 ms | **sí** — ver §3-bis.5 |
+
+### 3-bis.2 Dónde el plan acertó
+
+- **SQLite de la plataforma basta.** El §0-bis.1 lo adelantó y la fase lo confirma: cero
+  bytes empaquetados, cero problemas de classloader, FTS5 compilado y WAL. Las dos
+  trampas anotadas —nada de `ObjectBinderFactory.createN()` ni de `AutoCloseable.use`,
+  que son `inline` a JVM 25— se pisan en cada línea y estaban bien anotadas.
+- **`priority_rank` y `state_terminal` desnormalizados.** Sin ellos no hay índice que
+  ordene. Se recalculan con un `UPDATE` por clave cuando cambia la configuración, que es
+  raro y es barato.
+- **Paginación por *keyset*, jamás `OFFSET`.** Tal cual.
+- **`bm25()` con peso 10 en el título sustituye a `TITLE_WEIGHT`.** El test de
+  equivalencia con `LinearScanIndex` pasa consulta por consulta.
+- **La costura de la Fase 2 cumplió.** Entró `SqlitePager` y **no hubo que tocar ni una
+  línea de la UI**. Lo mismo con `TaskSearchIndex` y `Fts5Index`.
+
+### 3-bis.3 Dónde el plan se quedó corto — y qué cambió
+
+**a) Un índice por columna-ancla no hacía falta; una columna sí.**
+
+El §2.4 pedía cuatro índices con la tupla de orden completa, uno por cada fecha de la que
+puede colgar la agrupación. Son ~200 MB a un millón de filas y tres de ellos no se tocan
+nunca. Se aplica un paso más el propio truco del plan —desnormalizar lo que el índice
+necesita para ordenar—: **`sort_date` guarda ya resuelta** la fecha del anclaje del
+estado en el que está la tarea. Un índice en vez de cuatro, y la agrupación por fecha
+pasa a ser un rango contiguo sobre él.
+
+Con una trampa que costó un test en rojo: `MemoryPager` ordena por
+`anchorOf(task, anchor) ?: updatedAt`. Guardar «sin fecha» en `sort_date` hacía que las
+tareas sin completar de un estado terminal salieran ordenadas **por identificador**. La
+fecha de orden y el grupo son **dos datos distintos**: `sort_date` cae a `updated_at`
+cuando el anclaje no existe, y una columna aparte —`undated`— recuerda que no existía.
+
+**b) `ORDER BY` y `JOIN` en la misma consulta cuestan el corpus entero.**
+
+La forma obvia —unir `task_fts` con `task`, filtrar y ordenar por `bm25`— obliga a saltar
+a la tabla por **cada** acierto antes de poder descartarlo. Medido sobre 50.000 tareas y
+un término presente en casi todas:
+
+| | Coste |
+|---|---:|
+| `count(*)` de los aciertos | 0,7 ms |
+| Los 200 mejores rowids, con `bm25` | 12,3 ms |
+| **Lo mismo uniendo con `task` y filtrando** | **44,0 ms** |
+
+La búsqueda pasa a hacerse en **dos pasos**: el índice de texto puntúa y limita sin salir
+de sí mismo, y sólo los que sobreviven se buscan en la tabla. A 100.000 tareas, 115 ms →
+40 ms.
+
+**c) La invariante de la Fase 2 se rompía en silencio, y no estaba en ninguna lista.**
+
+`TaskNode.update` decidía por **identidad** si una fila había cambiado. Con el corpus en
+memoria era exacto y costaba un puntero: una tarea que no cambiaba era literalmente el
+mismo objeto entre repintados. Con el almacén, **cada página se lee y las instancias son
+nuevas siempre**, así que comparar punteros decía «ha cambiado» de todas las filas
+cargadas y las volvía a medir una por una — que es exactamente lo que la Fase 2 vino a
+quitar. Medido sobre 10.000 tareas: un repintado costaba **16,7 ms de EDT y tocaba 122
+filas**; comparando por igualdad, **0,2 ms y una fila**.
+
+Es el modo de fallo más difícil de ver de los que esta fase podía introducir: nada falla,
+sólo vuelve a costar lo que costaba. De paso se conserva la instancia **anterior** cuando
+son iguales, que es la que ya tiene forzados sus siete `lazy`.
+
+**d) La ventana se vuelve a pedir entera en cada sincronización, y eso hay que aprovecharlo.**
+
+`ListSync` guarda «desde aquí, tantas filas» y no un cursor, precisamente para poder pedir
+otra vez lo mismo y sincronizar por diferencias. Releyendo del almacén, desplazarse una
+página costaba **27 ms de EDT** con la ventana en cien filas, y creciendo, cuando lo único
+nuevo son las cincuenta de abajo. El paginador cachea la ventana y la **amplía** en vez de
+releerla: 27 ms → **7 ms**, y ya no depende de cuánto se haya bajado.
+
+**e) `ConfigChanged` no puede costar el proyecto, y se emite en cada arranque.**
+
+El §3.4 no dice cómo se recolocan las tareas que apuntan a configuración que ya no
+existe. Hacerlo con un recorrido sería volver al punto de partida. Se resuelve con dos
+**índices parciales** —`task_parked`, que sólo contiene las tareas aparcadas, y
+`task_untagged`, que sólo contiene las que no tienen etiqueta— más la propia tabla
+`counter`, que ya enumera qué estados hay en uso sin recorrer nada. El resultado: un
+cambio de configuración cuesta lo que cuestan las claves que cambiaron y las filas
+aparcadas, que son un puñado entre un millón.
+
+**f) El disco es la cifra que el plan no presupuestó.**
+
+El §2.6 es un presupuesto de **memoria** y se cumple con holgura. No había uno de disco, y
+hace falta: con el corpus de la especificación —2.000 caracteres de cuerpo, 8 etiquetas,
+5 anclas y 10 imágenes por tarea— la base pesa **~10 KB por tarea**, contra los 2,9 KB del
+XML. A un millón son ~10 GB.
+
+El reparto, aproximado: el cuerpo y lo derivado de él ~2,3 KB; el índice de texto ~1,5 KB;
+la tabla de etiquetas ~1,2 KB —lleva copiada la tupla de orden, ver la nota 4 del esquema—;
+las anclas ~1,2 KB; las referencias a imágenes ~1,7 KB; los seis índices de `task` ~0,3 KB.
+**Es el peor caso de la especificación y no una tarea normal**: una tarea real tiene una o
+dos etiquetas, ninguna ancla y ninguna imagen, y ahí la base pesa poco más que el texto.
+Aun así hay que decirlo, y la acción *Tasklane: Diagnostics* lo dice: pesa `tasklane.db`
+con su diario, no el `tasks.xml` que ya no se escribe.
+
+### 3-bis.4 Dos cosas del §3 que no se hicieron, y por qué
+
+**«Sentencias preparadas y reutilizadas» (§3.1).** Se preparan y se cierran en cada
+llamada, salvo en los lotes de la migración —donde sí se reutiliza una, y ahí la
+diferencia es de dos órdenes de magnitud—. El motivo es que reutilizar una sentencia
+obliga a garantizar que su resultado se agotó antes de volver a ejecutarla, y hay un
+camino que a propósito **no** lo agota: `first()`, que para en cuanto tiene una fila. Un
+caché de sentencias con esa trampa dentro es una fuente de fallos raros a cambio de
+microsegundos que las medidas dicen que no hacen falta: un comando completo son 0,42 ms,
+y un repintado 4,5 de los 16 del presupuesto. Si algún día molesta, la salida es el
+`SqlStatementPool` que la propia plataforma trae, no un caché a mano.
+
+**El rebalanceo de ventana del orden manual (§3.4).** El plan lo pide porque insertar
+repetidamente entre dos vecinos adyacentes agota el hueco local de `ORDER_GAP`. **No hay
+forma de insertar entre dos vecinos**: `order` sólo se mueve al crear, y crear siempre va
+al final —`max(ord) + 1000`, un salto de índice—. El día que haya arrastrar-para-ordenar
+habrá que escribirlo, y entonces hará falta; escribirlo hoy sería mantener código que
+ningún camino ejecuta.
+
+### 3-bis.5 Lo que sigue creciendo con N, y por qué se acepta
+
+**Buscar un término que está en casi todas las tareas.** FTS5 tiene que puntuar cada
+acierto antes de poder quedarse con los doscientos mejores, así que el coste es
+proporcional al **número de aciertos**. El corpus del banco es el peor caso imaginable:
+sus cuerpos se sortean de un vocabulario de sesenta palabras, así que cualquier término
+está en el 98 % de las tareas. Con un corpus real —donde una palabra cualquiera está en
+una fracción pequeña— las consultas del banco que sí son selectivas cuestan **0,15 ms a
+100.000 tareas**.
+
+O sea: lo que crece con N no es «buscar», es «pedir los doscientos mejores de entre
+novecientos mil aciertos». Se acepta, se anota, y si algún día molesta la salida es
+acotar el trabajo del motor, no volver a recorrer la tabla.
+
+**Contar las cabeceras de un estado.** Cada cabecera son dos saltos de índice —dónde
+empieza el grupo siguiente y cuántas hay dentro—, así que el total es proporcional al
+número de **cabeceras que se van a pintar**, no al de tareas. Pero contar el tramo de una
+cabecera sí recorre su tramo del índice: un grupo con un millón de filas se cuenta
+recorriendo un millón de entradas de índice. Ocurre **fuera del EDT** y en C; medido a
+100.000, las cabeceras de una pestaña agrupada por fecha cuestan 5,2 ms.
+
+### 3-bis.6 Qué cambia para quien lo usa
+
+- **Abrir un proyecto deja de leer las tareas.** La ventana pide la página que se ve.
+- **La primera vez, y sólo la primera, hay una migración.** En segundo plano, con barra de
+  progreso, cancelable, y **reanudable** si se cierra el IDE a medias. La lista se va
+  llenando mientras ocurre en vez de esperar a que termine.
+- **El `tasks.xml` no se borra**: queda al lado como `tasks.xml.migrated`. Quitarle el
+  sufijo y borrar la base es la vuelta atrás completa.
+- **Nueva acción *Export Repository to XML***, en el menú de copiar: devuelve las tareas
+  al formato de intercambio cuando se quiera.
+- **Lo que se acaba de escribir ya está en disco.** Desaparece el retardo de medio segundo
+  que agrupaba las escrituras, y con él la ventana de ediciones que un cierre inesperado
+  del IDE se llevaba por delante.
+- **Un fichero ilegible ya no deja el repositorio en blanco hasta la copia de seguridad**:
+  lo que se pudo leer entra igualmente, y sólo lo que falta se busca en el `.bak`.
+- **Buscar por el medio de una palabra deja de encontrar.** `log` encuentra `login`;
+  `ogin`, ya no. Es la única regresión de comportamiento de la fase y está en el §4 del
+  plan como riesgo nº3.
+- Lo que **no** cambia: el orden, la agrupación, los contadores, la selección, el pliegue,
+  los operadores del buscador y los avisos. La ventana es la misma.
+
+### 3-bis.7 Lo que quedó construido
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `TaskSchema` | `main/…/data/sqlite/` | El esquema y el porqué de cada decisión que no se lee sola |
+| `Sql` | `main/…/data/sqlite/` | Lo mínimo sobre `org.jetbrains.sqlite`: ejecutar, leer, contar, transacción y lotes |
+| `TaskDb` | `main/…/data/sqlite/` | El fichero abierto: pragmas, versión y **dos conexiones** —en WAL, un lector no espera a un escritor, y por eso la ventana responde mientras se importa— |
+| `TaskRows` | `main/…/data/sqlite/` | Entre `Task` y una fila. Es el `TasksCodec` de esta fase |
+| `TaskStore` | `main/…/data/sqlite/` | La única pieza que escribe: mutaciones, contadores, operaciones masivas y el lote de la migración |
+| `SqlitePager` | `main/…/data/sqlite/` | La lista, por índice y con `LIMIT`. La mezcla de cubos, el cursor con cuenta y la ventana que crece |
+| `Fts5Index` | `main/…/data/sqlite/` | La búsqueda, en dos pasos: el índice puntúa, la tabla sólo ve a los supervivientes |
+| `TasksXmlReader` | `main/…/data/sqlite/` | El `tasks.xml` en *streaming* con StAX, a tandas, con memoria constante |
+| `Mutation` | `main/…/domain/command/` | Lo que hay que cambiar. Lo que no cabe fila a fila se describe, no se materializa |
+| `TaskReducer` | `main/…/domain/command/` | Mismo contenido, otro alcance: recibe las tareas que el comando nombra y devuelve mutaciones |
+| `TasklaneSnapshot` | `main/…/domain/model/` | Deja de llevar el corpus. Lleva la vista y un número de revisión |
+| `MemoryPager` | `main/…/paging/` | Deja de ser provisional: es la mitad del reparto —lo acotado por su naturaleza— |
+| `ExportXmlAction` | `main/…/ui/actions/` | La puerta de salida al formato de intercambio |
+| `TaskStoreTest` | `test/…/data/sqlite/` | 19 casos: lo que entra vuelve a salir, los contadores nunca mienten, y las operaciones de proyecto hacen lo que hacía el reducer |
+| `SqlitePagerTest` | `test/…/data/sqlite/` | **Los dos paginadores dan la misma lista**, en cuatro agrupaciones por tres filtros, fila a fila |
+| `Fts5IndexTest` | `test/…/data/sqlite/` | **Los dos índices encuentran lo mismo**, consulta por consulta — y lo que no, escrito |
+| `TasksXmlReaderTest` | `test/…/data/sqlite/` | **Los dos lectores leen lo mismo**, más reanudar, cancelar y truncar |
+| `PlanTest` | `test/…/domain/` | Qué mutaciones pide cada comando, y cuáles no piden ninguna |
+| `ScaleBenchmark` | `test/…/bench/` | Reescrito: las puertas de esta fase, con el camino viejo al lado donde todavía cabe |
+
+Tres suites de equivalencia, y no es casualidad: **la forma de confiar en que un almacén
+nuevo no cambió el comportamiento es dejar vivo el viejo y compararlos**. `MemoryPager`,
+`LinearScanIndex` y `TasksCodec` siguen ahí por eso.
+
+### 3-bis.8 Qué sigue siendo el techo
+
+| | Coste a 100.000 | Dónde se arregla |
+|---|---:|---|
+| Los adjuntos en un directorio plano | `Files.list` de 10M entradas no termina | **Fase 4** |
+| Lo que ocupan las capturas en disco | 407 KB por captura | **Fase 4** (§0-bis.5: a 400 px son 33 KB) |
+| Exportar un estado entero | O(n) a propósito | Fase 5, en *streaming* |
+| Buscar un término presente en casi todo | 40 ms | Acotado por aciertos, no por N — §3-bis.5 |
+| EDT | **nada por encima de 11 ms** | — |
+
+El EDT dejó de ser el techo en la Fase 2 y sigue sin serlo. La memoria dejó de serlo aquí.
+Lo que queda es todo de la Fase 4, que es donde el plan decía que estaría.
+
 ### Fase 4 — Adjuntos a escala *(~2-3 semanas)*
 
 #### 4.1 Fragmentación del directorio
@@ -1098,9 +1353,23 @@ millón de tareas — y por tanto tiene que ser cancelable, medido y en segundo 
    mueve, y si se mueve más de lo tolerable hay que pesar las columnas de FTS hasta que
    coincida.
 
+> **Los tres, cerrados.** El nº1 lo despejó la Fase 0 y no existía: la plataforma ya trae
+> SQLite con FTS5 (§0-bis.1). El nº2 se cumplió tal cual —el XML se renombra a
+> `.migrated` en vez de borrarse, la migración es reanudable y hay una acción que vuelve a
+> escribirlo—, y el lector nuevo se compara con el viejo tarea a tarea. El nº3 **se movió
+> más de lo que el plan esperaba**, pero no en el orden: `bm25` ordena igual que el
+> escalón del título, y lo que cambió fue *qué casa* — FTS5 encuentra palabras y prefijos,
+> no trozos de palabra. Está escrito en el §3-bis.6 y fijado en `Fts5IndexTest`.
+
 ---
 
 ## 5. Lo que hay que decidir antes de empezar
+
+> **Las cuatro, respondidas.** La 1 dejó de ser una pregunta en la Fase 0 —no hay
+> dependencia que aceptar—; la 3 es que sí, y la Fase 3 la implementó como acción; la 4 se
+> resolvió sola por donde el plan decía: el coste por operación no depende de N, así que
+> el millón salió gratis en cuanto salieron bien los cien mil. La 2 sigue siendo de la
+> Fase 4.
 
 1. **¿Dependencia nativa (`sqlite-jdbc`, ~12 MB) aceptable?** Si no, el plan cambia de
    forma y de duración.

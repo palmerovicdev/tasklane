@@ -45,35 +45,32 @@ class VisibleTasksTest {
         bookmarked = bookmarked,
     )
 
-    private fun snapshot(vararg tasks: Task) = TasklaneSnapshot(
-        config = TasklaneConfig.DEFAULT,
-        tasksByRepo = tasks.groupBy { it.repo },
-        activeRepo = RepoKey.ROOT,
-    )
+    /** El universo de la ventana, que desde la Fase 3 llega como lista y no como modelo. */
+    private fun snapshot(vararg tasks: Task) = tasks.toList()
 
     /** Con `matches` a null no hay consulta: pasa todo. Con un mapa, sólo lo que está. */
     private fun found(vararg ids: String) =
-        SearchResults("q", TaskQuery.EMPTY, ids.associate { TaskId(it) to 1 }, null)
+        SearchResults("q", TaskQuery.EMPTY, ids.associate { TaskId(it) to 1 }, highlighter = null)
 
-    private fun counted(snapshot: TasklaneSnapshot, found: SearchResults, filter: TaskFilter, state: StateId) =
-        VisibleTasks.countsByState(snapshot, found, filter, now)[state] ?: 0
+    private fun counted(tasks: List<Task>, found: SearchResults, filter: TaskFilter, state: StateId) =
+        VisibleTasks.countsByState(tasks, found, filter, now)[state] ?: 0
 
-    private fun shown(snapshot: TasklaneSnapshot, found: SearchResults, filter: TaskFilter, state: StateId) =
-        VisibleTasks.of(snapshot, found, filter, state, now)
+    private fun shown(tasks: List<Task>, found: SearchResults, filter: TaskFilter, state: StateId) =
+        VisibleTasks.of(tasks, found, filter, state, now)
 
     private fun assertSameCount(
         expected: Int,
-        snapshot: TasklaneSnapshot,
+        tasks: List<Task>,
         found: SearchResults = SearchResults.NONE,
         filter: TaskFilter = TaskFilter.ALL,
         state: StateId = todo,
     ) {
-        val tasks = shown(snapshot, found, filter, state)
-        assertEquals(expected, tasks.size)
+        val visible = shown(tasks, found, filter, state)
+        assertEquals(expected, visible.size)
         assertEquals(
             "el contador no dice lo mismo que la lista",
-            tasks.size,
-            counted(snapshot, found, filter, state),
+            visible.size,
+            counted(tasks, found, filter, state),
         )
     }
 
@@ -100,11 +97,22 @@ class VisibleTasksTest {
     }
 
     @Test
-    fun `buscando entran los otros repositorios, y sin buscar no`() {
+    /**
+     * **Quién decide el universo cambió de sitio en la Fase 3.** Antes esto miraba el
+     * snapshot y elegía: el repositorio activo, o todos si había búsqueda. Ahora el
+     * universo llega ya acotado —`TaskService.pager` elige entre los aciertos de FTS5 y
+     * la consulta del repositorio activo— y aquí sólo se filtra lo que llega.
+     *
+     * Lo que sigue siendo cierto, y es lo que este caso fija: **lo que llega se cuenta
+     * entero**, venga del repositorio que venga. Un resultado de otro repositorio no se
+     * descarta por serlo.
+     */
+    fun `cuenta lo que le dan, venga del repositorio que venga`() {
         val snapshot = snapshot(task("a"), task("b", repo = other))
 
-        assertSameCount(1, snapshot)
+        assertSameCount(2, snapshot)
         assertSameCount(2, snapshot, found = found("a", "b"))
+        assertSameCount(1, snapshot, found = found("a"))
     }
 
     @Test

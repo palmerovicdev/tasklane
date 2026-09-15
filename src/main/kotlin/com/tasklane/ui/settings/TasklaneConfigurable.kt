@@ -238,7 +238,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             return false
         }
 
-        val count = countTasks { effectiveState(it) == row.id }
+        val count = countInState(row.id)
         if (count == 0) return true
 
         val targets = statesTable.rows.filter { it !== row }
@@ -265,7 +265,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             return false
         }
 
-        val count = countTasks { effectivePriority(it) == row.id }
+        val count = countInPriority(row.id)
         if (count == 0) return true
 
         val targets = prioritiesTable.rows.filter { it !== row }
@@ -289,8 +289,10 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
      * A está a punto de traer, y el diálogo estaría mintiendo sobre cuántas mueve.
      * El conjunto `seen` corta cualquier ciclo que se cuele.
      */
-    private fun effectiveState(task: Task): StateId {
-        var id = task.stateId
+    private fun effectiveState(task: Task): StateId = effectiveState(task.stateId)
+
+    private fun effectiveState(from: StateId): StateId {
+        var id = from
         val seen = mutableSetOf(id)
         while (true) {
             val next = stateReassign[id] ?: return id
@@ -299,8 +301,10 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         }
     }
 
-    private fun effectivePriority(task: Task): PriorityId {
-        var id = task.priorityId
+    private fun effectivePriority(task: Task): PriorityId = effectivePriority(task.priorityId)
+
+    private fun effectivePriority(from: PriorityId): PriorityId {
+        var id = from
         val seen = mutableSetOf(id)
         while (true) {
             val next = priorityReassign[id] ?: return id
@@ -309,9 +313,24 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         }
     }
 
-    /** Todos los repositorios: la configuración es del proyecto, no de la pestaña abierta. */
-    private fun countTasks(predicate: (Task) -> Boolean): Int =
-        TaskService.getInstance(project).snapshot.value.tasksByRepo.values.sumOf { it.count(predicate) }
+    /**
+     * Cuántas tareas acabarían en [state] con las reasignaciones que el diálogo lleva
+     * pendientes. Todos los repositorios: la configuración es del proyecto, no de la
+     * pestaña abierta.
+     *
+     * Sale de los contadores del almacén —cinco filas— y no de recorrer las tareas.
+     * Cuenta igual porque lo que se sigue es la **cadena** de reasignaciones, que
+     * depende del estado de origen y no de la tarea.
+     */
+    private fun countInState(state: StateId): Int =
+        TaskService.getInstance(project).countsByState()
+            .filterKeys { effectiveState(it) == state }
+            .values.sum()
+
+    private fun countInPriority(priority: PriorityId): Int =
+        TaskService.getInstance(project).countsByPriority()
+            .filterKeys { effectivePriority(it) == priority }
+            .values.sum()
 
     // ------------------------------------------------------ estado terminal
 
@@ -325,7 +344,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         return next.states.filter { state ->
             state.terminal &&
                 before.state(state.id)?.terminal == false &&
-                countTasks { it.stateId == state.id && it.completedAt == null } > 0
+                TaskService.getInstance(project).openCountOf(state.id) > 0
         }
     }
 

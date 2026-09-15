@@ -10,7 +10,6 @@ import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
-import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.domain.query.TaskQuery
 import com.tasklane.service.SearchResults
 import org.junit.Assert.assertEquals
@@ -28,12 +27,12 @@ import java.time.ZoneId
  * El contrato que hace posible la lista acotada: **nada de lo que se pide aquí
  * devuelve la lista entera**.
  *
- * Los casos están escritos contra [TaskPager] y no contra [InMemoryPager], que es
+ * Los casos están escritos contra [TaskPager] y no contra [MemoryPager], que es
  * deliberado: en la Fase 3 entra otra implementación sobre SQLite y estos mismos casos
  * tienen que seguir describiéndola. Lo único que mira dentro es el escenario del
  * cursor, y ni siquiera ése lo abre: lo pide por un lado y lo devuelve por el otro.
  */
-class InMemoryPagerTest {
+class MemoryPagerTest {
 
     private val now = Instant.parse("2026-09-15T10:00:00Z")
     private val zone = ZoneId.of("UTC")
@@ -73,12 +72,9 @@ class InMemoryPagerTest {
         grouping: Grouping = Grouping.NONE,
         found: SearchResults = SearchResults.NONE,
         filter: TaskFilter = TaskFilter.ALL,
-    ) = InMemoryPager(
-        snapshot = TasklaneSnapshot(
-            config = config(grouping),
-            tasksByRepo = mapOf(RepoKey.ROOT to tasks),
-            activeRepo = RepoKey.ROOT,
-        ),
+    ) = MemoryPager(
+        tasks = tasks,
+        config = config(grouping),
         found = found,
         filter = filter,
         now = now,
@@ -240,7 +236,7 @@ class InMemoryPagerTest {
 
     @Test
     fun `enseñar algo escondido por la busqueda no encuentra nada`() {
-        val visible = SearchResults("q", TaskQuery.EMPTY, mapOf(TaskId("t00000") to 1), null)
+        val visible = SearchResults("q", TaskQuery.EMPTY, mapOf(TaskId("t00000") to 1), highlighter = null)
         val pager = pager(many(10), found = visible)
 
         assertNotNull(pager.reveal(todo, TaskId("t00000")))

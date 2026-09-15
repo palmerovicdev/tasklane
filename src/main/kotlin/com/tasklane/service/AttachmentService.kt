@@ -142,9 +142,10 @@ class AttachmentService(private val project: Project) {
      *
      * Tres salvaguardas, y ninguna es paranoia — esto borra ficheros del usuario:
      *
-     * 1. **Sólo repositorios cargados.** Si un `tasks.xml` no se ha leído, su lista
-     *    de referencias está vacía, y eso no significa que no tenga imágenes:
-     *    significa que no lo sabemos.
+     * 1. **Las referencias salen de la tabla, no de un recorrido.** Desde la Fase 3 las
+     *    mantiene `blob_ref` dentro de la misma transacción que la escritura de la
+     *    tarea, así que no hay ventana en la que una imagen recién pegada todavía no
+     *    esté referenciada para el recolector.
      * 2. **Nunca los abiertos en solo lectura.** Vienen de una versión más nueva del
      *    plugin, que puede referenciar adjuntos de una forma que esta versión no sabe
      *    leer. Es la misma razón por la que no se reescribe su fichero.
@@ -160,9 +161,14 @@ class AttachmentService(private val project: Project) {
         val now = Instant.now()
         var deleted = 0
 
-        for ((repo, list) in snapshot.tasksByRepo) {
+        for (ref in snapshot.repositories) {
+            val repo = ref.key
             if (tasks.isReadOnly(repo)) continue
-            val referenced = list.flatMapTo(HashSet()) { task -> task.attachments.map { it.id } }
+            // De la tabla `blob_ref`, que el almacén mantiene dentro de la misma
+            // transacción que la escritura de la tarea. Antes salía de recorrer el
+            // corpus en memoria, con la salvaguarda de no mirar los repositorios sin
+            // leer; ahora no hay repositorios sin leer, porque no hay corpus.
+            val referenced = tasks.referencedBlobs(repo).mapTo(HashSet(), ::AttachmentId)
 
             for (blob in AttachmentGc.collectible(store.list(repo), referenced, now)) {
                 if (store.delete(blob.path)) {

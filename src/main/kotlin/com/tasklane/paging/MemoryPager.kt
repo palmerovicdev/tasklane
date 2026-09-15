@@ -9,7 +9,7 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskState
-import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.service.SearchResults
 import com.tasklane.ui.toolwindow.VisibleTasks
 import java.time.DayOfWeek
@@ -21,18 +21,22 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * El [TaskPager] de la Fase 2: ordena y agrupa el snapshot que ya está en memoria.
+ * El [TaskPager] que ordena y agrupa **una lista que ya cabe en memoria**.
  *
- * Es **el mismo trabajo que hacía `TasklanePanel.buildSections`**, movido detrás de la
- * costura y con dos diferencias que son el motivo de la fase:
+ * Nació en la Fase 2 como la implementación provisional sobre el snapshot —era el
+ * `TasklanePanel.buildSections` de siempre, movido detrás de la costura— y en la Fase 3
+ * dejó de ser provisional para pasar a ser **la mitad del reparto**:
  *
- * 1. Quien pinta ya no recibe la lista, recibe páginas. Lo que se ordena aquí sigue
- *    siendo O(n log n) —y a un millón de tareas eso son segundos— pero ocurre **fuera
- *    del EDT** y no se convierte en un millón de nodos de árbol. Bajar también ese
- *    coste es la Fase 3: ahí esta clase se sustituye por una consulta con `LIMIT` y
- *    nadie más se entera.
- * 2. Contar y repartir por estado es **una sola pasada** ([VisibleTasks.byState]) en
- *    vez de un recorrido para los contadores y otro para la lista.
+ * - Lo que no cabe en memoria —la lista de una pestaña, que puede ser un millón de
+ *   filas— lo sirve `SqlitePager`, con un índice y un `LIMIT`.
+ * - Lo que **está acotado por su propia naturaleza** lo sirve éste: los doscientos
+ *   aciertos de una búsqueda y las tareas vencidas de un repositorio. Ordenar
+ *   doscientas filas en Kotlin cuesta microsegundos, y expresar `bm25` y el orden
+ *   natural en la misma consulta SQL costaría mucho más de leer.
+ *
+ * Por eso ya no recibe un snapshot sino **la lista**: quien lo construye es quien sabe
+ * de dónde salió, y el pager no tiene por qué saberlo. Es también lo que hace que se
+ * pueda probar con un puñado de tareas y sin almacén, que es como está probado.
  *
  * **Se construye fuera del EDT y se consulta desde él.** El reparto por estado y las
  * secciones de la pestaña se calientan en la corrutina que lo crea; lo que el hilo de
@@ -40,8 +44,10 @@ import java.util.concurrent.ConcurrentHashMap
  * sublista de algo ya ordenado. La caché es concurrente por eso mismo, y no porque se
  * espere contención: un pager describe un instante y se tira con él.
  */
-internal class InMemoryPager(
-    private val snapshot: TasklaneSnapshot,
+internal class MemoryPager(
+    /** El universo de esta ventana, ya acotado por quien lo construyó. */
+    private val tasks: List<Task>,
+    private val config: TasklaneConfig,
     private val found: SearchResults,
     private val filter: TaskFilter,
     private val now: Instant,
@@ -54,7 +60,7 @@ internal class InMemoryPager(
     private class Section(val key: GroupKey?, val tasks: List<Task>)
 
     private val visible: Map<StateId, List<Task>> by lazy {
-        VisibleTasks.byState(snapshot, found, filter, now)
+        VisibleTasks.byState(tasks, found, filter, now)
     }
 
     private val sections = ConcurrentHashMap<StateId, List<Section>>()
@@ -118,15 +124,20 @@ internal class InMemoryPager(
     // --------------------------------------------------------------- agrupación
 
     private fun build(stateId: StateId): List<Section> {
-        val state = snapshot.config.state(stateId) ?: return emptyList()
+        val state = config.state(stateId) ?: return emptyList()
         val mine = visible[stateId].orEmpty()
 
         // Lo marcado va primero pase lo que pase: marcar es precisamente decir «que
         // no se me pierda esto». Después la prioridad, que es lo que se mira en una
         // lista de pendientes, y dentro de la misma prioridad lo más reciente arriba.
         val natural = compareByDescending<Task> { it.bookmarked }
-            .thenByDescending { snapshot.config.priorityOrDefault(it.priorityId).order }
+            .thenByDescending { config.priorityOrDefault(it.priorityId).order }
             .thenByDescending { (DateGrouper.anchorOf(it, state.anchor) ?: it.updatedAt).toEpochMilli() }
+            // El desempate, que desde la Fase 3 no es opcional: `SqlitePager` ordena
+            // estas mismas tareas con un índice, y dos tareas con la misma fecha al
+            // milisegundo tienen que quedar en el mismo sitio en los dos sitios. Sin
+            // esto, buscar y no buscar darían dos listas distintas con las mismas filas.
+            .thenByDescending { it.id.value }
         // Buscando, en cambio, lo que manda es lo que mejor casa: el orden normal
         // enterraría el resultado bueno bajo cualquier tarea de prioridad alta.
         val order =
@@ -174,9 +185,9 @@ internal class InMemoryPager(
      * cabecera vacía por cada prioridad configurada convertiría la lista en un índice.
      */
     private fun byPriority(tasks: List<Task>, order: Comparator<Task>): List<Section> = tasks
-        .groupBy { snapshot.config.priorityOrDefault(it.priorityId).id }
+        .groupBy { config.priorityOrDefault(it.priorityId).id }
         .toList()
-        .sortedByDescending { (id, _) -> snapshot.config.priorities.firstOrNull { it.id == id }?.order ?: 0 }
+        .sortedByDescending { (id, _) -> config.priorities.firstOrNull { it.id == id }?.order ?: 0 }
         .map { (id, inGroup) -> Section(GroupKey.OfPriority(id), inGroup.sortedWith(order)) }
 
     /**

@@ -44,7 +44,8 @@ internal class DiagnosticsAction : DumbAwareAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val snapshot = TaskService.getInstance(project).snapshot.value
+        val service = TaskService.getInstance(project)
+        val repos = service.snapshot.value.repositories.map { it.key }
         val metrics = TasklaneMetrics.getInstance(project).snapshot()
         val layout = StorageLayout.forProject(project)
 
@@ -56,8 +57,10 @@ internal class DiagnosticsAction : DumbAwareAction() {
                     indicator.isIndeterminate = true
                     val report = TasklaneDiagnostics.collect(
                         layout = layout,
-                        tasksByRepo = snapshot.tasksByRepo,
-                        orphansOf = { tasks -> TaskReducer.orphans(tasks).size },
+                        // Del almacén, en agregados: siete `count(*)` por repositorio en
+                        // vez de recorrer las tareas que hubiera en memoria — que además
+                        // ya no las hay.
+                        stats = repos.associateWith(service::statsOf),
                         metrics = metrics,
                     )
                     text = DiagnosticsReport.render(report)

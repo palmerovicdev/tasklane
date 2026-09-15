@@ -13,9 +13,14 @@ data class AnchoredTask(val task: Task, val anchor: CodeAnchor)
  * marcar sus líneas.
  *
  * Se da la vuelta al modelo a propósito: las tareas guardan sus anclas, pero quien
- * pinta tiene un fichero abierto y necesita la pregunta contraria. Hacerla recorriendo
- * todas las tareas en cada repintado sería recorrer la lista entera por cada línea
- * visible; así se recorre **una vez por cambio del modelo** y lo que queda es un mapa.
+ * pinta tiene un fichero abierto y necesita la pregunta contraria.
+ *
+ * **Desde la Fase 3 la vuelta la da el índice, no este objeto.** `AnchorMarkers`
+ * pregunta por ruta —`anchor_by_path`, un salto y un puñado de filas— en vez de
+ * construir el mapa entero del proyecto en cada cambio del modelo, que es lo que hacía
+ * que abrir un fichero costara lo mismo que abrir el proyecto (§3.6). Lo que queda aquí
+ * es la decisión de **qué se marca** y **cuál manda**, que es lo que había que poder
+ * probar sin IDE, y [byPath] sobre una lista para poder seguir probándolo.
  *
  * **Lo terminal no se marca.** Una tarea en un estado que significa «hecho» ya no es
  * una nota sobre el código: es historia. Dejar su marca en el margen convertiría el
@@ -33,15 +38,12 @@ object AnchoredTasks {
      * el fichero abierto no sabe de repositorios, y una nota sobre él vale igual venga
      * de la lista que venga.
      */
-    fun byPath(snapshot: TasklaneSnapshot): Map<String, List<AnchoredTask>> {
-        val config = snapshot.config
+    fun byPath(tasks: List<Task>, config: TasklaneConfig): Map<String, List<AnchoredTask>> {
         val byPath = HashMap<String, MutableList<AnchoredTask>>()
-        for (tasks in snapshot.tasksByRepo.values) {
-            for (task in tasks) {
-                if (config.stateOrDefault(task.stateId).terminal) continue
-                for (anchor in task.anchors) {
-                    byPath.getOrPut(anchor.path) { mutableListOf() } += AnchoredTask(task, anchor)
-                }
+        for (task in tasks) {
+            if (config.stateOrDefault(task.stateId).terminal) continue
+            for (anchor in task.anchors) {
+                byPath.getOrPut(anchor.path) { mutableListOf() } += AnchoredTask(task, anchor)
             }
         }
         val order = order(config)

@@ -1,7 +1,6 @@
 package com.tasklane.domain.command
 
 import com.tasklane.domain.model.PriorityId
-import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
@@ -13,225 +12,148 @@ import java.time.Clock
 import java.time.Instant
 
 /**
- * `(Snapshot, Command) -> Snapshot`. Aquí viven las invariantes del modelo y nada más:
- * sin IO, sin Swing, sin `Project`. Es la clase que concentra la lógica y la única
- * que hace falta testear para confiar en el comportamiento.
+ * `(config, las tareas que el comando nombra, comando) -> qué hay que cambiar`.
+ *
+ * Aquí viven las invariantes del modelo y nada más: sin IO, sin Swing, sin `Project`.
+ * Sigue siendo la clase que concentra la lógica y la única que hace falta testear para
+ * confiar en el comportamiento.
+ *
+ * ## Lo que cambió en la Fase 3, y por qué
+ *
+ * Hasta la Fase 2 la firma era `(Snapshot, Command) -> Snapshot`: el reducer recibía
+ * **el modelo entero** y devolvía otro modelo entero. Eso era correcto mientras el
+ * modelo cupiera en memoria, y dejó de serlo: a un millón de tareas el snapshot son
+ * 12,9 GB y copiar la lista de un repositorio por cada pulsación del marcador es O(n)
+ * por gesto.
+ *
+ * Ahora recibe [Subject] —la configuración y **las tareas que el comando nombra**, que
+ * son una o un puñado— y devuelve [Mutation]s. Lo que no cabe fila a fila —reasignar un
+ * estado con un millón de tareas dentro— no se materializa: se describe, y el almacén
+ * lo resuelve con un `UPDATE … WHERE`.
+ *
+ * Lo que **no** cambió es todo lo demás: sellar `completedAt` al entrar en un estado
+ * terminal y conservarlo al salir, que marcar no toque `updatedAt`, que una tarea vacía
+ * no sea una tarea, que las etiquetas y las anclas se limpien y se deduplican, y que un
+ * comando que no cambia nada no produzca nada. Esas reglas están donde estaban y se
+ * prueban como se probaban.
+ *
+ * ## Dónde fue a parar `normalize`
+ *
+ * La red de seguridad ante configuración desincronizada —aparcar en el estado por
+ * defecto lo que apunta a configuración que ya no existe, y devolverlo cuando vuelve—
+ * ya no se aplica tarea a tarea al cargar: cargar ya no existe. Vive en el almacén, que
+ * la resuelve por claves —[Mutation.Renormalize]— apoyándose en un índice parcial de
+ * las tareas aparcadas. La regla es la misma; lo que cambia es que cuesta lo que cuestan
+ * las aparcadas y no lo que cuesta el proyecto.
  */
 class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
 
     /**
-     * Lo que produce un comando: el snapshot nuevo **y el recibo de lo que hizo falta
-     * para producirlo**.
+     * Lo que un comando necesita además de sí mismo.
      *
-     * El recibo existe porque antes el servicio lo reconstruía a posteriori recorriendo
-     * el modelo entero: `reportRemapped` aplanaba el snapshot **dos veces por comando**
-     * y `markDirty` comparaba las listas de todos los repositorios. A 100.000 tareas eso
-     * eran 0,6 ms por pulsación gastados en volver a deducir algo que el reducer acababa
-     * de saber de primera mano.
-     *
-     * En la Fase 3 esto es lo que pasará a devolver `List<Mutation>` (ver
-     * `docs/plan-escala.md` §3.4): la forma ya es la buena, lo que cambiará es que en
-     * vez de un snapshot entero llevará las filas que tocar.
+     * [tasks] son **sólo** las que el comando nombra —[targetsOf] dice cuáles—, ya
+     * leídas del almacén. [nextOrder] es una función y no un valor porque sólo
+     * [TaskCommand.Create] lo pide, y calcularlo es un salto de índice que no hay que
+     * pagar en los demás comandos.
      */
-    data class Reduction(
-        val snapshot: TasklaneSnapshot,
-        /**
-         * Repositorios cuya lista de tareas cambió, y por tanto hay que reescribir.
-         *
-         * Vacío para una carga: leer de disco no es editar. Y vacío también cuando el
-         * comando no cambió nada, que es el caso más frecuente de todos —los eventos
-         * de VCS llegan repetidos y `ConfigChanged` se emite en cada arranque—.
-         */
-        val dirty: Set<RepoKey>,
-        /**
-         * Tareas que **este** comando acaba de aparcar en el estado o la prioridad por
-         * defecto por apuntar a configuración que ya no existe. Ver [normalize].
-         *
-         * Sólo las nuevas: una tarea que ya venía aparcada no se vuelve a anunciar en
-         * cada comando, que es la razón por la que el servicio comparaba el antes y el
-         * después.
-         */
-        val remapped: List<Task>,
-    )
+    class Subject(
+        val config: TasklaneConfig,
+        val tasks: List<Task> = emptyList(),
+        val nextOrder: () -> Long = { 0L },
+    ) {
+        fun task(id: TaskId): Task? = tasks.firstOrNull { it.id == id }
+    }
 
     /**
-     * El comando completo, con recibo. Es lo que usa [com.tasklane.service.TaskService].
+     * Lo que produce un comando: qué cambiar y con qué configuración.
+     *
+     * [config] sólo se mueve con [TaskCommand.ConfigChanged], y va aquí porque el
+     * almacén necesita la configuración **nueva** para recalcular lo que guarda
+     * derivado de ella, mientras que [Mutation.Renormalize] lleva la **anterior** para
+     * poder tocar sólo lo que cambió.
      */
-    fun plan(snapshot: TasklaneSnapshot, command: TaskCommand): Reduction {
+    data class Plan(val mutations: List<Mutation>, val config: TasklaneConfig) {
+        val isEmpty: Boolean get() = mutations.isEmpty()
+    }
+
+    fun plan(subject: Subject, command: TaskCommand): Plan {
         val now = Instant.now(clock)
-        // Se comparte con `normalize` y casi siempre se queda vacía: sólo la carga y un
-        // cambio de configuración pueden aparcar tareas.
-        val remapped = ArrayList<Task>(0)
+        val config = subject.config
 
         return when (command) {
             // ------------------------------------------------ alcance proyecto
 
             is TaskCommand.ConfigChanged -> {
-                val config = command.config.normalized()
-                if (config == snapshot.config) unchanged(snapshot)
-                else snapshot.copy(config = config)
-                    .mapAllTasks { normalize(it, config, remapped) }
-                    .with(remapped)
+                val next = command.config.normalized()
+                // `ConfigChanged` se emite en cada arranque y en cada paso por los
+                // ajustes, y casi siempre no cambia nada.
+                if (next == config) Plan(emptyList(), config)
+                else Plan(listOf(Mutation.Renormalize(config)), next)
             }
 
-            is TaskCommand.ReassignState -> {
-                if (command.from == command.to) return unchanged(snapshot)
-                snapshot.mapAllTasks { task ->
-                    if (task.stateId != command.from) task
-                    else applyState(task, command.to, snapshot.config, now)
-                }.with(remapped)
-            }
+            is TaskCommand.ReassignState ->
+                if (command.from == command.to) nothing(config)
+                else Plan(listOf(Mutation.Reassign(command.from, command.to, now)), config)
 
-            is TaskCommand.ReassignPriority -> {
-                if (command.from == command.to) return unchanged(snapshot)
-                snapshot.mapAllTasks { task ->
-                    if (task.priorityId != command.from) task
-                    else task.copy(
-                        priorityId = command.to,
-                        updatedAt = now,
-                        extra = task.extra - ORIG_PRIORITY,
-                    )
-                }.with(remapped)
-            }
+            is TaskCommand.ReassignPriority ->
+                if (command.from == command.to) nothing(config)
+                else Plan(listOf(Mutation.Reprioritize(command.from, command.to, now)), config)
 
-            is TaskCommand.RepositoriesChanged -> {
-                val repos = command.repositories
-                // Que el activo sobreviva es la invariante: perderlo dejaría el
-                // árbol pintando un repositorio que ya no está en la lista.
-                val active = when {
-                    repos.isEmpty() -> snapshot.activeRepo
-                    repos.any { it.key == snapshot.activeRepo } -> snapshot.activeRepo
-                    else -> repos.first().key
-                }
-                // Pendientes de leer = los del catálogo que aún no tienen lista. Se
-                // recalcula entero: un repositorio que sale del catálogo deja de
-                // estar pendiente de nada.
-                val loading = repos.map { it.key }.filterNot { it in snapshot.tasksByRepo }.toSet()
-                // Los eventos de VCS llegan repetidos. Devolver el MISMO snapshot
-                // cuando nada cambió es lo que evita que el servicio se ponga a
-                // recorrer repositorios buscando qué reescribir.
-                if (repos == snapshot.repositories && active == snapshot.activeRepo && loading == snapshot.loading) {
-                    return unchanged(snapshot)
-                }
-                // Ninguna tarea cambia: cambia el catálogo. Nada que reescribir.
-                unchanged(snapshot.copy(repositories = repos, activeRepo = active, loading = loading))
-            }
+            is TaskCommand.BackfillCompletedAt ->
+                if (command.states.isEmpty()) nothing(config)
+                else Plan(listOf(Mutation.Backfill(command.states)), config)
 
-            is TaskCommand.SelectRepo -> unchanged(
-                if (command.repo == snapshot.activeRepo) snapshot
-                else snapshot.copy(activeRepo = command.repo),
-            )
-
-            is TaskCommand.BackfillCompletedAt -> snapshot.mapAllTasks { task ->
-                // `updatedAt` no se toca: la fecha que se rellena se DERIVA de ella,
-                // así que pisarla destruiría justamente el dato que se está usando.
-                if (task.stateId in command.states && task.completedAt == null) {
-                    task.copy(completedAt = task.updatedAt)
-                } else {
-                    task
-                }
-            }.with(remapped)
+            // El catálogo y el repositorio activo son estado de la vista: no tocan
+            // ninguna fila. Ver `TaskReducer.view`.
+            is TaskCommand.RepositoriesChanged, is TaskCommand.SelectRepo -> nothing(config)
 
             // ----------------------------------------------------- acotados
 
-            is RepoScoped -> reduceScoped(snapshot, command, now, remapped)
-        }
-    }
-
-    /**
-     * Sólo el snapshot. Es la forma que consumen los tests y el banco, que no escriben
-     * en disco y por tanto no tienen nada que hacer con el recibo.
-     */
-    fun reduce(snapshot: TasklaneSnapshot, command: TaskCommand): TasklaneSnapshot =
-        plan(snapshot, command).snapshot
-
-    /** Un snapshot sin nada que reescribir ni que anunciar. */
-    private fun unchanged(snapshot: TasklaneSnapshot) = Reduction(snapshot, emptySet(), emptyList())
-
-    private fun reduceScoped(
-        snapshot: TasklaneSnapshot,
-        command: RepoScoped,
-        now: Instant,
-        remapped: MutableList<Task>,
-    ): Reduction {
-        val repo = command.repo
-        val current = snapshot.tasksOf(repo)
-        val config = snapshot.config
-
-        val next: List<Task> = when (command) {
-            // Una carga NO ensucia nada: leer de disco no es editar, y marcarlo como
-            // sucio haría que abrir el proyecto reescribiera todos sus ficheros. Sí
-            // puede aparcar tareas, y eso sí se anuncia.
-            is TaskCommand.Loaded -> {
-                val tasks = command.tasks.map { withDerived(normalize(it, config, remapped)) }
-                return Reduction(
-                    snapshot.copy(
-                        tasksByRepo = snapshot.tasksByRepo + (repo to tasks),
-                        loading = snapshot.loading - repo,
-                        // El techo del orden se calcula AQUÍ, que es el único momento
-                        // en que ya se está recorriendo la lista entera de todos
-                        // modos. A partir de aquí `nextOrder` es O(1). Ver
-                        // [TasklaneSnapshot.maxOrder].
-                        maxOrder = snapshot.maxOrder + (repo to (tasks.maxOfOrNull { it.order } ?: 0L)),
-                    ),
-                    dirty = emptySet(),
-                    remapped = remapped,
-                )
-            }
-
-            is TaskCommand.ForgetRepo -> {
-                if (repo !in snapshot.tasksByRepo && snapshot.repositories.none { it.key == repo }) {
-                    return unchanged(snapshot)
-                }
-                val remaining = snapshot.repositories.filterNot { it.key == repo }
-                // Tampoco ensucia: el repositorio se va, no se reescribe.
-                return unchanged(
-                    snapshot.copy(
-                        tasksByRepo = snapshot.tasksByRepo - repo,
-                        repositories = remaining,
-                        // Igual que en RepositoriesChanged: el activo tiene que seguir
-                        // existiendo, o el árbol quedaría pintando una clave fantasma.
-                        activeRepo = if (snapshot.activeRepo != repo) snapshot.activeRepo
-                        else remaining.firstOrNull()?.key ?: snapshot.activeRepo,
-                        loading = snapshot.loading - repo,
-                        maxOrder = snapshot.maxOrder - repo,
-                    ),
-                )
-            }
+            is TaskCommand.ForgetRepo -> Plan(listOf(Mutation.Forget(command.repo)), config)
 
             is TaskCommand.Create -> {
                 val body = command.body.trim()
                 // Una tarea vacía no es una tarea: se ignora en vez de crear ruido.
-                if (body.isEmpty()) return unchanged(snapshot)
+                if (body.isEmpty()) return nothing(config)
                 val state = command.stateId?.let { config.stateOrDefault(it) } ?: config.defaultState
                 val priority = command.priorityId?.let { config.priorityOrDefault(it) } ?: config.defaultPriority
-                current + Task(
-                    id = TaskId.random(),
-                    repo = repo,
-                    body = body,
-                    links = LinkExtractor.extract(body),
-                    attachments = ImageRefParser.parse(body),
-                    stateId = state.id,
-                    priorityId = priority.id,
-                    createdAt = now,
-                    updatedAt = now,
-                    completedAt = if (state.terminal) now else null,
-                    order = snapshot.nextOrder(repo),
-                    tags = command.tags.map(String::trim).filter(String::isNotEmpty).distinct(),
-                    dueDate = command.dueDate,
-                    anchors = command.anchors.distinct(),
+                upsert(
+                    config,
+                    Task(
+                        id = TaskId.random(),
+                        repo = command.repo,
+                        body = body,
+                        links = LinkExtractor.extract(body),
+                        attachments = ImageRefParser.parse(body),
+                        stateId = state.id,
+                        priorityId = priority.id,
+                        createdAt = now,
+                        updatedAt = now,
+                        completedAt = if (state.terminal) now else null,
+                        order = subject.nextOrder(),
+                        tags = clean(command.tags),
+                        dueDate = command.dueDate,
+                        anchors = command.anchors.distinct(),
+                    ),
                 )
             }
 
-            is TaskCommand.UpdateBody -> current.mapTask(command.id) { task ->
+            is TaskCommand.Delete -> {
+                // Sólo las que existían. Antes esto se notaba en que borrar un id
+                // inexistente reconstruía la lista igualmente: un repintado y un volcado
+                // a disco por un borrado que no borraba nada.
+                val ids = subject.tasks.map { it.id }.filter { it in command.ids.toSet() }
+                if (ids.isEmpty()) nothing(config) else Plan(listOf(Mutation.Delete(ids)), config)
+            }
+
+            is TaskCommand.UpdateBody -> edit(subject, command.id) { task ->
                 val body = command.body.trim()
                 if (body.isEmpty() || body == task.body) task
                 else withDerived(task.copy(body = body, updatedAt = now))
             }
 
-            // Los seis cambios del diálogo sobre UNA copia de la lista, y produciendo
-            // UN snapshot. Ver el KDoc de [TaskCommand.UpdateTask].
-            is TaskCommand.UpdateTask -> current.mapTask(command.id) { task ->
+            // Los seis cambios del diálogo a la vez. Ver el KDoc de [TaskCommand.UpdateTask].
+            is TaskCommand.UpdateTask -> edit(subject, command.id) { task ->
                 var next = task
                 command.body?.trim()?.takeIf { it.isNotEmpty() && it != next.body }?.let {
                     next = withDerived(next.copy(body = it))
@@ -242,9 +164,9 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                     // volver sola a una tarea aparcada.
                     next = next.copy(priorityId = it, extra = next.extra - ORIG_PRIORITY)
                 }
-                command.tags?.map(String::trim)?.filter(String::isNotEmpty)?.distinct()
-                    ?.takeIf { it != next.tags }
-                    ?.let { next = next.copy(tags = it) }
+                clean(command.tags).takeIf { command.tags != null && it != next.tags }?.let {
+                    next = next.copy(tags = it)
+                }
                 if (command.dueDate != null) {
                     // `Optional.empty` es «quítasela», que es distinto de «no la toques».
                     val due = command.dueDate.orElse(null)
@@ -259,11 +181,9 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 if (next === task) task else next.copy(updatedAt = now)
             }
 
-            is TaskCommand.ChangeState -> current.mapTask(command.id) { task ->
-                applyState(task, command.stateId, config, now)
-            }
+            is TaskCommand.ChangeState -> edit(subject, command.id) { applyState(it, command.stateId, config, now) }
 
-            is TaskCommand.ChangePriority -> current.mapTask(command.id) { task ->
+            is TaskCommand.ChangePriority -> edit(subject, command.id) { task ->
                 if (task.priorityId == command.priorityId) task
                 // Mover a mano es una decisión: deja de ser una huérfana aparcada
                 // y por eso pierde la marca que la haría volver sola.
@@ -274,29 +194,29 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 )
             }
 
-            is TaskCommand.SetAnchors -> current.mapTask(command.id) { task ->
+            is TaskCommand.SetAnchors -> edit(subject, command.id) { task ->
                 val anchors = command.anchors.distinct()
                 if (task.anchors == anchors) task else task.copy(anchors = anchors, updatedAt = now)
             }
 
-            is TaskCommand.SetDueDate -> current.mapTask(command.id) { task ->
+            is TaskCommand.SetDueDate -> edit(subject, command.id) { task ->
                 if (task.dueDate == command.dueDate) task
                 else task.copy(dueDate = command.dueDate, updatedAt = now)
             }
 
-            is TaskCommand.ToggleBookmark -> current.mapTask(command.id) { task ->
+            is TaskCommand.ToggleBookmark -> edit(subject, command.id) { task ->
                 // Marcar no es editar: no toca `updatedAt`. Si lo tocara, marcar una
                 // tarea vieja para no perderla de vista la movería al grupo de hoy,
                 // que es justo lo contrario de lo que el usuario pidió.
                 task.copy(bookmarked = !task.bookmarked)
             }
 
-            is TaskCommand.SetTags -> current.mapTask(command.id) { task ->
-                val tags = command.tags.map(String::trim).filter(String::isNotEmpty).distinct()
+            is TaskCommand.SetTags -> edit(subject, command.id) { task ->
+                val tags = clean(command.tags)
                 if (tags == task.tags) task else task.copy(tags = tags, updatedAt = now)
             }
 
-            is TaskCommand.ToggleComplete -> current.mapTask(command.id) { task ->
+            is TaskCommand.ToggleComplete -> edit(subject, command.id) { task ->
                 val isDone = config.stateOrDefault(task.stateId).terminal
                 val target = if (isDone) {
                     config.defaultState.id
@@ -305,60 +225,106 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 }
                 applyState(task, target, config, now)
             }
-
-            is TaskCommand.Delete -> {
-                val ids = command.ids.toSet()
-                val next = current.filterNot { it.id in ids }
-                // La MISMA lista si no había nada que borrar. `filterNot` siempre
-                // construye una nueva, y una lista nueva es un snapshot nuevo: un
-                // repintado y un volcado a disco por un borrado que no borró nada.
-                if (next.size == current.size) current else next
-            }
         }
-
-        // Identidad y no igualdad: el reducer devuelve la MISMA lista cuando no ha
-        // tocado nada, así que decidir por referencia es exacto y cuesta un puntero.
-        // Es lo que sustituye al `equals` de listas que hacía `TaskService.markDirty`.
-        if (next === current) return unchanged(snapshot)
-        return Reduction(
-            snapshot.copy(
-                tasksByRepo = snapshot.tasksByRepo + (repo to next),
-                maxOrder = nextMaxOrder(snapshot, command, next),
-            ),
-            dirty = setOf(repo),
-            remapped = remapped,
-        )
     }
 
     /**
-     * El techo del orden después del comando.
+     * La mitad del comando que sólo cambia la **vista**: qué repositorios hay, cuál está
+     * activo y qué configuración se está pintando. Ninguna de las tres toca una fila.
      *
-     * Sólo [TaskCommand.Create] lo mueve, y lo mueve a un valor que se acaba de
-     * calcular, así que se sabe sin mirar la lista. Los demás comandos no tocan
-     * `order`; borrar tampoco lo baja, y no hace falta que lo baje: los huecos del
-     * orden disperso son justamente lo que permite insertar sin renumerar.
+     * Devuelve el **mismo** snapshot cuando no cambia nada, y eso no es una
+     * optimización: es lo que impide que un evento de VCS repetido —llegan repetidos— o
+     * el `ConfigChanged` de cada arranque provoquen un repintado.
      */
-    private fun nextMaxOrder(
-        snapshot: TasklaneSnapshot,
-        command: RepoScoped,
-        next: List<Task>,
-    ): Map<RepoKey, Long> =
-        if (command is TaskCommand.Create) {
-            snapshot.maxOrder + (command.repo to (next.last().order))
-        } else {
-            snapshot.maxOrder
+    fun view(snapshot: TasklaneSnapshot, command: TaskCommand): TasklaneSnapshot = when (command) {
+        is TaskCommand.ConfigChanged -> {
+            val config = command.config.normalized()
+            if (config == snapshot.config) snapshot else snapshot.copy(config = config)
         }
+
+        is TaskCommand.RepositoriesChanged -> {
+            val repos = command.repositories
+            // Que el activo sobreviva es la invariante: perderlo dejaría el árbol
+            // pintando un repositorio que ya no está en la lista.
+            val active = when {
+                repos.isEmpty() -> snapshot.activeRepo
+                repos.any { it.key == snapshot.activeRepo } -> snapshot.activeRepo
+                else -> repos.first().key
+            }
+            if (repos == snapshot.repositories && active == snapshot.activeRepo) snapshot
+            else snapshot.copy(repositories = repos, activeRepo = active)
+        }
+
+        // No se valida contra el catálogo a propósito: al abrir el proyecto se restaura
+        // la selección guardada antes de que la detección haya terminado.
+        is TaskCommand.SelectRepo ->
+            if (command.repo == snapshot.activeRepo) snapshot else snapshot.copy(activeRepo = command.repo)
+
+        is TaskCommand.ForgetRepo -> {
+            val remaining = snapshot.repositories.filterNot { it.key == command.repo }
+            if (remaining.size == snapshot.repositories.size && command.repo !in snapshot.loading) {
+                snapshot
+            } else {
+                snapshot.copy(
+                    repositories = remaining,
+                    activeRepo = if (snapshot.activeRepo != command.repo) snapshot.activeRepo
+                    else remaining.firstOrNull()?.key ?: snapshot.activeRepo,
+                    loading = snapshot.loading - command.repo,
+                )
+            }
+        }
+
+        else -> snapshot
+    }
+
+    /**
+     * Qué tareas hay que leer del almacén antes de planificar. Es la otra mitad del
+     * cambio de alcance: el servicio carga **esto** y no el corpus.
+     */
+    fun targetsOf(command: TaskCommand): List<TaskId> = when (command) {
+        is TaskCommand.Delete -> command.ids
+        is TaskCommand.UpdateBody -> listOf(command.id)
+        is TaskCommand.UpdateTask -> listOf(command.id)
+        is TaskCommand.ChangeState -> listOf(command.id)
+        is TaskCommand.ChangePriority -> listOf(command.id)
+        is TaskCommand.SetAnchors -> listOf(command.id)
+        is TaskCommand.SetDueDate -> listOf(command.id)
+        is TaskCommand.ToggleBookmark -> listOf(command.id)
+        is TaskCommand.SetTags -> listOf(command.id)
+        is TaskCommand.ToggleComplete -> listOf(command.id)
+        else -> emptyList()
+    }
+
+    // ------------------------------------------------------------------- privado
+
+    private fun nothing(config: TasklaneConfig) = Plan(emptyList(), config)
+
+    private fun upsert(config: TasklaneConfig, task: Task) =
+        Plan(listOf(Mutation.Upsert(listOf(task))), config)
+
+    /**
+     * Aplica [transform] a la tarea que el comando nombra.
+     *
+     * Devolver la **misma** instancia significa «no ha cambiado nada», y entonces no
+     * sale ninguna mutación: ni escritura, ni repintado. Es el mismo contrato de
+     * identidad que la Fase 1 introdujo, y sigue costando un puntero.
+     */
+    private inline fun edit(subject: Subject, id: TaskId, transform: (Task) -> Task): Plan {
+        val task = subject.task(id) ?: return nothing(subject.config)
+        val next = transform(task)
+        return if (next === task) nothing(subject.config) else upsert(subject.config, next)
+    }
+
+    /** Etiquetas como las guarda el modelo: sin espacios, sin vacías y sin repetidas. */
+    private fun clean(tags: List<String>?): List<String> =
+        tags.orEmpty().map(String::trim).filter(String::isNotEmpty).distinct()
 
     /**
      * Recalcula lo que se deriva del cuerpo: enlaces e imágenes.
      *
-     * Se invoca **sólo donde el cuerpo entra o cambia** —crear, editar y cargar— y
-     * no en los comandos que mueven estado o prioridad: ninguno de ellos puede
-     * tocar el texto, y extraer ahí sería recorrer el cuerpo de todas las tareas
-     * para llegar siempre a la misma lista. Ver `docs/architecture.html` §9.
-     *
-     * Devuelve la MISMA instancia si nada cambió: es lo que deja que el servicio
-     * decida por identidad qué repositorios hay que reescribir.
+     * Se invoca **sólo donde el cuerpo entra o cambia** —crear y editar— y no en los
+     * comandos que mueven estado o prioridad: ninguno de ellos puede tocar el texto.
+     * Ver `docs/architecture.html` §9.
      */
     private fun withDerived(task: Task): Task {
         val links = LinkExtractor.extract(task.body)
@@ -386,115 +352,6 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         )
     }
 
-    /**
-     * Red de seguridad ante configuración desincronizada, en los dos sentidos.
-     *
-     * **Se fue:** una tarea que apunta a un estado o prioridad inexistente NO se
-     * descarta; se remapea al valor por defecto y el ID original queda en
-     * [Task.extra] —que el códec persiste, así que sobrevive a cerrar el proyecto—.
-     *
-     * **Volvió:** si ese ID reaparece en la configuración, la tarea regresa sola a
-     * su sitio. La marca sólo sobrevive mientras la tarea siga aparcada en el
-     * fallback: moverla a mano la borra, de modo que la vuelta nunca pisa una
-     * decisión del usuario.
-     */
-    private fun normalize(task: Task, config: TasklaneConfig, remapped: MutableList<Task>): Task {
-        // El caso abrumadoramente normal: la configuración está donde debe y no hay
-        // nada que recolocar. Se sale antes de tocar un mapa mutable, porque esto
-        // corre una vez por tarea en cada carga y en cada paso por los ajustes.
-        if (task.extra.isEmpty() && config.state(task.stateId) != null && config.priority(task.priorityId) != null) {
-            return task
-        }
-
-        val wasOrphan = ORIG_STATE in task.extra || ORIG_PRIORITY in task.extra
-        var stateId = task.stateId
-        var priorityId = task.priorityId
-        val extra = task.extra.toMutableMap()
-
-        extra[ORIG_STATE]?.let { orig ->
-            config.state(StateId(orig))?.let { stateId = it.id; extra -= ORIG_STATE }
-        }
-        extra[ORIG_PRIORITY]?.let { orig ->
-            config.priority(PriorityId(orig))?.let { priorityId = it.id; extra -= ORIG_PRIORITY }
-        }
-
-        if (config.state(stateId) == null) {
-            // putIfAbsent y no put: si la tarea ya venía huérfana, el ID que vale la
-            // pena recordar es el primero, no el fallback por el que pasó después.
-            extra.putIfAbsent(ORIG_STATE, stateId.value)
-            stateId = config.defaultState.id
-        }
-        if (config.priority(priorityId) == null) {
-            extra.putIfAbsent(ORIG_PRIORITY, priorityId.value)
-            priorityId = config.defaultPriority.id
-        }
-
-        if (stateId == task.stateId && priorityId == task.priorityId && extra == task.extra) return task
-        val next = task.copy(stateId = stateId, priorityId = priorityId, extra = extra)
-        // El recibo: sólo las que se aparcan AHORA. Una tarea que ya venía aparcada no
-        // se vuelve a anunciar, que es lo que el servicio conseguía comparando el
-        // conjunto de huérfanas de antes con el de después —dos `flatten()` del
-        // snapshot entero por comando—.
-        if (!wasOrphan && (ORIG_STATE in extra || ORIG_PRIORITY in extra)) remapped += next
-        return next
-    }
-
-    /**
-     * Aplica [transform] a todas las tareas de todos los repositorios conservando la
-     * identidad de lo que no cambia: si un repositorio sale intacto se devuelve su
-     * misma lista, y si ninguno cambia se devuelve el mismo snapshot.
-     *
-     * No es micro-optimización. `ConfigChanged` se emite en cada arranque y en cada
-     * paso por los ajustes, y casi siempre no tiene nada que remapear; reconstruir
-     * ahí todas las listas haría que el servicio marcara como sucios —y reescribiera
-     * en disco— repositorios en los que no ha pasado nada.
-     */
-    private inline fun TasklaneSnapshot.mapAllTasks(transform: (Task) -> Task): Changed {
-        val dirty = mutableSetOf<RepoKey>()
-        val next = tasksByRepo.mapValues { (repo, tasks) ->
-            var changed = false
-            val mapped = tasks.map { task -> transform(task).also { if (it !== task) changed = true } }
-            if (!changed) return@mapValues tasks
-            dirty += repo
-            mapped
-        }
-        return if (dirty.isEmpty()) Changed(this, emptySet()) else Changed(copy(tasksByRepo = next), dirty)
-    }
-
-    /** Un snapshot y los repositorios que hay que reescribir. Se completa con [with]. */
-    private class Changed(val snapshot: TasklaneSnapshot, val dirty: Set<RepoKey>)
-
-    private fun Changed.with(remapped: List<Task>) = Reduction(snapshot, dirty, remapped)
-
-    /**
-     * Sustituye **una** tarea conservando el resto tal cual.
-     *
-     * Antes era un `map` sobre la lista entera, y eso era el 69 % del coste de un
-     * comando a 100.000 tareas (2,86 ms de los 4,14 medidos en la Fase 0): `map`
-     * recorre elemento a elemento invocando una lambda y va rellenando un `ArrayList`
-     * que crece. Aquí el recorrido caro se parte en dos pasos que el sistema hace bien:
-     * una búsqueda del índice —comparar `TaskId`, que es un `value class` sobre
-     * `String`— y una copia del array de una sola llamada, que acaba en
-     * `System.arraycopy`.
-     *
-     * Sigue siendo O(n), y lo será hasta la Fase 3: el objetivo de la Fase 1 no es
-     * quitar la linealidad sino la constante, que es de dónde sale el techo de ~100.000
-     * tareas que el plan promete.
-     *
-     * Devolver la MISMA lista cuando nada cambió es lo que deja que el reducer decida
-     * por identidad qué repositorios hay que reescribir.
-     */
-    private inline fun List<Task>.mapTask(id: TaskId, transform: (Task) -> Task): List<Task> {
-        val index = indexOfFirst { it.id == id }
-        if (index < 0) return this
-        val task = this[index]
-        val next = transform(task)
-        if (next === task) return this
-        val copy = ArrayList(this)
-        copy[index] = next
-        return copy
-    }
-
     companion object {
         const val ORIG_STATE = "origStateId"
         const val ORIG_PRIORITY = "origPriorityId"
@@ -502,5 +359,32 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         /** Tareas aparcadas en el fallback por configuración ausente. */
         fun orphans(tasks: List<Task>): List<Task> =
             tasks.filter { ORIG_STATE in it.extra || ORIG_PRIORITY in it.extra }
+
+        /**
+         * Aplica unas mutaciones a una lista de tareas.
+         *
+         * Existe para los tests y el banco: es el almacén de mentira que permite probar
+         * el reducer sin una base de datos, igual que antes se probaba con un snapshot.
+         * **Sólo entiende las mutaciones que llevan filas** —[Mutation.Upsert] y
+         * [Mutation.Delete]—; las de alcance de proyecto se prueban contra SQLite de
+         * verdad en `TaskStoreTest`, que es donde vive su semántica.
+         */
+        fun applyTo(tasks: List<Task>, mutations: List<Mutation>): List<Task> {
+            var out = tasks
+            for (mutation in mutations) {
+                out = when (mutation) {
+                    is Mutation.Upsert -> {
+                        val byId = mutation.tasks.associateBy { it.id }
+                        val kept = out.map { byId[it.id] ?: it }
+                        val fresh = mutation.tasks.filter { task -> out.none { it.id == task.id } }
+                        kept + fresh
+                    }
+
+                    is Mutation.Delete -> out.filterNot { it.id in mutation.ids.toSet() }
+                    else -> out
+                }
+            }
+            return out
+        }
     }
 }

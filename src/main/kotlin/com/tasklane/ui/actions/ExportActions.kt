@@ -27,6 +27,27 @@ internal class ExportSelectionAction : ExportAction(ExportScope.SELECTION) {
     override fun isAvailable(e: AnActionEvent): Boolean = panelOf(e)?.selectedTasks()?.isNotEmpty() == true
 }
 
+/**
+ * Saca las tareas del repositorio activo a un `tasks.xml`, en el formato de siempre.
+ *
+ * Es la puerta de salida de la Fase 3: las tareas viven en una base SQLite y esto las
+ * devuelve a un fichero de texto que otra versión del plugin —o cualquiera— sabe leer.
+ * No es una exportación «para pegar» como las demás de este menú, y por eso va detrás
+ * de un separador: escribe un fichero y dice dónde.
+ */
+internal class ExportXmlAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = panelOf(e)?.activeRepository != null
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val repo = panelOf(e)?.activeRepository?.key ?: return
+        ExportService.getInstance(project).exportXml(repo)
+    }
+}
+
 internal abstract class ExportAction(private val scope: ExportScope) : PanelAction() {
 
     protected open fun isAvailable(e: AnActionEvent): Boolean = panelOf(e) != null
@@ -38,7 +59,7 @@ internal abstract class ExportAction(private val scope: ExportScope) : PanelActi
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val panel = panelOf(e) ?: return
-        ExportService.getInstance(project).copy(panel.exportSections(scope))
+        ExportService.getInstance(project).copy(panel.exportRequest(scope))
     }
 }
 

@@ -9,6 +9,59 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.0.0] — Las tareas se mudan a una base de datos
+
+La **Fase 3** del plan de escala (`docs/plan-escala.md`): las tareas dejan de vivir en
+un `tasks.xml` que se leía entero al abrir y se reescribía entero al guardar, y pasan a
+una base SQLite local. El cambio no se ve —la ventana, el orden, los grupos y los
+contadores son los mismos— y se nota en todo: un proyecto con cien mil tareas abre en
+**9 ms** en vez de tres segundos, y el plugin ocupa **2,5 MB de memoria** en vez de
+1,3 GB.
+
+**Es una versión mayor porque cambia el formato de los datos.** La migración es
+automática, ocurre una vez y en segundo plano, y **el `tasks.xml` no se borra**: se deja
+al lado como `tasks.xml.migrated`. Volver a la 1.6.0 es quitarle ese sufijo. Y hay una
+puerta de salida permanente en *Copiar → Export Repository to XML*, que devuelve las
+tareas al formato de intercambio cuando se quiera.
+
+### Añadido
+- **Las tareas viven en `.idea/tasklane/tasklane.db`**, una base SQLite —la que ya trae
+  el propio IDE— con índices, paginación y búsqueda de texto completo. Un fichero por
+  proyecto, con una columna que dice de qué repositorio es cada tarea.
+- **La migración desde `tasks.xml`** va en segundo plano, con barra de progreso, se
+  puede cancelar y **se reanuda** si se cierra el IDE a medias. La lista se va llenando
+  mientras ocurre en vez de esperar a que termine.
+- **Nueva acción *Export Repository to XML***, en el menú de copiar: escribe las tareas
+  del repositorio activo de vuelta a `tasks.xml`, en el formato de siempre. El dato no
+  queda secuestrado dentro de la base.
+
+### Cambiado
+- **Abrir un proyecto ya no lee las tareas.** Antes se cargaba el fichero entero antes
+  de pintar nada; ahora la ventana pide **la página que se ve**. Con 100.000 tareas,
+  abrir y pintar pasa de **3.027 ms a 9,2 ms**.
+- **La memoria del plugin deja de crecer con el proyecto.** Medido: **2,5 MB** con
+  100.000 tareas, contra los 1,3 GB que costaba tener el modelo vivo en memoria. Y es la
+  misma cifra con diez mil que con un millón.
+- **Guardar es una transacción, no un volcado.** Editar una tarea escribía el fichero
+  completo —1.168 ms con 100.000 tareas— detrás de un retardo de medio segundo. Ahora
+  son **0,44 ms** y sin retardo: lo que se acaba de escribir ya está en disco, así que
+  un cierre inesperado del IDE no se lleva por delante lo último que se tecleó.
+- **Buscar usa un índice de texto en vez de recorrer las tareas.** Con 100.000, la peor
+  consulta posible —una palabra que está en casi todas— pasa de **115 ms a 40 ms**, y
+  las normales son instantáneas.
+- **Borrar un estado con tareas dentro es inmediato**, por muchas que tenga: deja de ser
+  una pasada por todas para pasar a ser una sola instrucción a la base.
+- **Marcar las líneas del editor** ya no recorre el proyecto entero cada vez que cambia
+  algo: pregunta por el fichero abierto.
+
+### Corregido
+- **Un `tasks.xml` ilegible ya no dejaba el repositorio en blanco hasta la copia de
+  seguridad.** Ahora lo que se pudo leer del fichero entra igualmente, y sólo lo que
+  falta se busca en el `.bak`.
+- Un repositorio muy grande podía abrir bien y **morirse al mirarlo**, porque pintar la
+  lista por primera vez materializaba el texto de todas las tareas. Ya no hay nada que
+  materializar.
+
 ## [1.6.0] — La lista deja de pesar lo que pesa el proyecto
 
 La **Fase 2** del plan de escala (`docs/plan-escala.md`): la ventana carga la lista a

@@ -11,9 +11,14 @@ import com.tasklane.domain.model.TaskId
  * Es la costura de la Fase 2 (`docs/plan-escala.md` §3, Fase 2.1) y existe por el
  * mismo motivo que existe `TaskSearchIndex`: el panel tiene que poder dejar de pedir
  * «la lista» y pasar a pedir «una página» **antes** de que haya una base de datos
- * detrás. Hoy la implementación es [InMemoryPager], que ordena y agrupa el snapshot
- * que ya estaba en memoria; en la Fase 3 se sustituye por una sobre SQLite y la UI no
- * se entera —el `LIMIT` y el cursor ya están en esta forma—.
+ * detrás. La costura cumplió en la Fase 3: entró
+ * `com.tasklane.data.sqlite.SqlitePager` —índice y `LIMIT`— y no hubo que tocar una
+ * línea de la UI.
+ *
+ * Hay **dos** implementaciones vivas, y el reparto es el mismo de siempre: SQL para lo
+ * que no cabe —la lista de una pestaña—, Kotlin para lo que está acotado por su propia
+ * naturaleza —los doscientos aciertos de una búsqueda, lo vencido—, que es lo que
+ * pagina [MemoryPager].
  *
  * Lo que el contrato promete, y lo que hace que la ventana no se congele: **ninguna
  * llamada de aquí devuelve más de [PageQuery.limit] tareas**, y [counts] y [outline]
@@ -95,11 +100,11 @@ internal interface TaskPager {
 /**
  * Por dónde continúa una página.
  *
- * Opaco a propósito: quien lo recibe sólo lo guarda y lo devuelve. Hoy es una posición
- * dentro de una lista ya ordenada; en la Fase 3 será la tupla del orden
- * (`bookmarked, priority_rank, updated_at, id`) con la que la consulta pagina sin
- * `OFFSET`. Que el panel no pueda mirar dentro es lo que permite cambiar una cosa por
- * la otra sin tocar la UI.
+ * Opaco a propósito: quien lo recibe sólo lo guarda y lo devuelve. En [MemoryPager] es
+ * una posición dentro de una lista ya ordenada; en `SqlitePager` es la tupla del orden
+ * —`(bookmarked, priority_rank, sort_date, seq)`, más cuántas filas quedaron detrás—
+ * con la que la consulta pagina sin `OFFSET`. Que el panel no pueda mirar dentro es lo
+ * que permitió cambiar una cosa por la otra sin tocar la UI.
  */
 internal interface Cursor
 

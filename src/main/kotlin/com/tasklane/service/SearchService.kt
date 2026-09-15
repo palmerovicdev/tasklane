@@ -11,7 +11,7 @@ import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.domain.query.QueryParser
 import com.tasklane.domain.query.TaskQuery
-import com.tasklane.search.LinearScanIndex
+import com.tasklane.search.SearchCorpus
 import com.tasklane.search.SearchScope
 import com.tasklane.search.TaskSearchIndex
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +42,16 @@ data class SearchResults(
     /** `TaskId` → puntuación, o `null` si no hay consulta. */
     val matches: Map<TaskId, Int>?,
     /**
+     * Las tareas que casaron, como mucho doscientas.
+     *
+     * Están aquí desde la Fase 3 y es un cambio de reparto, no un añadido: buscando, el
+     * universo de la ventana **es** el resultado de la búsqueda, y quien lo tiene ya
+     * leído es el índice. Antes la lista se sacaba del corpus en memoria filtrando por
+     * [matches]; sin corpus, traerlas dos veces sería pedirle a SQLite las mismas
+     * doscientas filas que acaba de devolver.
+     */
+    val tasks: List<com.tasklane.domain.model.Task> = emptyList(),
+    /**
      * Matcher para resaltar, construido una vez por consulta y no una por fila. Va
      * aquí y no en el renderer porque construirlo cuesta, y el renderer se invoca
      * una vez por fila visible en cada repintado.
@@ -55,7 +65,7 @@ data class SearchResults(
     fun accepts(id: TaskId): Boolean = matches?.containsKey(id) ?: true
 
     companion object {
-        val NONE = SearchResults("", TaskQuery.EMPTY, null, null)
+        val NONE = SearchResults("", TaskQuery.EMPTY, null, emptyList(), null)
     }
 }
 
@@ -77,9 +87,9 @@ class SearchService(
     scope: CoroutineScope,
 ) {
 
-    private val index: TaskSearchIndex = LinearScanIndex()
     private val workspace = TasklaneWorkspaceService.getInstance(project)
     private val tasks = TaskService.getInstance(project)
+    private val index: TaskSearchIndex = tasks.searchIndex
     private val metrics = TasklaneMetrics.getInstance(project)
 
     private val _rawQuery = MutableStateFlow("")
@@ -94,15 +104,16 @@ class SearchService(
     val results: StateFlow<SearchResults> =
         combine(_rawQuery.debounce(DEBOUNCE), _allRepos, tasks.snapshot, ::Input)
             .mapLatest { input ->
-                // El corpus se refresca aquí dentro, en el mismo hilo que va a
+                // El contexto se refresca aquí dentro, en el mismo hilo que va a
                 // buscar. Hacerlo en una corrutina aparte abriría una ventana en la
-                // que los resultados hablan de un snapshot y el árbol pinta otro.
-                // Los dos dentro del mismo cronometro: `setCorpus` recorre el corpus
-                // entero en CADA snapshot (§1.5), asi que separarlos escondería la
-                // mitad del coste de una tecla justo en el informe que existe para
-                // enseñarlo.
+                // que los resultados hablan de una configuración y el árbol pinta otra.
+                //
+                // Desde la Fase 3 esto ya no es el corpus: son los nombres que hay que
+                // traducir a ids —`state:`, `p:`, `repo:`—. El índice invertido vive en
+                // disco, así que lo que antes costaba 8 ms por tecla a 100.000 tareas
+                // ahora es copiar dos referencias.
                 metrics.time(TasklaneMetrics.Op.SEARCH) {
-                    index.setCorpus(input.snapshot)
+                    index.setCorpus(SearchCorpus(input.snapshot.config, input.snapshot.repositories))
                     compute(input)
                 }
             }
@@ -127,10 +138,14 @@ class SearchService(
         val searchScope =
             if (input.allRepos) SearchScope.All else SearchScope.Repo(input.snapshot.activeRepo)
 
+        val found = index.search(query, searchScope)
         return SearchResults(
             raw = input.raw,
             query = query,
-            matches = index.search(query, searchScope).associate { it.task.id to it.score },
+            matches = found.associate { it.task.id to it.score },
+            // Buscando, el universo de la ventana ES el resultado: quien lo tiene ya
+            // leído es el índice, así que se pasa en vez de volver a pedirlo.
+            tasks = found.map { it.task },
             // Se resalta sólo el texto libre: subrayar las letras de `state:` dentro
             // del título sería ruido, porque ese operador no es lo que se buscaba.
             highlighter = query.text

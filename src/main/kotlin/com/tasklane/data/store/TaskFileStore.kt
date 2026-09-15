@@ -14,7 +14,23 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
 /**
- * Lectura y escritura de las tareas, un fichero por repositorio.
+ * El lado **XML** del almacén: el formato de intercambio, no el almacén.
+ *
+ * Hasta la 1.6.0 esto era el almacén entero —se leía el fichero al abrir y se reescribía
+ * completo en cada volcado—. Desde la Fase 3 las tareas viven en `tasklane.db` y esta
+ * clase conserva dos trabajos, los dos vivos:
+ *
+ * - **[write] es la exportación.** Es lo que respalda *Export Repository to XML* y la
+ *   promesa del §3.3 del plan de escala: que el dato pueda salir a un fichero de texto
+ *   es lo que hace que mudarse a una base no sea un viaje de ida.
+ * - **[delete] borra el directorio de un repositorio**, que es la mitad destructiva de
+ *   «Exportar y quitar».
+ *
+ * [read] ya no la llama nadie en producción —importar un `tasks.xml` se hace en
+ * *streaming* con `TasksXmlReader`, porque un fichero de 2,9 GB no cabe en un DOM— y se
+ * queda a propósito: es el decodificador de referencia con el que sus tests comprueban
+ * que lo que [write] escribe se vuelve a leer igual. Una exportación que no se pueda
+ * volver a importar no es una exportación.
  *
  * Todo el IO de esta clase es bloqueante y debe invocarse desde `Dispatchers.IO`.
  * No usa la VFS a propósito: estos ficheros son datos del plugin, no fuentes del

@@ -7,44 +7,77 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task as ProgressTask
 import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneWorkspaceService
-import com.tasklane.data.store.LoadAlert
+import com.tasklane.data.sqlite.Fts5Index
+import com.tasklane.data.sqlite.SqlitePager
+import com.tasklane.data.sqlite.TaskDb
+import com.tasklane.data.sqlite.TaskStore
+import com.tasklane.data.sqlite.TasksXmlReader
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
-import com.tasklane.data.store.alert
+import com.tasklane.data.store.TasksCodec
+import com.tasklane.diagnostics.TaskStats
 import com.tasklane.diagnostics.TasklaneMetrics
+import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
+import com.tasklane.domain.model.AnchoredTask
+import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
+import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.paging.MemoryPager
+import com.tasklane.search.LinearScanIndex
+import com.tasklane.search.TaskSearchIndex
+import com.tasklane.paging.TaskPager
 import com.tasklane.repo.RepositoryRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.time.Instant
 import java.util.Collections
-import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Punto único de mutación del modelo y única capa que habla con el almacén.
  *
- * La UI observa [snapshot] y envía comandos con [apply]; nunca toca [TaskFileStore].
+ * La UI observa [snapshot], envía comandos con [apply] y pide **páginas** con [pager];
+ * nunca toca [TaskStore].
  *
- * El [CoroutineScope] lo inyecta la plataforma y se cancela al cerrar el proyecto,
- * así que no hay que desregistrar nada a mano.
+ * ## Lo que la Fase 3 cambió aquí
+ *
+ * 1. **El servicio ya no guarda las tareas.** [snapshot] describe la ventana
+ *    —configuración, repositorios, cuál está activo— y lleva un número de revisión que
+ *    sube con cada escritura. Las tareas viven en `tasklane.db` y se piden por páginas.
+ * 2. **Un comando es una transacción.** Se leen del almacén **sólo las tareas que el
+ *    comando nombra**, el reducer planifica, y el almacén aplica. Todo dentro de la
+ *    misma transacción, que es lo que hace que leer-modificar-escribir sea atómico sin
+ *    el bucle de *compare-and-set* que hacía falta cuando el modelo vivía en un
+ *    `StateFlow`.
+ * 3. **Desapareció el debounce de 500 ms.** Existía porque cada volcado reescribía el
+ *    fichero entero; con WAL, confirmar es escribir las páginas que cambiaron al final
+ *    de un fichero secuencial. Quitarlo arregla de paso lo que costaba: hasta medio
+ *    segundo de ediciones perdidas si el IDE se caía.
+ * 4. **Cargar se convirtió en migrar.** Abrir un repositorio ya no lee su `tasks.xml`:
+ *    la primera vez lo **importa** a la base, en segundo plano y con progreso, y a
+ *    partir de ahí el fichero sólo se conserva como vuelta atrás.
  */
 @Service(Service.Level.PROJECT)
 class TaskService(
@@ -53,8 +86,34 @@ class TaskService(
 ) : Disposable {
 
     private val layout = StorageLayout.forProject(project)
-    private val store = layout?.let(::TaskFileStore)
+
+    /** El lado XML: exportar al formato de intercambio y borrar el directorio de un repo. */
+    private val files = layout?.let(::TaskFileStore)
+    /**
+     * La base, y **el `.gitignore` antes que ella**.
+     *
+     * Hasta la Fase 2 el `.gitignore` con `*` lo escribía la primera escritura de un
+     * `tasks.xml`; ahora el primer fichero que aparece en `.idea/tasklane/` es
+     * `tasklane.db`, y si el marcador no estuviera ya puesto, la base —y su diario, y
+     * sus adjuntos— acabarían en el `git status` del usuario.
+     */
+    private val db: TaskDb? = layout?.let {
+        runCatching { it.ensureIgnored() }.onFailure { e ->
+            thisLogger().warn("Tasklane: no se pudo escribir el .gitignore de los datos", e)
+        }
+        TaskDb.open(it.root)
+    }
+    private val store: TaskStore? = db?.let(::TaskStore)
     private val reducer = TaskReducer()
+
+    /**
+     * El índice de búsqueda del proyecto.
+     *
+     * Lo crea el servicio y no [SearchService] porque quien tiene la conexión es quien
+     * tiene la base. Sin base —un *default project*, un test ligero— se cae al escaneo
+     * lineal sobre un corpus vacío, que es exactamente «no hay nada que buscar».
+     */
+    internal val searchIndex: TaskSearchIndex = db?.let { Fts5Index(it.reader) } ?: LinearScanIndex()
     private val configService = TasklaneConfigService.getInstance(project)
     private val registry = RepositoryRegistry.getInstance(project)
     private val workspace = TasklaneWorkspaceService.getInstance(project)
@@ -79,40 +138,32 @@ class TaskService(
      * **`replay = 1` porque la ventana puede no existir todavía.** Sus pestañas se
      * construyen al abrirla por primera vez y se suscriben desde una corrutina, así que
      * una petición hecha justo al abrirla —que es lo que hace el clic de una marca— se
-     * perdería entre la construcción y la suscripción. Con el replay, la pestaña recién
-     * nacida la recibe igual. Lo que puede resucitar es la última petición cuando se crea
-     * una pestaña nueva por haber añadido un estado en *Settings*; ahí la tarea no es de
-     * ese estado y la pestaña la ignora, que es lo que ya hacía con las ajenas.
+     * perdería entre la construcción y la suscripción.
      */
     private val _reveal = MutableSharedFlow<Set<TaskId>>(replay = 1, extraBufferCapacity = 8)
     val reveal: SharedFlow<Set<TaskId>> = _reveal.asSharedFlow()
 
-    /** Repos con cambios sin volcar. Se acumulan aquí y el debounce solo da la señal. */
-    private val dirty: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
-    private val saveSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 64)
-
-    /** Repos abiertos en solo lectura por venir de una versión futura del esquema. */
+    /** Repos cuyo `tasks.xml` viene de una versión futura del formato. */
     private val readOnly: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
 
-    /**
-     * Repos cuya lectura ya se ha lanzado. Es lo que impide que dos emisiones
-     * seguidas del registro —abrir el proyecto dispara varias— lean el mismo
-     * fichero dos veces en paralelo.
-     */
-    private val requested: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
+    /** Repos cuya migración ya se ha lanzado, para no lanzarla dos veces. */
+    private val importing: MutableSet<RepoKey> = Collections.synchronizedSet(mutableSetOf())
 
-    @OptIn(FlowPreview::class)
-    private fun startSaveLoop() {
-        scope.launch(Dispatchers.IO) {
-            saveSignal.debounce(SAVE_DEBOUNCE).collect { flushAll() }
-        }
-    }
+    /**
+     * Un comando cada vez.
+     *
+     * Hay dos productores reales —el hilo de interfaz y las corrutinas de fondo que
+     * recogen la configuración y el catálogo— y cada comando es un leer-modificar-escribir
+     * sobre [_snapshot]. Hasta la Fase 2 eso se resolvía con un bucle de *compare-and-set*
+     * porque el snapshot **era** el modelo; ahora el modelo lo guarda el almacén, que ya
+     * serializa sus transacciones, y lo único que queda por proteger es que dos comandos
+     * no se pisen la vista. Un cerrojo dice eso mismo en una línea.
+     */
+    private val gate = Any()
 
     init {
-        startSaveLoop()
-        // La selección guardada se restaura ANTES de que llegue el catálogo: así el
-        // primer `loadPending` ya sabe cuál es el repositorio que hay que leer
-        // primero, y la tool window no llega a pintar el equivocado.
+        // La selección guardada se restaura ANTES de que llegue el catálogo: así la
+        // tool window no llega a pintar el repositorio equivocado.
         workspace.selectedRepo?.let { apply(TaskCommand.SelectRepo(RepoKey(it))) }
         // La configuración entra en el modelo como un comando más. El primer valor
         // que emite el StateFlow es el que ya se sembró arriba, así que es inocuo.
@@ -120,7 +171,7 @@ class TaskService(
         scope.launch(Dispatchers.IO) {
             registry.repositories.collect { repositories ->
                 apply(TaskCommand.RepositoriesChanged(repositories))
-                loadPending()
+                importPending()
             }
         }
     }
@@ -129,26 +180,110 @@ class TaskService(
 
     fun apply(command: TaskCommand) = metrics.time(TasklaneMetrics.Op.COMMAND) { applyNow(command) }
 
-    private fun applyNow(command: TaskCommand) {
-        var before: TasklaneSnapshot
-        var result: TaskReducer.Reduction
-        // Bucle de compare-and-set: hay dos productores reales —el EDT y la carga en
-        // Dispatchers.IO— y un leer-modificar-escribir suelto perdería comandos.
-        do {
-            before = _snapshot.value
-            result = reducer.plan(before, command)
-            if (result.snapshot === before) return
-        } while (!_snapshot.compareAndSet(before, result.snapshot))
+    private fun applyNow(command: TaskCommand) = synchronized(gate) { applyLocked(command) }
 
-        // El reducer ya sabe qué hizo, así que aquí no se deduce nada: antes esto
-        // aplanaba el snapshot entero dos veces para descubrir las tareas aparcadas y
-        // comparaba las listas de todos los repositorios para descubrir cuáles
-        // reescribir. Ver `TaskReducer.Reduction`.
-        if (result.remapped.isNotEmpty()) reportRemapped(result.remapped)
-        markDirty(result.dirty)
+    private fun applyLocked(command: TaskCommand) {
+        val before = _snapshot.value
+        val view = reducer.view(before, command)
+        val store = store
+
+        if (store == null || store.readOnly || isReadOnly(command)) {
+            if (view !== before) _snapshot.value = view
+            return
+        }
+
+        val repo = (command as? RepoScoped)?.repo ?: before.activeRepo
+
+        // Leer el sujeto, planificar y escribir, todo dentro de la misma transacción.
+        // Es lo que sustituye al bucle de compare-and-set: la atomicidad la da ahora
+        // quien de verdad guarda el dato.
+        val applied = metrics.time(TasklaneMetrics.Op.SAVE) {
+            runCatching {
+                store.write {
+                    val subject = TaskReducer.Subject(
+                        // La configuración de **antes** del comando, no la de después.
+                        // Importa en un solo caso y ahí lo es todo: `ConfigChanged`
+                        // devuelve `Renormalize(la anterior)`, que es lo que le permite
+                        // al almacén tocar sólo lo que cambió. Pasándole la nueva, el
+                        // almacén compararía la configuración consigo misma y no
+                        // recolocaría nada.
+                        config = before.config,
+                        tasks = store.tasks(reducer.targetsOf(command)),
+                        nextOrder = { store.nextOrder(repo) },
+                    )
+                    val plan = reducer.plan(subject, command)
+                    if (plan.isEmpty) null else store.apply(plan.config, plan.mutations)
+                }
+            }.onFailure { report(it) }.getOrNull()
+        }
+
+        val touched = applied != null && applied.rows > 0
+        _snapshot.value = if (touched) view.touched() else view
+        applied?.parked?.takeIf { it.count > 0 }?.let(::reportParked)
     }
 
-    fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly
+    /** Un comando sobre un repositorio abierto en solo lectura no se aplica. */
+    private fun isReadOnly(command: TaskCommand): Boolean =
+        command is RepoScoped && command.repo in readOnly
+
+    fun isReadOnly(repo: RepoKey): Boolean = repo in readOnly || store?.readOnly == true
+
+    // ------------------------------------------------------------- lectura
+
+    /**
+     * De dónde saca la ventana sus filas **en este repintado**.
+     *
+     * El reparto es la decisión central de la fase: SQL para lo que no cabe —la lista de
+     * una pestaña— y Kotlin para lo que está acotado por su propia naturaleza. Ver
+     * `SqlitePager` y `MemoryPager`.
+     */
+    internal fun pager(found: SearchResults, filter: TaskFilter, now: Instant): TaskPager {
+        val snapshot = _snapshot.value
+        val db = db
+        val store = store
+        return when {
+            db == null || store == null ->
+                MemoryPager(emptyList(), snapshot.config, found, filter, now)
+
+            // Buscando, el universo son los doscientos aciertos que devolvió FTS5, y el
+            // alcance ya lo aplicó el índice: si el usuario pidió «todos los
+            // repositorios», los de fuera del activo tienen que poder salir.
+            found.active -> MemoryPager(found.tasks, snapshot.config, found, filter, now)
+
+            filter == TaskFilter.OVERDUE ->
+                MemoryPager(store.overdue(snapshot.activeRepo, now), snapshot.config, found, filter, now)
+
+            else -> SqlitePager(db.reader, snapshot.activeRepo, snapshot.config, filter, now)
+        }
+    }
+
+    /** Una tarea por id. La pide la ventana para saber si una petición de enseñar es suya. */
+    fun task(id: TaskId): Task? = store?.task(id)
+
+    /** Todo lo de un repositorio. Sólo la exportación, que es O(n) por definición. */
+    fun tasksOf(repo: RepoKey): List<Task> = store?.allOf(repo).orEmpty()
+
+    /** Qué tareas cuelgan de un fichero. Es el §3.6: un salto de índice, no el modelo entero. */
+    fun anchorsIn(path: String): List<AnchoredTask> = store?.anchorsIn(path).orEmpty()
+
+    /** Los adjuntos que alguna tarea sigue nombrando. Lo pregunta el recolector. */
+    fun referencedBlobs(repo: RepoKey): Set<String> = store?.referencedBlobs(repo).orEmpty()
+
+    fun statsOf(repo: RepoKey): TaskStats = store?.statsOf(repo) ?: TaskStats()
+
+    /**
+     * Cuántas tareas hay en cada estado, **sumando todos los repositorios**: la
+     * configuración es del proyecto, no de la pestaña abierta.
+     *
+     * Sale de la tabla `counter`, que son cinco filas. Antes era un recorrido del corpus
+     * por cada fila de la tabla de estados de los ajustes.
+     */
+    fun countsByState(): Map<StateId, Int> = store?.countsByState().orEmpty()
+
+    fun countsByPriority(): Map<PriorityId, Int> = store?.countsByPriority().orEmpty()
+
+    /** Cuántas siguen sin cerrar en un estado. Lo pregunta el ofrecimiento de rellenar `completedAt`. */
+    fun openCountOf(state: StateId): Int = store?.openCountOf(state) ?: 0
 
     /**
      * Cambia el repositorio activo y lo recuerda para la próxima apertura. Pasa por
@@ -160,7 +295,6 @@ class TaskService(
         if (repo == _snapshot.value.activeRepo) return
         apply(TaskCommand.SelectRepo(repo))
         workspace.selectedRepo = repo.value
-        scope.launch(Dispatchers.IO) { loadPending() }
     }
 
     fun requestReveal(ids: Set<TaskId>) {
@@ -172,9 +306,8 @@ class TaskService(
      *
      * Es lo que pide una marca del editor al pulsarla: el fichero no sabe de
      * repositorios, así que la tarea que cuelga de él puede ser de una lista que ni
-     * siquiera está abierta, y una petición de enseñar que cae en un repositorio
-     * inactivo no la atiende nadie. Se cambia sólo si **ninguna** de las tareas está en
-     * el activo: con una que lo esté, cambiar sería llevarse al usuario de su lista para
+     * siquiera está abierta. Se cambia sólo si **ninguna** de las tareas está en el
+     * activo: con una que lo esté, cambiar sería llevarse al usuario de su lista para
      * enseñarle algo que ya podía ver.
      */
     fun revealTasks(tasks: List<Task>) {
@@ -185,181 +318,228 @@ class TaskService(
     }
 
     /**
-     * Saca un repositorio del modelo y borra sus datos del disco. Es la mitad
-     * destructiva de «Exportar y quitar», y quien llama ya ha confirmado con el
-     * usuario y ha dejado el texto en el portapapeles.
-     *
-     * El orden importa: primero se limpia el estado que decide qué se escribe
-     * —`dirty` sobre todo— y sólo después se borra. Al revés, un volcado pendiente
-     * recrearía el `tasks.xml` justo detrás del borrado.
+     * Saca un repositorio del modelo y borra sus datos. Es la mitad destructiva de
+     * «Exportar y quitar», y quien llama ya ha confirmado con el usuario y ha dejado el
+     * texto en el portapapeles.
      */
     fun forgetRepo(repo: RepoKey) {
-        dirty -= repo
-        requested -= repo
+        importing -= repo
         readOnly -= repo
         apply(TaskCommand.ForgetRepo(repo))
         if (workspace.selectedRepo == repo.value) {
             workspace.selectedRepo = _snapshot.value.activeRepo.value
         }
         scope.launch(Dispatchers.IO) {
-            runCatching { store?.delete(repo) }.onFailure { e ->
+            runCatching { files?.delete(repo) }.onFailure { e ->
                 thisLogger().warn("Tasklane: no se pudo borrar el directorio de $repo", e)
-                notify(
-                    "Tasklane: el repositorio se quito de la lista",
-                    "Sus tareas ya estan en el portapapeles, pero no se pudo borrar la carpeta de " +
-                        "datos: ${e.message.orEmpty()}",
-                    NotificationType.WARNING,
-                )
             }
-            // Sin tareas en disco, el catalogo deja de conservar la entrada huerfana.
+            // Sin datos en disco, el catalogo deja de conservar la entrada huerfana.
             registry.refresh()
         }
     }
 
-    /**
-     * Qué repositorios hay que reescribir. Lo dice el reducer, que es quien acaba de
-     * cambiarlos; aquí sólo se descuentan los abiertos en solo lectura, que es lo
-     * único de esta decisión que el reducer no puede saber.
-     *
-     * Sigue sin leerse del comando, y por la misma razón de siempre: hay comandos
-     * —cambio de configuración, reasignación— que tocan varios repositorios a la vez y
-     * pueden no cambiar nada en alguno de ellos.
-     */
-    private fun markDirty(changed: Set<RepoKey>) {
-        val writable = changed.filterNot { it in readOnly }
-        if (writable.isEmpty()) return
-        dirty += writable
-        saveSignal.tryEmit(Unit)
-    }
-
-    // ---------------------------------------------------------------- carga
+    // --------------------------------------------------------------- migración
 
     /**
-     * Lee los repositorios que aún no están en memoria, **el activo primero**: es el
-     * único que se está mirando y el que decide cuándo deja de verse vacía la
-     * ventana.
+     * Importa a la base los `tasks.xml` que queden, uno por repositorio.
      *
-     * Los demás se leen a continuación en vez de esperar a que alguien los abra,
-     * porque hay comandos de alcance de proyecto —reasignar un estado al borrarlo—
-     * que actúan sobre el snapshot entero: un repositorio sin leer se los perdería y
-     * sus tareas acabarían remapeadas al estado por defecto en lugar de al que el
-     * usuario eligió.
+     * **En segundo plano, cancelable y reanudable.** Un fichero de 2,9 GB no se puede
+     * meter en un DOM —ver `TasksXmlReader`— ni se puede importar dentro de una sola
+     * transacción, así que va a tandas de dos mil tareas; cada tanda se confirma con su
+     * propia marca de progreso, y si el IDE se cierra a mitad, la siguiente apertura
+     * continúa por donde iba.
+     *
+     * **El `tasks.xml` no se borra**: al terminar se renombra a `tasks.xml.migrated`.
+     * La vuelta atrás es renombrarlo.
      */
-    private suspend fun loadPending() {
-        val snapshot = _snapshot.value
-        val order = snapshot.repositories
+    private fun importPending() {
+        val store = store ?: return
+        val layout = layout ?: return
+        if (store.readOnly) return
+
+        val pending = _snapshot.value.repositories
             .map { it.key }
-            .sortedByDescending { it == snapshot.activeRepo }
-        for (repo in order) {
-            if (repo in snapshot.tasksByRepo) continue
-            if (!requested.add(repo)) continue
-            load(repo)
-        }
+            .filter { it !in importing && !store.isImported(it) && Files.exists(layout.tasksFile(it)) }
+        if (pending.isEmpty()) return
+
+        importing.addAll(pending)
+        synchronized(gate) { _snapshot.value = _snapshot.value.let { it.copy(loading = it.loading + pending) } }
+
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(project, TasklaneBundle.message("migrate.progress"), true) {
+                override fun run(indicator: ProgressIndicator) {
+                    for (repo in pending) {
+                        // Un repositorio que falle no puede llevarse por delante a los
+                        // demás, ni dejar la marca de «importando» puesta para siempre.
+                        // Lo ya confirmado sigue confirmado: WAL no deshace tandas.
+                        runCatching { importRepo(repo, indicator) }
+                            .onFailure { thisLogger().warn("Tasklane: fallo importando $repo", it) }
+                    }
+                }
+
+                override fun onFinished() {
+                    importing.removeAll(pending.toSet())
+                    synchronized(gate) {
+                        _snapshot.value = _snapshot.value.let { it.copy(loading = it.loading - pending) }.touched()
+                    }
+                }
+            },
+        )
     }
 
-    private suspend fun load(repo: RepoKey) {
-        val store = store ?: run {
-            // Proyecto sin directorio base (default project, tests ligeros).
-            apply(TaskCommand.Loaded(repo, emptyList()))
-            return
+    private fun importRepo(repo: RepoKey, indicator: ProgressIndicator) {
+        val store = store ?: return
+        val layout = layout ?: return
+        val file = layout.tasksFile(repo)
+        val config = _snapshot.value.config
+
+        indicator.text = TasklaneBundle.message("migrate.repo", repo.value)
+        val total = TasksXmlReader.count(file).coerceAtLeast(1)
+        var written = store.importedCount(repo)
+
+        val result = metrics.time(TasklaneMetrics.Op.LOAD) {
+            store.bulk {
+                TasksXmlReader.read(file, repo, skip = written, cancelled = { indicator.isCanceled }) { chunk ->
+                    store.write {
+                        store.importBatch(chunk, config)
+                        written += chunk.size
+                        store.markImported(repo, TasksCodec.CURRENT_VERSION, written, false, nowMillis())
+                    }
+                    indicator.fraction = written.toDouble() / total
+                    // La ventana se va llenando mientras se importa: cada tanda
+                    // confirmada es una lista un poco más larga, no una pantalla en
+                    // blanco de un minuto.
+                    synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
+                }
+            }
         }
 
-        val result = metrics.time(TasklaneMetrics.Op.LOAD) { store.read(repo) }
-        val alert = result.alert()
-        if (alert?.readOnly == true) readOnly += repo
-        alert?.let(::report)
+        when (result) {
+            is TasksXmlReader.Result.Done -> {
+                store.write { store.markImported(repo, result.version, written, complete = true, at = nowMillis()) }
+                val archived = archive(file)
+                // Se avisa a propósito, aunque haya salido bien. Cambiar el formato de
+                // los datos de alguien sin decírselo es lo contrario de lo que hace este
+                // plugin con los ficheros corruptos, y aquí además hay algo que el
+                // usuario necesita saber: dónde quedó el original y que renombrarlo es
+                // la vuelta atrás.
+                if (written > 0) {
+                    notify(
+                        TasklaneBundle.message("migrate.done.title"),
+                        TasklaneBundle.message("migrate.done.content", written, archived),
+                        NotificationType.INFORMATION,
+                    )
+                }
+            }
 
-        // `tasks` esta definido en las cuatro ramas de ReadResult, asi que la carga
-        // es uniforme: un fichero corrupto del que se recupero algo no pierde nada.
-        apply(TaskCommand.Loaded(repo, result.tasks))
+            is TasksXmlReader.Result.FutureVersion -> {
+                // Exactamente lo que hacía `TaskFileStore`: no se toca y se avisa.
+                readOnly += repo
+                notify(
+                    TasklaneBundle.message("notification.readOnly.title"),
+                    TasklaneBundle.message("notification.readOnly.content", result.version),
+                    NotificationType.WARNING,
+                )
+            }
+
+            is TasksXmlReader.Result.Broken -> recover(repo, file, written, result)
+            is TasksXmlReader.Result.Cancelled -> Unit
+        }
     }
 
     /**
-     * El aviso de [LoadAlert] escrito y lanzado. La decision de **que** avisar vive en
-     * [alert], que es pura y se prueba sin IDE; aqui solo queda ponerle palabras.
+     * El fichero se rompió por el camino. Lo importado hasta ahí ya está confirmado —a
+     * diferencia de antes, cuando un XML ilegible dejaba el repositorio entero en
+     * blanco—, así que lo que queda es intentar el `.bak` y contarlo.
      */
-    private fun report(alert: LoadAlert) = when (alert) {
-        is LoadAlert.FutureFormat -> notify(
-            TasklaneBundle.message("notification.readOnly.title"),
-            TasklaneBundle.message("notification.readOnly.content", alert.version),
-            NotificationType.WARNING,
-        )
+    private fun recover(repo: RepoKey, file: Path, written: Int, broken: TasksXmlReader.Result.Broken) {
+        val store = store ?: return
+        val layout = layout ?: return
+        thisLogger().warn("Tasklane: $file no se pudo leer entero", broken.cause)
 
-        is LoadAlert.Recovered -> notify(
-            TasklaneBundle.message("notification.corrupt.title"),
-            corruptContent(TasklaneBundle.message("notification.corrupt.recovered", alert.tasks), alert.quarantinedAt),
-            NotificationType.ERROR,
-        )
+        val backup = layout.backupFile(repo)
+        var recovered = 0
+        if (written == 0 && Files.exists(backup)) {
+            val config = _snapshot.value.config
+            TasksXmlReader.read(backup, repo) { chunk ->
+                store.write {
+                    store.importBatch(chunk, config)
+                    recovered += chunk.size
+                }
+            }
+        }
+        val quarantined = runCatching {
+            val target = layout.corruptFile(repo, nowMillis())
+            Files.move(file, target, StandardCopyOption.REPLACE_EXISTING)
+            target
+        }.getOrNull()
+        store.write { store.markImported(repo, TasksCodec.CURRENT_VERSION, written + recovered, true, nowMillis()) }
 
-        is LoadAlert.Lost -> notify(
+        val head = if (written + recovered > 0) {
+            TasklaneBundle.message("notification.corrupt.recovered", written + recovered)
+        } else {
+            TasklaneBundle.message("notification.corrupt.lost")
+        }
+        notify(
             TasklaneBundle.message("notification.corrupt.title"),
-            corruptContent(TasklaneBundle.message("notification.corrupt.lost"), alert.quarantinedAt),
+            quarantined?.let { "$head ${TasklaneBundle.message("notification.corrupt.quarantined", it)}" } ?: head,
             NotificationType.ERROR,
         )
     }
 
-    /** Donde quedo el fichero ilegible, si se pudo apartar: es por donde se empieza a mirar. */
-    private fun corruptContent(head: String, quarantinedAt: java.nio.file.Path?): String =
-        quarantinedAt?.let { "$head ${TasklaneBundle.message("notification.corrupt.quarantined", it)}" } ?: head
+    /**
+     * El original se conserva. La vuelta atrás es quitarle el sufijo.
+     *
+     * Devuelve dónde quedó, que es lo que se le dice al usuario. Si no se pudo mover
+     * —permisos, un volumen de red— se devuelve el sitio de siempre y no se toca nada
+     * más: el fichero de más es un problema mucho menor que el fichero de menos.
+     */
+    private fun archive(file: Path): String = runCatching {
+        Files.move(
+            file,
+            file.resolveSibling("${file.fileName}${StorageLayout.MIGRATED_SUFFIX}"),
+            StandardCopyOption.REPLACE_EXISTING,
+        ).toString()
+    }.onFailure { thisLogger().warn("Tasklane: no se pudo archivar $file", it) }
+        .getOrDefault(file.toString())
+
+    private fun nowMillis(): Long = Instant.now().toEpochMilli()
 
     // ----------------------------------------------- configuracion desincronizada
 
     /**
-     * Avisa de las tareas que el reducer acaba de aparcar en el estado por defecto
-     * por apuntar a configuración inexistente. No es un error recuperable en
-     * silencio: el usuario ve sus tareas en un sitio que no eligió, y merece saber
+     * Avisa de las tareas que se acaban de aparcar en el estado o la prioridad por
+     * defecto por apuntar a configuración que ya no existe. No es un error recuperable
+     * en silencio: el usuario ve sus tareas en un sitio que no eligió, y merece saber
      * cuántas y cuáles.
-     *
-     * [fresh] son **sólo las nuevas**: el reducer ya descarta las que ya venían
-     * aparcadas, que es lo que este método conseguía antes comparando el conjunto de
-     * huérfanas de antes con el de después.
      */
-    private fun reportRemapped(fresh: List<Task>) {
-        val ids = fresh.map { it.id }.toSet()
+    private fun reportParked(parked: TaskStore.Parked) {
         NotificationGroupManager.getInstance()
             .getNotificationGroup(NOTIFICATION_GROUP)
             .createNotification(
                 TasklaneBundle.message("notification.remapped.title"),
-                TasklaneBundle.message("notification.remapped.content", fresh.size),
+                TasklaneBundle.message("notification.remapped.content", parked.count),
                 NotificationType.WARNING,
             )
             .addAction(
                 NotificationAction.createSimple(TasklaneBundle.message("notification.remapped.action")) {
-                    requestReveal(ids)
+                    requestReveal(parked.ids)
                 },
             )
             .notify(project)
     }
 
-    // ------------------------------------------------------------ escritura
-
-    private suspend fun flushAll() {
-        val store = store ?: return
-        val pending = synchronized(dirty) { dirty.toList().also { dirty.clear() } }
-        val current = _snapshot.value
-        for (repo in pending) {
-            if (repo in readOnly) continue
-            runCatching { metrics.time(TasklaneMetrics.Op.SAVE) { store.write(repo, current.tasksOf(repo)) } }
-                .onFailure { e ->
-                    thisLogger().error("Tasklane: fallo al guardar $repo", e)
-                    notify(
-                        TasklaneBundle.message("notification.save.title"),
-                        TasklaneBundle.message("notification.save.content", e.message.orEmpty()),
-                        NotificationType.ERROR,
-                    )
-                }
-        }
+    private fun report(error: Throwable) {
+        thisLogger().error("Tasklane: fallo al escribir en la base de tareas", error)
+        notify(
+            TasklaneBundle.message("notification.save.title"),
+            TasklaneBundle.message("notification.save.content", error.message.orEmpty()),
+            NotificationType.ERROR,
+        )
     }
 
-    /**
-     * Volcado final. Síncrono a propósito: en este punto el scope del servicio ya
-     * está cancelado, así que una corrutina no llegaría a ejecutarse. La escritura
-     * es de unos pocos KB.
-     */
     override fun dispose() {
-        if (dirty.isEmpty()) return
-        runCatching { runBlocking { flushAll() } }
-            .onFailure { thisLogger().warn("Tasklane: volcado final fallido", it) }
+        db?.close()
     }
 
     private fun notify(title: String, content: String, type: NotificationType) {
@@ -371,7 +551,6 @@ class TaskService(
 
     companion object {
         const val NOTIFICATION_GROUP = "Tasklane"
-        private val SAVE_DEBOUNCE = 500.milliseconds
 
         fun getInstance(project: Project): TaskService = project.service()
     }

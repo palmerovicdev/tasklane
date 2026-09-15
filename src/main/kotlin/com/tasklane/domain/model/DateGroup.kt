@@ -102,6 +102,46 @@ object DateGrouper {
         DateAnchor.COMPLETED -> task.completedAt
     }
 
+    /**
+     * El intervalo `[desde, hasta)` que ocupa un grupo, en milisegundos de época.
+     *
+     * Es la inversa de [groupOf] y existe por la Fase 3: sin corpus en memoria, las
+     * cabeceras no salen de repartir tareas sino de **contar un rango del índice**, y
+     * para contar un rango hay que saber dónde empieza y dónde acaba. Que las dos
+     * funciones vivan juntas es lo que impide que se separen: cualquier cambio en el
+     * reparto obliga a tocar el intervalo en la línea de al lado.
+     *
+     * `hasta` de [DateGroup.Today] es [Long.MAX_VALUE] a propósito, por lo mismo que
+     * [groupOf] manda ahí las fechas futuras: un reloj desajustado o un fichero editado
+     * a mano no pueden crear un grupo por encima de «hoy».
+     *
+     * [DateGroup.Undated] no tiene intervalo —devuelve `null`—: no es un rango de
+     * fechas, es la ausencia de una.
+     */
+    fun rangeOf(
+        group: DateGroup,
+        today: LocalDate,
+        zone: ZoneId,
+        firstDayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
+    ): LongRange? {
+        fun startOf(date: LocalDate): Long = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        return when (group) {
+            is DateGroup.Today -> startOf(today)..Long.MAX_VALUE
+            is DateGroup.Yesterday -> startOf(today.minusDays(1)) until startOf(today)
+            is DateGroup.ThisWeek -> {
+                val start = startOf(today.with(TemporalAdjusters.previousOrSame(firstDayOfWeek)))
+                val end = startOf(today.minusDays(1))
+                if (start >= end) LongRange.EMPTY else start until end
+            }
+
+            is DateGroup.Day -> startOf(group.date) until startOf(group.date.plusDays(1))
+            is DateGroup.Month ->
+                startOf(group.month.atDay(1)) until startOf(group.month.plusMonths(1).atDay(1))
+
+            is DateGroup.Undated -> null
+        }
+    }
+
     fun groupOf(
         instant: Instant?,
         today: LocalDate,

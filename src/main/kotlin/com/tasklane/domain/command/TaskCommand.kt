@@ -5,7 +5,6 @@ import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.StateId
-import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import java.time.Instant
@@ -14,6 +13,12 @@ import java.util.Optional
 /**
  * Todas las mutaciones posibles del modelo. `sealed` a propósito: añadir un caso
  * nuevo rompe la compilación del reducer en vez de pasar desapercibido.
+ *
+ * **Ya no hay un comando de carga.** Hasta la Fase 2 abrir un repositorio emitía un
+ * `Loaded` con su lista entera de tareas, que es lo que metía el corpus en el modelo.
+ * Desde la Fase 3 las tareas ya están en el almacén y la ventana las pide por páginas;
+ * lo único que se «carga» es la migración del `tasks.xml` de una versión anterior, y
+ * ésa escribe en la base, no en el modelo.
  *
  * Se divide en dos familias porque desde la Fase 2 no todo cabe en un repositorio:
  * cambiar la configuración o reasignar un estado que se borra afectan a **todos**
@@ -94,9 +99,6 @@ sealed interface TaskCommand {
     data class ToggleComplete(override val repo: RepoKey, val id: TaskId) : RepoScoped
 
     data class Delete(override val repo: RepoKey, val ids: List<TaskId>) : RepoScoped
-
-    /** Carga inicial desde disco. No es una edición del usuario, no ensucia el repo. */
-    data class Loaded(override val repo: RepoKey, val tasks: List<Task>) : RepoScoped
 
     /**
      * Saca del modelo un repositorio entero. Lo emite «Exportar y quitar», y sólo

@@ -105,6 +105,41 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.0.0 &mdash; your tasks move into a database</h3>
+            <p><b>Tasks no longer live in a <code>tasks.xml</code> that was read whole on
+               open and rewritten whole on save.</b> They live in a local SQLite database
+               &mdash; the one the IDE already ships. Nothing about the window changes:
+               same order, same groups, same counts. Everything about the cost does.</p>
+            <ul>
+              <li><b>Opening a project stops reading your tasks.</b> With 100,000 tasks,
+                  opening the tool window and painting it went from
+                  <b>3,027&nbsp;ms to 9.2&nbsp;ms</b>. The window asks for the page you
+                  can see, not for the list.</li>
+              <li><b>Memory stops growing with the project.</b> Measured: <b>2.5&nbsp;MB</b>
+                  with 100,000 tasks, against the 1.3&nbsp;GB it took to keep the model
+                  alive in memory. It is the same figure with ten thousand as with a
+                  million.</li>
+              <li><b>Saving is a transaction, not a dump.</b> Editing one task used to
+                  rewrite the whole file &mdash; 1,168&nbsp;ms on 100,000 tasks &mdash;
+                  behind a half-second delay. It is now <b>0.44&nbsp;ms</b> and there is
+                  no delay, so an IDE crash no longer takes the last thing you typed.</li>
+              <li><b>Search uses a full-text index</b> instead of walking every task. On
+                  100,000, the worst possible query &mdash; a word present in almost all
+                  of them &mdash; went from 115&nbsp;ms to 40&nbsp;ms.</li>
+              <li><b>Deleting a state with tasks in it is instant</b>, however many it
+                  has: one instruction to the database instead of a pass over all of
+                  them.</li>
+              <li><b>Your old file is kept.</b> The migration runs once, in the
+                  background, with a progress bar, and can be cancelled and resumed. The
+                  old <code>tasks.xml</code> is left beside the database as
+                  <code>tasks.xml.migrated</code> &mdash; renaming it back is how you go
+                  back. And <i>Copy &rarr; Export Repository to XML</i> writes your tasks
+                  out to that format whenever you want, so nothing is locked in.</li>
+              <li>Fixed: an unreadable <code>tasks.xml</code> used to leave the repository
+                  blank until the backup was read. What could be read now gets in anyway,
+                  and only the rest is looked for in the backup.</li>
+            </ul>
+
             <h3>1.6.0 &mdash; the list stops weighing what the project weighs</h3>
             <ul>
               <li><b>Repainting the list no longer depends on how big the project is.</b>

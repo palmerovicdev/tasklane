@@ -497,7 +497,7 @@ puerta y su versión.
 | E0 | Banco de pruebas e instrumentación | `1.5.0` | ✅ |
 | E1 | Quitar los O(n) por comando | `1.5.0` | ✅ |
 | E2 | UI acotada | `1.6.0` | ✅ |
-| E3 | El almacén (SQLite + FTS5) | | |
+| E3 | El almacén (SQLite + FTS5) | `2.0.0` | ✅ |
 | E4 | Adjuntos a escala | | |
 | E5 | Las operaciones grandes | | |
 | E6 | Endurecimiento | | |
@@ -507,7 +507,17 @@ convierte «va lento» en una cifra, y el recorte del trabajo por comando —edi
 tarea sobre 100.000 pasó de 26 ms a 6 ms—. La `1.6.0` cierra la **Fase 2**: la lista se
 carga **a páginas** y el árbol se repinta **por diferencias**, así que abrir la ventana
 sobre un millón de tareas pasa de diez segundos con el IDE congelado a menos de un
-milisegundo. Lo que queda por debajo —cargar, buscar y la memoria— es la Fase 3.
+milisegundo.
+
+La `2.0.0` cierra la **Fase 3**, que es la grande: las tareas dejan el `tasks.xml` que se
+leía entero al abrir y se reescribía entero al guardar, y se mudan a una base **SQLite**
+—la que ya trae el propio IDE, sin empaquetar un byte— con índices, paginación y
+búsqueda de texto completo. Con 100.000 tareas, abrir el proyecto y pintar la lista pasa
+de **3.027 ms a 9,2 ms**, guardar de un volcado de **1.168 ms a una transacción de
+0,44 ms**, y el plugin pasa de ocupar **1,29 GB de memoria a 2,5 MB**. Es una versión
+mayor porque cambia el formato: la migración es automática y en segundo plano, y el
+`tasks.xml` se conserva al lado como `tasks.xml.migrated` — quitarle el sufijo es la
+vuelta atrás. Lo que queda por debajo —las capturas en disco— es la Fase 4.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -546,7 +556,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v1.6.0 && git push origin v1.6.0
+git tag v2.0.0 && git push origin v2.0.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

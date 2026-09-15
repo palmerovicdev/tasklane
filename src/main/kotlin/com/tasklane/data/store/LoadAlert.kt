@@ -6,6 +6,12 @@ import java.nio.file.Path
  * Qué hay que contarle al usuario después de leer el fichero de un repositorio, y si
  * ese repositorio se abre en solo lectura.
  *
+ * **Desde la Fase 3 describe el camino del XML, no el del almacén.** La misma decisión
+ * —versión futura, recuperado del backup, perdido— la toma ahora `TaskService` sobre el
+ * resultado de `TasksXmlReader` al importar, y la base tiene su propia versión futura en
+ * `PRAGMA user_version`. Esto se queda como criterio del lado XML, que es donde sus
+ * tests lo fijan.
+ *
  * Existe separado de quien notifica porque es **el criterio de la Fase 7**: «corromper
  * `tasks.xml` y comprobar que el plugin recupera desde `.bak` y avisa». Recuperar ya
  * se probaba en `TaskFileStoreTest`; avisar no se probaba en ninguna parte, porque la

@@ -2,24 +2,27 @@ package com.tasklane.bench
 
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.ui.CheckedTreeNode
+import com.tasklane.data.sqlite.SqlitePager
+import com.tasklane.data.sqlite.Fts5Index
+import com.tasklane.data.sqlite.TaskDb
+import com.tasklane.data.sqlite.TaskStore
+import com.tasklane.data.sqlite.TasksXmlReader
 import com.tasklane.data.store.TasksCodec
+import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TasklaneConfig
-import com.tasklane.domain.model.TasklaneSnapshot
-import com.tasklane.domain.model.StateId
 import com.tasklane.domain.query.QueryParser
 import com.tasklane.paging.GroupOutline
-import com.tasklane.paging.InMemoryPager
 import com.tasklane.paging.PageQuery
 import com.tasklane.paging.TaskPager
-import com.tasklane.search.LinearScanIndex
+import com.tasklane.search.SearchCorpus
 import com.tasklane.search.SearchScope
-import com.tasklane.service.SearchResults
 import com.tasklane.ui.toolwindow.GroupNode
 import com.tasklane.ui.toolwindow.ListSync
 import com.tasklane.ui.toolwindow.MoreNode
@@ -27,6 +30,7 @@ import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskTreeModel
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
 import org.junit.AfterClass
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume
 import org.junit.Before
@@ -41,32 +45,36 @@ import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 
 /**
- * El banco de la Fase 0 (`docs/plan-escala.md` §0.3). **Convierte cada fila de §1.7 en
- * una cifra medida** en lugar de una estimación de lectura del código.
+ * El banco de escala (`docs/plan-escala.md` §0.3). **Convierte cada fila de las puertas
+ * en una cifra medida** en lugar de una estimación de lectura del código.
  *
  * Se ejecuta a mano y en el job nocturno, nunca en el build normal: un corpus de 100k
  * tarda minutos y reserva gigas, y eso no puede colgar de un `./gradlew test`.
  *
  *     ./gradlew test --tests '*ScaleBenchmark' -PbenchN=10000   -PtestHeap=2g
- *     ./gradlew test --tests '*ScaleBenchmark' -PbenchN=100000  -PtestHeap=6g
- *     ./gradlew test --tests '*ScaleBenchmark' -PbenchN=1000000 -PtestHeap=24g
+ *     ./gradlew test --tests '*ScaleBenchmark' -PbenchN=100000  -PtestHeap=4g
+ *     ./gradlew test --tests '*ScaleBenchmark' -PbenchN=1000000 -PtestHeap=8g
+ *
+ * **Desde la Fase 3 el heap que hace falta para medir baja, y ése es medio resultado.**
+ * Hasta la Fase 2 medir un millón de tareas exigía `-PtestHeap=32g` porque el corpus
+ * tenía que caber en memoria; ahora el corpus vive en `tasklane.db` y lo único que se
+ * materializa es lo que se está mirando.
  *
  * **Se salta con `Assume` y no con `@Ignore`**, aunque el plan dijera `@Ignore`. Son lo
  * mismo para el build normal —sin `-PbenchN` esto no corre— pero `@Ignore` obliga a
  * **editar el fichero** para lanzarlo, y un instrumento que hay que modificar para
- * usarlo es un instrumento que se queda sin usar. Con esto el job nocturno del §6.3 es
- * una línea de Gradle y nada más.
+ * usarlo es un instrumento que se queda sin usar.
  *
- * **Qué mide y qué no.** Todo lo que hay aquí son las piezas **puras** del camino
- * real: el códec, el reducer, el índice, el recuento de la ventana y el árbol de
+ * **Qué mide y qué no.** Todo lo que hay aquí son las piezas **de producción** del
+ * camino real: el almacén, el paginador, el índice de texto, el reducer y el árbol de
  * Swing con su renderer de verdad. Lo que no se puede medir sin arrancar un IDE
  * —`TaskService` y `SearchService` son `@Service(PROJECT)`— se reproduce llamando a
- * exactamente lo que ellos llaman, y los sitios donde eso ocurre están señalados uno
- * a uno. No se mide el IO de la VFS porque el plugin no la usa.
+ * exactamente lo que ellos llaman, y los sitios donde eso ocurre están señalados uno a
+ * uno. No se mide el IO de la VFS porque el plugin no la usa.
  */
 class ScaleBenchmark {
 
-    private val config = TasklaneConfig.DEFAULT
+    private val config = TasklaneConfig.DEFAULT.normalized()
     private val repo = RepoKey.ROOT
     private val reducer = TaskReducer()
 
@@ -78,302 +86,308 @@ class ScaleBenchmark {
         )
     }
 
-    // ------------------------------------------------------------------ escenarios
+    // ======================================================== las puertas de la Fase 3
 
     /**
-     * **§1.2 — lo que revienta primero.** `TaskFileStore.readFile` construye el DOM
-     * entero antes de que exista una sola `Task`, y encima `reduceScoped` pasa las
-     * regex de `LinkExtractor` e `ImageRefParser` sobre todo el texto.
+     * **La puerta: abrir en frío un repositorio de un millón y pintar por debajo de
+     * 300 ms.**
      *
-     * El plan predice `OutOfMemoryError` a ~300.000 tareas con el heap de 2 GB que
-     * trae IntelliJ de fábrica. Si esto muere, **ése es el dato**: se anota el N al
-     * que murió y con cuánto heap.
+     * Lo que se mide es exactamente lo que hace la pestaña al abrirse: construir el
+     * paginador, pedirle los contadores y las cabeceras —fuera del EDT— y sincronizar
+     * el árbol —dentro—. Nada de esto materializa el corpus: los contadores son cinco
+     * filas de `counter` y cada cabecera son dos saltos de índice.
+     *
+     * Se abre **una conexión nueva en cada vuelta**, porque medir con la caché de
+     * páginas de SQLite ya caliente sería medir la segunda apertura y no la primera.
      */
     @Test
-    fun `carga en frio`() {
-        val file = corpusFile()
-        val result = Bench.measure("carga en frio: JDOM + decode + normalize", runs = 3, warmup = 1) {
-            val decoded = TasksCodec.decode(JDOMUtil.load(file), repo)
-            // Exactamente lo que hace TaskService.load -> apply(Loaded) -> reduceScoped.
-            val snapshot = reducer.reduce(base(), TaskCommand.Loaded(repo, decoded.tasks))
-            assertTrue(snapshot.activeTasks.size == n)
+    fun `apertura en frio`() {
+        val file = dbFile()
+        val state = TasklaneConfig.TODO
+
+        val fuera = Bench.measure("apertura · contadores + cabeceras (fuera del EDT)", runs = 5, warmup = 2) {
+            val db = TaskDb.open(file.parent)!!
+            try {
+                val pager = SqlitePager(db.reader, repo, board, TaskFilter.ALL, Instant.now())
+                assertTrue(pager.counts().isNotEmpty())
+                pager.outline(state)
+            } finally {
+                db.close()
+            }
         }
-        record(result)
+        record(fuera)
+
+        val db = TaskDb.open(file.parent)!!
+        try {
+            val pager = SqlitePager(db.reader, repo, board, TaskFilter.ALL, Instant.now()).also {
+                it.counts()
+                it.outline(state)
+            }
+            val outline = pager.outline(state)
+            val dentro = Bench.measureOnEdt("apertura · primer pintado (EDT)", runs = 5, warmup = 2) {
+                val tree = newTree()
+                list(tree, pager, state, outline).sync()
+                settle(tree)
+            }
+            record(dentro)
+        } finally {
+            db.close()
+        }
     }
 
     /**
-     * **§1.3 — el volcado.** `writeElement` devuelve un `String` que luego se pasa a
-     * `ByteArray`: el pico son las dos representaciones vivas a la vez. Y ocurre
-     * **cada 500 ms de tecleo**, porque el debounce reescribe el fichero entero
-     * aunque haya cambiado una letra.
-     */
-    @Test
-    fun `volcado completo`() {
-        val tasks = corpus()
-        val result = Bench.measure("volcado: encode + writeElement + toByteArray", runs = 3, warmup = 1) {
-            val bytes = JDOMUtil.writeElement(TasksCodec.encode(repo, tasks)).toByteArray(StandardCharsets.UTF_8)
-            assertTrue(bytes.isNotEmpty())
-        }
-        record(result)
-    }
-
-    /**
-     * **§1.5 — el comando completo**, tal y como lo ejecuta hoy `TaskService.apply`:
-     * `reducer.plan` y el consumo de su recibo.
+     * **La puerta: crear, editar y completar por debajo de 50 ms de interfaz y 20 ms de
+     * volcado.**
      *
-     * Antes de la Fase 1 esto eran tres cosas: el reducer, más dos `flatten()` del
-     * snapshot entero para averiguar qué tareas se habían aparcado, más una
-     * comparación estructural de las listas de todos los repositorios. Ahora el
-     * reducer lo dice al devolver.
+     * Es el camino entero de `TaskService.apply`: leer del almacén **sólo la tarea que
+     * el comando nombra**, planificar y aplicar, todo dentro de una transacción. Hasta
+     * la Fase 2 esto copiaba la lista del repositorio y reescribía el fichero completo
+     * detrás; aquí no depende de N por ninguno de los dos lados.
      */
     @Test
     fun `un comando`() {
-        val before = loaded()
-        val victim = before.activeTasks[before.activeTasks.size / 2]
+        val db = openDb()
+        val store = TaskStore(db)
+        val victim = firstTask(db, store)
 
-        val result = Bench.measure("un comando: plan + consumir el recibo", runs = 20, warmup = 5) {
-            val reduction = reducer.plan(before, TaskCommand.ToggleComplete(repo, victim.id))
-            assertTrue(reduction.dirty.size == 1 && reduction.remapped.isEmpty())
-        }
-        record(result)
+        record(
+            Bench.measure("comando · leer sujeto + planificar + transacción", runs = 50, warmup = 10) {
+                store.write {
+                    val subject = TaskReducer.Subject(config, store.tasks(listOf(victim.id)))
+                    val plan = reducer.plan(subject, TaskCommand.ToggleBookmark(repo, victim.id))
+                    store.apply(plan.config, plan.mutations)
+                }
+            },
+        )
+
+        // Y el desglose, que es lo que dice dónde está el coste si algún día sube.
+        record(
+            Bench.measure("comando · desglose: leer el sujeto", runs = 50, warmup = 10) {
+                store.tasks(listOf(victim.id))
+            },
+        )
+        val subject = TaskReducer.Subject(config, store.tasks(listOf(victim.id)))
+        record(
+            Bench.measure("comando · desglose: el reducer", runs = 200, warmup = 50) {
+                reducer.plan(subject, TaskCommand.ToggleBookmark(repo, victim.id))
+            },
+        )
+        val plan = reducer.plan(subject, TaskCommand.ToggleBookmark(repo, victim.id))
+        record(
+            Bench.measure("comando · desglose: la transacción", runs = 50, warmup = 10) {
+                store.apply(plan.config, plan.mutations)
+            },
+        )
     }
 
     /**
-     * **La puerta de la Fase 1, tal y como está escrita**: «una edición de tarea por
-     * debajo de 16 ms de EDT».
+     * **La puerta: una tecla en el buscador por debajo de 100 ms.**
      *
-     * Y una edición no es un comando: `TasklanePanel.editSelected` manda **seis**
-     * seguidos al aceptar el diálogo —cuerpo, estado, prioridad, etiquetas,
-     * vencimiento y anclas—, todos desde el EDT. Medir uno solo y dar la puerta por
-     * cerrada sería medir la sexta parte del problema.
-     */
-    @Test
-    fun `editar una tarea`() {
-        val start = loaded()
-        val victim = start.activeTasks[start.activeTasks.size / 2]
-        val otroEstado = config.states.first { it.id != victim.stateId }.id
-        val otraPrioridad = config.priorities.first { it.id != victim.priorityId }.id
-
-        var flip = false
-        // Los dos caminos, medidos uno al lado del otro: el que había hasta la Fase 1
-        // y el que hay ahora. Es la única forma de que la cifra signifique algo.
-        val seis = Bench.measureOnEdt("editar · seis comandos (como hasta la Fase 1)", runs = 10, warmup = 3) {
-            flip = !flip
-            // Se alterna para que ningún comando se salga por «ya estaba así»: una
-            // edición que no cambia nada es barata por razones que no queremos medir.
-            var snapshot = start
-            for (command in listOf(
-                TaskCommand.UpdateBody(repo, victim.id, if (flip) "cuerpo nuevo" else "otro cuerpo"),
-                TaskCommand.ChangeState(repo, victim.id, if (flip) otroEstado else victim.stateId),
-                TaskCommand.ChangePriority(repo, victim.id, if (flip) otraPrioridad else victim.priorityId),
-                TaskCommand.SetTags(repo, victim.id, if (flip) listOf("uno") else listOf("dos")),
-                TaskCommand.SetDueDate(repo, victim.id, if (flip) SyntheticCorpus.REFERENCE_NOW else null),
-                TaskCommand.SetAnchors(repo, victim.id, emptyList()),
-            )) {
-                snapshot = reducer.plan(snapshot, command).snapshot
-            }
-            assertTrue(snapshot !== start)
-        }
-        record(seis)
-
-        val uno = Bench.measureOnEdt("editar · un UpdateTask (lo que hace el diálogo)", runs = 10, warmup = 3) {
-            flip = !flip
-            val reduction = reducer.plan(
-                start,
-                TaskCommand.UpdateTask(
-                    repo = repo,
-                    id = victim.id,
-                    body = if (flip) "cuerpo nuevo" else "otro cuerpo",
-                    stateId = if (flip) otroEstado else victim.stateId,
-                    priorityId = if (flip) otraPrioridad else victim.priorityId,
-                    tags = if (flip) listOf("uno") else listOf("dos"),
-                    dueDate = java.util.Optional.ofNullable(
-                        if (flip) SyntheticCorpus.REFERENCE_NOW else null,
-                    ),
-                    anchors = emptyList(),
-                ),
-            )
-            assertTrue(reduction.snapshot !== start)
-        }
-        record(uno)
-    }
-
-    /**
-     * El desglose del comando, pieza a pieza. El §1.5 lista seis sitios O(n) pero no
-     * dice cuál pesa, y arreglar el que no era es la forma más común de gastar una
-     * semana sin mover una cifra. Aquí se ve cuál era: el `reduce`.
+     * Hasta la Fase 2 buscar era normalizar el texto de todas las tareas y recorrerlas:
+     * 91 ms a 100.000 y ~0,9 s extrapolados a un millón, más 3 KB por tarea de
+     * documentos cacheados. Aquí es un `MATCH` contra un índice invertido que ya está
+     * en disco y un `LIMIT 200`.
      *
-     * Las dos últimas líneas miden lo que el §1.5 llamaba «escaneo lineal» y
-     * «`maxOfOrNull` sobre todo el repo». Desde la Fase 1 son búsquedas en un mapa y
-     * por eso su cifra deja de crecer con N — que es justamente lo que hay que poder
-     * comprobar.
-     */
-    @Test
-    fun `desglose de un comando`() {
-        val before = loaded()
-        val victim = before.activeTasks[before.activeTasks.size / 2]
-        val command = TaskCommand.ToggleComplete(repo, victim.id)
-
-        record(Bench.measure("  desglose · plan (reducer entero)", runs = 20, warmup = 5) {
-            reducer.plan(before, command)
-        })
-        // Lo que `TaskService.apply` hace con el recibo: descontar los repositorios en
-        // solo lectura y mirar si hay algo que anunciar. Antes esto eran dos `flatten()`
-        // del snapshot entero más un `equals` de listas.
-        val readOnly = emptySet<com.tasklane.domain.model.RepoKey>()
-        record(
-            Bench.measure("  desglose · consumir el recibo", runs = 20, warmup = 5) {
-                val reduction = reducer.plan(before, command)
-                assertTrue(reduction.dirty.none { it in readOnly } && reduction.remapped.isEmpty())
-            },
-        )
-        // El índice por id se construye la primera vez que alguien pregunta, así que se
-        // fuerza fuera de la medida: lo que interesa es cuánto cuesta preguntar, no
-        // cuánto costó construirlo.
-        before.task(victim.id)
-        record(
-            Bench.measure("  desglose · snapshot.task(id)", runs = 20, warmup = 5) {
-                assertTrue(before.task(victim.id) != null)
-            },
-        )
-        record(
-            Bench.measure("  desglose · snapshot.nextOrder", runs = 20, warmup = 5) {
-                assertTrue(before.nextOrder(repo) > 0)
-            },
-        )
-        record(
-            Bench.measure("  desglose · crear una tarea", runs = 20, warmup = 5) {
-                reducer.plan(before, TaskCommand.Create(repo, "una tarea nueva"))
-            },
-        )
-    }
-
-    /**
-     * Y el desglose de la tecla. `setCorpus` recorre el corpus entero en cada snapshot
-     * (§1.5) y `search` lo recorre otra vez; saber cuál de los dos manda decide si la
-     * Fase 1 toca el índice o no.
-     */
-    @Test
-    fun `desglose de una tecla`() {
-        val snapshot = loaded()
-        val index = LinearScanIndex()
-        index.setCorpus(snapshot)
-        index.search(QueryParser.parse("token"), SearchScope.Repo(repo))
-
-        record(Bench.measure("  desglose · setCorpus", runs = 20, warmup = 5) { index.setCorpus(snapshot) })
-        record(
-            Bench.measure("  desglose · search (texto libre)", runs = 20, warmup = 5) {
-                index.search(QueryParser.parse("token cache"), SearchScope.Repo(repo))
-            },
-        )
-        record(
-            Bench.measure("  desglose · search (solo operadores)", runs = 20, warmup = 5) {
-                index.search(QueryParser.parse("is:done #api"), SearchScope.Repo(repo))
-            },
-        )
-    }
-
-    /**
-     * **§1.5 y §1.7 — una tecla en el buscador.** `LinearScanIndex.setCorpus` rehace
-     * un `HashSet` con **todos** los ids en cada snapshot, y después la búsqueda
-     * recorre el corpus entero. Las dos cosas pasan por cada tecla.
+     * Se miden tres consultas distintas a propósito: una palabra frecuente —donde el
+     * `LIMIT` es lo que salva—, una rara y una con operadores, que es la que va por el
+     * `WHERE` de SQL en vez de por el índice de texto.
      */
     @Test
     fun `tecla en el buscador`() {
-        val snapshot = loaded()
-        val index = LinearScanIndex()
-        // Primera pasada aparte: normalizar el corpus se paga una vez, y meterlo en la
-        // medida contaría como coste por tecla algo que no lo es.
-        index.setCorpus(snapshot)
-        index.search(QueryParser.parse("token"), SearchScope.Repo(repo))
+        val db = openDb()
+        val index = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(config)) }
 
-        var i = 0
-        val queries = listOf("login", "token ca", "#api", "state:doing token", "has:image cache")
-        val result = Bench.measure("tecla en el buscador: setCorpus + parse + search", runs = 20, warmup = 5) {
-            index.setCorpus(snapshot)
-            index.search(QueryParser.parse(queries[i++ % queries.size]), SearchScope.Repo(repo))
+        for (query in listOf("token", "revision del despliegue", "is:done token", "#api token")) {
+            record(
+                Bench.measure("buscar · «$query»", runs = 20, warmup = 5) {
+                    index.search(QueryParser.parse(query), SearchScope.Repo(repo))
+                },
+            )
         }
-        record(result)
     }
 
     /**
-     * **§1.7 — cambiar de pestaña.** Filtrar, contar, ordenar y agrupar: lo que
-     * `TasklanePanel` pide fuera del EDT en cada repintado.
+     * **La puerta: el heap del plugin por debajo de 150 MB y plano entre 10k y 1M.**
      *
-     * Desde la Fase 2 esto **es** código de producción: construir el pager y
-     * calentarle el contorno y los contadores es exactamente lo que hace el panel en
-     * su corrutina. Antes había aquí una copia de `buildSections` que podía derivar
-     * del original sin que nada avisara.
+     * Se mide lo que queda **vivo** después de abrir, pintar y buscar, que es el estado
+     * en el que el plugin pasa el día. Hasta la Fase 2 eran 12,9 KB por tarea —el
+     * §0-bis.4— y el corpus entero; ahora lo único retenido son las páginas cargadas y
+     * la caché de páginas de SQLite, que tiene tope.
      */
     @Test
-    fun `repintado - contar, filtrar, ordenar y agrupar`() {
-        val snapshot = loaded().copy(config = board)
-        val now = Instant.now()
+    fun `memoria del plugin`() {
+        val baseline = Bench.heapMegabytes()
+        val db = openDb()
+        val state = TasklaneConfig.TODO
 
-        val result = Bench.measure("repintado: pager (contar + filtrar + ordenar + agrupar)", runs = 10, warmup = 3) {
-            val pager = InMemoryPager(snapshot, SearchResults.NONE, TaskFilter.ALL, now)
-            pager.counts()
-            for (state in board.states) pager.outline(state.id)
+        val pager = SqlitePager(db.reader, repo, board, TaskFilter.ALL, Instant.now())
+        pager.counts()
+        val outline = pager.outline(state)
+        val afterOpen = Bench.heapMegabytes()
+
+        // Pintar: los siete `lazy` de cada tarea visible se materializan aquí, que es
+        // lo que a la Fase 2 le costaba 3,4 KB por tarea **del corpus entero**.
+        val tree = Bench.edt { newTree() }
+        val sync = list(tree, pager, state, outline)
+        Bench.edt {
+            sync.sync()
+            settle(tree)
         }
-        record(result)
+        val afterPaint = Bench.heapMegabytes()
+
+        val index = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(config)) }
+        val found = index.search(QueryParser.parse("token"), SearchScope.Repo(repo))
+        val afterSearch = Bench.heapMegabytes()
+
+        println(
+            """
+            |
+            |┌─ Memoria del plugin con n = $n
+            |│  abrir (contadores + cabeceras)  %9.1f MB
+            |│  + primer pintado                %9.1f MB
+            |│  + una búsqueda                  %9.1f MB
+            |│  TOTAL                           %9.1f MB   (%6.0f B por tarea)
+            |└─
+            """.trimMargin().format(
+                afterOpen - baseline,
+                afterPaint - afterOpen,
+                afterSearch - afterPaint,
+                afterSearch - baseline,
+                (afterSearch - baseline) * 1024 * 1024 / n,
+            ),
+        )
+        // Referenciado hasta el final para que el GC de la última medida no se lo lleve.
+        assertTrue(found.isNotEmpty() && tree.rowCount > 0 && outline.isNotEmpty())
     }
 
     /**
-     * **§1.4 — la trampa del EDT, y la puerta de la Fase 2.** Con `rowHeight = 0`,
-     * `JTree` usa `VariableHeightLayoutCache`, que **mide cada fila invocando al
-     * renderer**: ~0,064 ms cada una.
+     * **La puerta: migrar un millón desde `tasks.xml`, terminando, cancelable y sin
+     * pasar de 300 MB de heap.**
      *
-     * Los dos caminos, uno al lado del otro y en la misma ejecución, que es la única
-     * forma de que la comparación signifique algo (§1-bis.5):
+     * Es el §3.3 entero: StAX en vez de JDOM —un fichero de 2,9 GB no cabe en un DOM—,
+     * tandas de dos mil tareas, cada una con su transacción y su marca de progreso.
+     * Lo que se mide es el camino completo, y lo que se vigila es el techo de memoria:
+     * si el lector retuviera el corpus, esta cifra crecería con N.
+     */
+    @Test
+    fun `migracion desde tasks_xml`() {
+        val source = corpusFile()
+        val dir = Files.createTempDirectory("tasklane-bench-migrate")
+        try {
+            val db = TaskDb.open(dir)!!
+            val store = TaskStore(db)
+            val baseline = Bench.heapMegabytes()
+            var peak = 0.0
+            var written = 0
+
+            val result = Bench.measure("migración · StAX + importBatch de $n tareas", runs = 1, warmup = 0) {
+                store.bulk {
+                    TasksXmlReader.read(source, repo) { chunk ->
+                        store.write {
+                            store.importBatch(chunk, config)
+                            written += chunk.size
+                            store.markImported(repo, TasksCodec.CURRENT_VERSION, written, false, 0L)
+                        }
+                        if (written % 100_000 < TasksXmlReader.CHUNK) {
+                            peak = maxOf(peak, Bench.heapMegabytes() - baseline)
+                        }
+                    }
+                }
+            }
+            record(result)
+
+            assertEquals("tienen que estar todas", n, written)
+            println("  pico de heap durante la migración: %.1f MB".format(peak))
+            println("  la base pesa: ${Files.size(dir.resolve(TaskDb.FILE_NAME)) / (1024 * 1024)} MB")
+            db.close()
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    // ================================================ el camino viejo, para comparar
+
+    /**
+     * **Hasta la Fase 2 — la carga en frío.** `TaskFileStore.readFile` construye el DOM
+     * entero antes de que exista una sola `Task`. Se mide al lado de la migración para
+     * que la comparación sea en la misma ejecución (§1-bis.5).
      *
-     * - **Hasta la Fase 2**: un nodo por tarea, `reload()` y desplegar todos los
-     *   grupos. Una invocación del renderer por tarea, en el hilo de interfaz.
+     * A partir de cierto N esto **muere con `OutOfMemoryError`**, y ése es el dato: se
+     * anota el N al que murió y con cuánto heap.
+     */
+    @Test
+    fun `carga en frio con JDOM (hasta la Fase 2)`() {
+        Assume.assumeTrue("el DOM de un millón no cabe en el heap del banco", n <= 200_000)
+        val file = corpusFile()
+        record(
+            Bench.measure("hasta la Fase 2 · JDOM + decode", runs = 2, warmup = 0) {
+                val decoded = TasksCodec.decode(JDOMUtil.load(file), repo)
+                assertEquals(n, decoded.tasks.size)
+            },
+        )
+    }
+
+    /**
+     * **Hasta la Fase 2 — el volcado.** `writeElement` devuelve un `String` que luego se
+     * pasa a `ByteArray`: el pico son las dos representaciones vivas a la vez. Y ocurría
+     * **cada 500 ms de tecleo**, porque el debounce reescribía el fichero entero aunque
+     * hubiera cambiado una letra. Desde la Fase 3 no hay volcado: hay transacción.
+     */
+    @Test
+    fun `volcado completo (hasta la Fase 2)`() {
+        Assume.assumeTrue("el corpus de un millón en memoria no es el escenario", n <= 200_000)
+        val tasks = corpus()
+        record(
+            Bench.measure("hasta la Fase 2 · encode + writeElement", runs = 2, warmup = 0) {
+                val bytes = JDOMUtil.writeElement(TasksCodec.encode(repo, tasks)).toByteArray(StandardCharsets.UTF_8)
+                assertTrue(bytes.isNotEmpty())
+            },
+        )
+    }
+
+    // ============================================== los escenarios del EDT (Fase 2)
+
+    /**
+     * **§1.4 — la trampa del EDT.** Con `rowHeight = 0`, `JTree` usa
+     * `VariableHeightLayoutCache`, que **mide cada fila invocando al renderer**:
+     * ~0,064 ms cada una, o sea que el presupuesto de 16 ms se agota en ~250 filas.
+     *
+     * Los dos caminos, uno al lado del otro y en la misma ejecución:
+     *
+     * - **Hasta la Fase 2**: un nodo por tarea, `reload()` y desplegar todos los grupos.
      * - **Desde la Fase 2**: las cabeceras salen del agregado y sólo los grupos que
-     *   caben en el presupuesto reciben su **primera página**. El árbol no llega a
-     *   contener el corpus, así que la cifra deja de crecer con N — que es justamente
-     *   lo que hay que poder comprobar.
+     *   caben en el presupuesto reciben su primera página.
      *
-     * Cada ejecución parte de un árbol nuevo a propósito: lo que se mide es el
-     * **primer** pintado, que es el único momento en el que sincronizar por
-     * diferencias no ayuda porque no hay nada puesto que reaprovechar.
-     *
-     * `JTree` y no `CheckboxTree` por lo mismo que en `TaskTreeRendererTest`: el
-     * constructor de la de la plataforma instala su speed search y eso sí necesita
-     * `Application`. Lo que se mide —crear nodos y **medir cada fila**— es idéntico.
+     * Ahora las filas salen de `SqlitePager`, así que el camino viejo hay que
+     * materializarlo a propósito —`pager.all`— y a un millón de tareas eso ya no cabe:
+     * por eso se salta a partir de cierto N. **Que no quepa es el resultado.**
      */
     @Test
     fun `render en el EDT`() {
-        val snapshot = loaded().copy(config = board)
+        val db = openDb()
         val state = TasklaneConfig.TODO
-        val pager = pager(snapshot, state)
+        val pager = boardPager(db, state)
         val outline = pager.outline(state)
 
-        val antes = Bench.measureOnEdt("render · el corpus entero + reload (hasta la Fase 2)", runs = 3, warmup = 1) {
-            val tree = newTree()
-            val root = tree.model.root as CheckedTreeNode
-            for (group in outline) {
-                val node = GroupNode(group.key, group.size)
-                pager.all(PageQuery(state, group.key)).forEach { node.add(TaskNode(it, false)) }
-                root.add(node)
+        if (n <= 200_000) {
+            val antes = Bench.measureOnEdt("render · el corpus entero + reload (hasta la Fase 2)", runs = 3, warmup = 1) {
+                val tree = newTree()
+                val root = tree.model.root as CheckedTreeNode
+                for (group in outline) {
+                    val node = GroupNode(group.key, group.size)
+                    pager.all(PageQuery(state, group.key)).forEach { node.add(TaskNode(it, false)) }
+                    root.add(node)
+                }
+                (tree.model as DefaultTreeModel).reload()
+                for (node in root.children().toList().filterIsInstance<GroupNode>()) {
+                    tree.expandPath(TreePath(node.path))
+                }
+                settle(tree)
             }
-            (tree.model as DefaultTreeModel).reload()
-            // Desplegar es lo que obliga a MEDIR cada fila, y medir es lo que invoca al
-            // renderer una vez por tarea. Sin esto el árbol sólo mediría las cabeceras
-            // y el banco diría que todo va bien.
-            //
-            // Por RUTA y no por fila. `expandRow(i)` parece equivalente y no lo es: al
-            // desplegar el grupo 0 sus miles de hijos se meten en la numeración, así que
-            // la fila 1 ya no es el grupo 1 sino una tarea, y el resto del bucle no
-            // despliega nada. Con ese fallo este banco marcaba 51 ms a 100k —sublineal,
-            // imposible— en vez de lo que cuesta.
-            for (node in root.children().toList().filterIsInstance<GroupNode>()) {
-                tree.expandPath(TreePath(node.path))
-            }
-            settle(tree)
+            record(antes)
         }
-        record(antes)
 
-        val ahora = Bench.measureOnEdt("render · contorno + una página por grupo (Fase 2)", runs = 3, warmup = 1) {
+        val ahora = Bench.measureOnEdt("render · lista acotada (Fase 2 sobre SQLite)", runs = 5, warmup = 2) {
             val tree = newTree()
             list(tree, pager, state, outline).sync()
             settle(tree)
@@ -385,90 +399,87 @@ class ScaleBenchmark {
      * **Lo que de verdad se paga a diario**: el repintado que llega detrás de *cada*
      * comando y de *cada* tecla del buscador, con el árbol ya pintado.
      *
-     * Es el escenario que justifica que el árbol se sincronice por diferencias en vez
-     * de reconstruirse. Aquí la lista ya está en pantalla y sólo ha cambiado una
-     * tarea: lo que se mide es cuántas filas hay que volver a medir por ello.
+     * Aquí la lista ya está en pantalla y sólo ha cambiado una tarea: lo que se mide es
+     * cuántas filas hay que volver a medir por ello.
      */
     @Test
     fun `repintado con el arbol ya pintado`() {
-        val start = loaded().copy(config = board)
+        val db = openDb()
+        val store = TaskStore(db)
         val state = TasklaneConfig.TODO
-        val before = pager(start, state)
-        val outlineBefore = before.outline(state)
-        // La primera fila de la primera página del primer grupo: la tarea que el
-        // usuario tiene delante. Completar una que no esté cargada mediría el caso
-        // fácil —no hay nada que rehacer porque no había nada puesto—.
-        val victim = before.page(PageQuery(state, outlineBefore.first().key)).items.first()
-        val after = reducer.plan(start, TaskCommand.ToggleComplete(repo, victim.id)).snapshot
+        val pager = boardPager(db, state)
+        val outline = pager.outline(state)
+        val victim = pager.page(PageQuery(state, outline.first().key)).items.first()
 
-        val pagers = listOf(before, pager(after, state))
-        val outlines = listOf(outlineBefore, pagers[1].outline(state))
-
-        var flip = 0
-        val viejo = Bench.measureOnEdt("repintar · reload del corpus entero (hasta la Fase 2)", runs = 3, warmup = 1) {
-            val tree = newTree()
-            val root = tree.model.root as CheckedTreeNode
-            val which = flip++ % 2
-            root.removeAllChildren()
-            for (group in outlines[which]) {
-                val node = GroupNode(group.key, group.size)
-                pagers[which].all(PageQuery(state, group.key)).forEach { node.add(TaskNode(it, false)) }
-                root.add(node)
-            }
-            (tree.model as DefaultTreeModel).reload()
-            for (node in root.children().toList().filterIsInstance<GroupNode>()) {
-                tree.expandPath(TreePath(node.path))
-            }
+        val tree = Bench.edt { newTree() }
+        val sync = list(tree, pager, state, outline)
+        Bench.edt {
+            sync.sync()
             settle(tree)
         }
-        record(viejo)
 
-        val sync = Bench.edt { newTree().let { tree -> list(tree, pagers[0], state, outlines[0]) to tree } }
-        Bench.edt { sync.first.sync() }
+        // 1. El suelo: un repintado en el que **nada** ha cambiado. Es el caso más
+        //    frecuente de todos —un evento de VCS repetido, el `ConfigChanged` de cada
+        //    arranque— y es el que tiene que ser plano en N.
+        //
+        //    Los paginadores se construyen FUERA de la medida a propósito: el panel los
+        //    construye en su corrutina y sólo sincroniza en el hilo de interfaz. Uno por
+        //    vuelta, porque un paginador reutilizado tendría la ventana ya traída y eso
+        //    mediría el caso fácil.
+        val fresh = ArrayDeque((0 until 26).map { boardPager(db, state) })
+        record(
+            Bench.measureOnEdt("repintar · sin cambios (volver a pedir la ventana)", runs = 20, warmup = 5) {
+                sync.pager = fresh.removeFirstOrNull() ?: return@measureOnEdt
+                sync.sync()
+                settle(tree)
+            },
+        )
+
+        // 2. Y lo que el usuario nota al pulsar el marcador: la transacción, el
+        //    paginador nuevo y el repintado, todo en el hilo de interfaz, que es donde
+        //    de verdad ocurre.
         var touched = 0
         var round = 0
-        val nuevo = Bench.measureOnEdt("repintar · sincronizar por diferencias (Fase 2)", runs = 20, warmup = 5) {
-            val which = round++ % 2
-            sync.first.pager = pagers[which]
-            sync.first.outline = outlines[which]
-            touched = maxOf(touched, sync.first.sync())
-            settle(sync.second)
-        }
-        // Si esto fuera cero el escenario no estaría midiendo nada: querría decir que
-        // la tarea que cambió no estaba en ninguna página cargada.
+        record(
+            Bench.measureOnEdt("editar una tarea · comando + repintado (EDT)", runs = 20, warmup = 5) {
+                val marked = round++ % 2 == 0
+                store.apply(board, listOf(Mutation.Upsert(listOf(victim.copy(bookmarked = marked)))))
+                val fresh = boardPager(db, state)
+                sync.pager = fresh
+                sync.outline = fresh.outline(state)
+                touched = maxOf(touched, sync.sync())
+                settle(tree)
+            },
+        )
+        // Si esto fuera cero el escenario no estaría midiendo nada: querría decir que la
+        // tarea que cambió no estaba en ninguna página cargada.
         assertTrue("el repintado tiene que tener algo que rehacer", touched > 0)
         println("  filas tocadas por repintado: $touched")
-        record(nuevo)
     }
 
     /**
-     * **Desplazarse.** Llegar al centinela pide la siguiente página, y ésas sí son cien
-     * filas nuevas que hay que medir. Es el otro número de la puerta de la Fase 2 —el
-     * desplazamiento tiene que mantener 60 fps— y el que dice si el tamaño de página
-     * está bien elegido: el presupuesto son 16 ms.
+     * **Desplazarse.** Llegar al centinela pide la siguiente página, y ésas sí son
+     * cincuenta filas nuevas que hay que medir. Es el número que dice si el tamaño de
+     * página está bien elegido: el presupuesto son 16 ms.
      *
-     * Va sobre la pestaña **sin agrupar**, que es donde la raíz se pagina directamente
-     * y las páginas son más largas —agrupando, una página se reparte entre grupos—.
+     * Va sobre la pestaña **sin agrupar**, que es donde la raíz se pagina directamente.
      */
     @Test
     fun `desplazarse una pagina`() {
-        val snapshot = loaded()
+        val db = openDb()
         val state = TasklaneConfig.TODO
-        val pager = pager(snapshot, state)
+        val pager = SqlitePager(db.reader, repo, config, TaskFilter.ALL, Instant.now()).also { it.counts() }
         assertTrue("esta pestaña no agrupa: la raíz se pagina sola", pager.outline(state).isEmpty())
 
         val tree = Bench.edt { newTree() }
         val sync = list(tree, pager, state, emptyList())
-        // La primera página fuera de la medida: lo que se cronometra es lo que cuesta
-        // traer la siguiente, no abrir la lista.
         Bench.edt {
             sync.sync()
             settle(tree)
         }
 
         val result = Bench.measureOnEdt("desplazarse: una página más (${TaskPager.PAGE} filas)", runs = 10, warmup = 3) {
-            // Exactamente lo que hace llegar al centinela desplazándose.
-            val sentinel = tree.getPathForRow(tree.rowCount - 1).lastPathComponent as MoreNode
+            val sentinel = sync.visibleSentinel() ?: lastSentinel(tree) ?: return@measureOnEdt
             sync.loadMore(sentinel)
             settle(tree)
         }
@@ -476,12 +487,9 @@ class ScaleBenchmark {
     }
 
     /**
-     * **§1.6 — los adjuntos.** `AttachmentStore.list` hace `Files.list(dir).toList()`
-     * más un `readAttributes` por fichero, sobre un **único directorio plano**. Con
-     * diez millones de blobs eso es lo que hace que `AttachmentGcActivity` no termine.
-     *
-     * Escribir los blobs cuesta mucho más que medirlos, así que este escenario lleva
-     * su propio N —`-PbenchBlobs`— y por defecto se queda corto.
+     * **§1.6 — los adjuntos.** Un `Files.list` de un directorio plano con millones de
+     * entradas es la operación que no termina. Sigue aquí porque es la puerta de la
+     * Fase 4, no de ésta.
      */
     @Test
     fun `listar el directorio de adjuntos`() {
@@ -504,75 +512,7 @@ class ScaleBenchmark {
         }
     }
 
-    /**
-     * **§2.6 — el presupuesto de memoria.** Cuánto retiene el modelo vivo: las `Task`
-     * con sus siete `lazy` ya forzados (que es lo que pasa en cuanto la lista se
-     * pinta una vez) más los documentos del índice.
-     *
-     * El plan estima 5–6 KB por tarea más 2 KB del `SearchDocument`. Esta medida es la
-     * que dice si acertó.
-     */
-    @Test
-    fun `memoria retenida por el modelo vivo`() {
-        val baseline = Bench.heapMegabytes()
-
-        // 1. Recién cargado. Es lo que hay en el heap durante la apertura del
-        //    proyecto, ANTES de que la ventana pinte nada: los siete `lazy` de `Task`
-        //    siguen sin forzarse, así que ni el título ni los bloques del detalle
-        //    existen todavía.
-        val snapshot = loaded()
-        val afterLoad = Bench.heapMegabytes()
-
-        // 2. Después del primer repintado. Pintar una fila pide título, descripción,
-        //    enlaces del título y bloques del detalle, así que en cuanto la lista se
-        //    ve una vez los siete `lazy` de cada tarea visible quedan materializados
-        //    —y con el desplazamiento, los de todas—.
-        //
-        //    La diferencia entre 1 y 2 no es un detalle contable: explica por qué el
-        //    proyecto ABRE con 200.000 tareas y se muere al mirarlas.
-        var chars = 0L
-        for (task in snapshot.activeTasks) {
-            chars += task.title.length + task.description.length + task.titleLinks.size + task.detailBlocks.size
-        }
-        val afterLazy = Bench.heapMegabytes()
-
-        // 3. Y el corpus del buscador, que guarda el cuerpo normalizado OTRA VEZ.
-        val index = LinearScanIndex()
-        index.setCorpus(snapshot)
-        index.search(QueryParser.parse("token"), SearchScope.Repo(repo))
-        val afterIndex = Bench.heapMegabytes()
-
-        val loadedMb = afterLoad - baseline
-        val lazyMb = afterLazy - afterLoad
-        val docsMb = afterIndex - afterLazy
-        val total = loadedMb + lazyMb + docsMb
-        println(
-            """
-            |
-            |┌─ Memoria retenida con n = $n
-            |│  Task recién cargada     %9.1f MB   (%6.0f B por tarea)
-            |│  + los siete lazy        %9.1f MB   (%6.0f B por tarea)   <- los fuerza el primer repintado
-            |│  + SearchDocument        %9.1f MB   (%6.0f B por tarea)
-            |│  TOTAL                   %9.1f MB   (%6.0f B por tarea)
-            |└─
-            """.trimMargin().format(
-                loadedMb, loadedMb * 1024 * 1024 / n,
-                lazyMb, lazyMb * 1024 * 1024 / n,
-                docsMb, docsMb * 1024 * 1024 / n,
-                total, total * 1024 * 1024 / n,
-            ),
-        )
-        // Referenciado hasta el final para que el GC de la última medida no se lo lleve.
-        assertTrue(snapshot.activeTasks.isNotEmpty() && chars > 0)
-    }
-
     // ------------------------------------------------------------------ andamiaje
-
-    /** Un snapshot vacío con la configuración por defecto: el punto de partida real. */
-    private fun base() = TasklaneSnapshot.EMPTY.copy(config = config)
-
-    /** El corpus ya dentro de un snapshot, como lo deja `TaskCommand.Loaded`. */
-    private fun loaded(): TasklaneSnapshot = reducer.reduce(base(), TaskCommand.Loaded(repo, corpus()))
 
     /**
      * La configuración de los escenarios de lista: la pestaña *ToDo* agrupando por
@@ -583,18 +523,24 @@ class ScaleBenchmark {
         states = config.states.map {
             if (it.id == TasklaneConfig.TODO) it.copy(grouping = Grouping.BY_DATE) else it
         },
-    )
+    ).normalized()
 
     /**
-     * El pager de una pestaña, **ya caliente**: es lo que el panel construye en su
+     * El paginador de una pestaña, **ya caliente**: es lo que el panel construye en su
      * corrutina, fuera del EDT. Lo que se mide después es lo que le queda al hilo de
      * interfaz.
      */
-    private fun pager(snapshot: TasklaneSnapshot, state: StateId): InMemoryPager =
-        InMemoryPager(snapshot, SearchResults.NONE, TaskFilter.ALL, Instant.now()).also {
+    private fun boardPager(db: TaskDb, state: StateId): SqlitePager =
+        SqlitePager(db.reader, repo, board, TaskFilter.ALL, Instant.now()).also {
             it.counts()
             it.outline(state)
         }
+
+    private fun firstTask(db: TaskDb, store: TaskStore): Task {
+        val pager = SqlitePager(db.reader, repo, config, TaskFilter.ALL, Instant.now())
+        return pager.page(PageQuery(TasklaneConfig.TODO, null, 1)).items.firstOrNull()
+            ?: store.tasks(listOf(com.tasklane.domain.model.TaskId("nope"))).first()
+    }
 
     private val renderer = TaskTreeRenderer().apply {
         config = board
@@ -621,9 +567,7 @@ class ScaleBenchmark {
      *
      * **Nada de `leftChildIndent`.** Tocarlo era la forma de forzar la medida hasta la
      * Fase 2, y hace algo más de lo que dice: `BasicTreeUI.setLeftChildIndent` llama a
-     * `treeState.invalidateSizes()`, o sea tira **todas** las alturas cacheadas. Con
-     * un árbol que se reconstruía entero daba igual; midiendo un repintado por
-     * diferencias contaría como coste de esta fase justo lo que esta fase evita.
+     * `treeState.invalidateSizes()`, o sea tira **todas** las alturas cacheadas.
      */
     private fun settle(tree: JTree) {
         assertTrue(tree.rowCount > 0)
@@ -632,15 +576,23 @@ class ScaleBenchmark {
 
     /**
      * Lo que hace la pestaña con el árbol, que desde la Fase 2 es **código de
-     * producción**: [ListSync] no necesita un IDE, sólo un `JTree` y un pager. Antes
-     * aquí había una copia de `buildSections` que podía derivar del original sin que
-     * nada avisara; ahora el banco mide exactamente lo que corre.
+     * producción**: [ListSync] no necesita un IDE, sólo un `JTree` y un paginador.
      */
     private fun list(tree: JTree, pager: TaskPager, state: StateId, outline: List<GroupOutline>) =
         ListSync(tree, state).apply {
             this.pager = pager
             this.outline = outline
         }
+
+    /**
+     * El centinela del final del árbol. El de [ListSync.visibleSentinel] necesita un
+     * viewport de verdad, que en el banco no hay: aquí se busca en el modelo.
+     */
+    private fun lastSentinel(tree: JTree): MoreNode? {
+        val root = tree.model.root as CheckedTreeNode
+        return root.children().toList().filterIsInstance<MoreNode>()
+            .lastOrNull { it.direction == MoreNode.Direction.AFTER }
+    }
 
     private fun record(result: Bench.Result) {
         results += result
@@ -651,28 +603,63 @@ class ScaleBenchmark {
         /** El tamaño del corpus. `-PbenchN=100000`. */
         val n: Int = System.getProperty("tasklane.bench.n")?.toIntOrNull() ?: 10_000
 
-        /** Lo único de `TasklanePanel` que aquí sigue copiado. Ver [ScaleBenchmark.syncBoard]. */
-        const val GROUP_PAGE = 50
-
         private val results = mutableListOf<Bench.Result>()
 
         private var cached: List<Task>? = null
         private var cachedFile: Path? = null
+        private var cachedDb: Path? = null
+        private var openedDb: TaskDb? = null
 
         /**
-         * El corpus, generado una vez para toda la clase. Regenerarlo por escenario
-         * costaría más que todo lo que se mide junto.
+         * El corpus materializado. **Sólo para los escenarios del camino viejo**: a un
+         * millón son los ~5,5 GB del §1.2, que es precisamente lo que esta fase borra.
          */
         fun corpus(): List<Task> = cached ?: SyntheticCorpus.tasks(n).also { cached = it }
 
+        /** El `tasks.xml` del camino viejo y de la migración, escrito en streaming. */
         fun corpusFile(): Path = cachedFile ?: run {
-            val dir = Files.createTempDirectory("tasklane-bench")
+            val dir = Files.createTempDirectory("tasklane-bench-xml")
             val file = dir.resolve("tasks.xml")
             val bytes = SyntheticCorpus.writeTasksXml(file, n)
-            println("Corpus de $n tareas en disco: ${bytes / (1024 * 1024)} MB")
+            println("Corpus de $n tareas en XML: ${bytes / (1024 * 1024)} MB")
             cachedFile = file
             file
         }
+
+        /**
+         * La base ya poblada, una vez para toda la clase. Poblarla por escenario
+         * costaría más que todo lo que se mide junto.
+         */
+        fun dbFile(): Path = cachedDb ?: run {
+            val dir = Files.createTempDirectory("tasklane-bench-db")
+            val db = TaskDb.open(dir)!!
+            val store = TaskStore(db)
+            val config = TasklaneConfig.DEFAULT.normalized()
+            var written = 0
+            store.bulk {
+                val chunk = ArrayList<Task>(TasksXmlReader.CHUNK)
+                for (task in SyntheticCorpus.sequence(n)) {
+                    chunk += task
+                    if (chunk.size >= TasksXmlReader.CHUNK) {
+                        store.importBatch(chunk, config)
+                        written += chunk.size
+                        chunk.clear()
+                    }
+                }
+                if (chunk.isNotEmpty()) {
+                    store.importBatch(chunk, config)
+                    written += chunk.size
+                }
+            }
+            db.close()
+            val file = dir.resolve(TaskDb.FILE_NAME)
+            println("Base de $written tareas: ${Files.size(file) / (1024 * 1024)} MB")
+            cachedDb = file
+            file
+        }
+
+        /** La base abierta, compartida por los escenarios que no miden la apertura. */
+        internal fun openDb(): TaskDb = openedDb ?: TaskDb.open(dbFile().parent)!!.also { openedDb = it }
 
         @BeforeClass
         @JvmStatic
@@ -684,9 +671,13 @@ class ScaleBenchmark {
         @JvmStatic
         fun summary() {
             Bench.report("Resumen · n = $n", results)
+            openedDb?.close()
             cachedFile?.parent?.toFile()?.deleteRecursively()
+            cachedDb?.parent?.toFile()?.deleteRecursively()
             cached = null
             cachedFile = null
+            cachedDb = null
+            openedDb = null
         }
     }
 }

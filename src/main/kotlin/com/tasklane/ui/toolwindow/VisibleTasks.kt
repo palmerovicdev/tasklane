@@ -3,7 +3,6 @@ package com.tasklane.ui.toolwindow
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
-import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.service.SearchResults
 import java.time.Instant
 
@@ -21,9 +20,15 @@ import java.time.Instant
  *
  * Lo que **no** está aquí es ordenar ni agrupar: eso sólo lo necesita quien pinta, y
  * contar no debe pagarlo. Vive en
- * [com.tasklane.paging.InMemoryPager]. De ahí la única discrepancia que queda viva y
+ * [com.tasklane.paging.MemoryPager]. De ahí la única discrepancia que queda viva y
  * es correcta: agrupando por etiqueta, una tarea con dos etiquetas sale en dos filas
  * y el contador sigue diciendo una. Cuenta tareas, no filas.
+ *
+ * **Desde la Fase 3 sólo sirve al camino en memoria.** Los contadores de las pestañas
+ * de la vista normal salen de la tabla `counter`, que el almacén mantiene dentro de la
+ * misma transacción que la escritura; aquí se sigue contando lo que está acotado por su
+ * naturaleza —los aciertos de una búsqueda, lo vencido—, que es exactamente lo que
+ * [com.tasklane.paging.MemoryPager] pagina.
  */
 internal object VisibleTasks {
 
@@ -36,13 +41,13 @@ internal object VisibleTasks {
      * escritura; el reparto por estado lo sustituye un `WHERE state = ?`.
      */
     fun byState(
-        snapshot: TasklaneSnapshot,
+        tasks: List<Task>,
         found: SearchResults,
         filter: TaskFilter,
         now: Instant,
     ): Map<StateId, List<Task>> {
         val byState = HashMap<StateId, MutableList<Task>>()
-        for (task in pool(snapshot, found)) {
+        for (task in tasks) {
             if (!found.accepts(task.id)) continue
             if (!filter.accepts(task, now)) continue
             byState.getOrPut(task.stateId) { ArrayList() } += task
@@ -52,26 +57,18 @@ internal object VisibleTasks {
 
     /** Las de un estado, listas para agrupar y ordenar. */
     fun of(
-        snapshot: TasklaneSnapshot,
+        tasks: List<Task>,
         found: SearchResults,
         filter: TaskFilter,
         stateId: StateId,
         now: Instant,
-    ): List<Task> = byState(snapshot, found, filter, now)[stateId].orEmpty()
+    ): List<Task> = byState(tasks, found, filter, now)[stateId].orEmpty()
 
     /** Cuántas hay en cada estado. */
     fun countsByState(
-        snapshot: TasklaneSnapshot,
+        tasks: List<Task>,
         found: SearchResults,
         filter: TaskFilter,
         now: Instant,
-    ): Map<StateId, Int> = byState(snapshot, found, filter, now).mapValues { it.value.size }
-
-    /**
-     * El universo de la ventana. Con búsqueda activa es el snapshot entero: el
-     * alcance ya lo aplicó el índice, y si el usuario pidió «todos los repositorios»
-     * los resultados de fuera del activo tienen que poder salir.
-     */
-    private fun pool(snapshot: TasklaneSnapshot, found: SearchResults): List<Task> =
-        if (found.active) snapshot.tasksByRepo.values.flatten() else snapshot.activeTasks
+    ): Map<StateId, Int> = byState(tasks, found, filter, now).mapValues { it.value.size }
 }

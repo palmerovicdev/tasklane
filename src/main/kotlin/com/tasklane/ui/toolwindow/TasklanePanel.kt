@@ -33,7 +33,6 @@ import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.export.ExportScope
-import com.tasklane.domain.export.TaskExporter
 import com.tasklane.domain.model.GroupKey
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.RepoKey
@@ -47,7 +46,6 @@ import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.paging.GroupOutline
-import com.tasklane.paging.InMemoryPager
 import com.tasklane.paging.TaskPager
 import com.tasklane.service.SearchResults
 import com.tasklane.service.SearchService
@@ -329,7 +327,7 @@ internal class TasklanePanel(
                 // contador y la lista podrían discrepar en lo que está vencido.
                 val now = Instant.now()
                 val (pager, outline, counts) = metrics.time(TasklaneMetrics.Op.SECTIONS) {
-                    val pager = InMemoryPager(snap, found, filter, now)
+                    val pager = service.pager(found, filter, now)
                     // Se calientan aquí a propósito: es donde vive el O(n log n) de
                     // ordenar y agrupar. Lo que el EDT pida después son sublistas de
                     // algo ya ordenado y una cuenta ya hecha.
@@ -802,7 +800,7 @@ internal class TasklanePanel(
      * como que el plugin no hizo nada.
      */
     private fun waitFor(ids: Set<TaskId>) {
-        val mine = ids.filter { service.snapshot.value.task(it)?.stateId == stateId }.toSet()
+        val mine = ids.filter { service.task(it)?.stateId == stateId }.toSet()
         if (mine.isEmpty()) return
         pendingReveal = mine
 
@@ -839,16 +837,33 @@ internal class TasklanePanel(
     // ------------------------------------------------------------ exportación
 
     /**
-     * Qué se lleva el portapapeles para cada alcance. Las cabeceras salen de aquí y
-     * no del exportador porque son lo que el usuario ve escrito en la pestaña: el
-     * nombre del estado y, si agrupa, el del grupo de fecha.
+     * Qué hay que exportar, **sin haberlo leído todavía**.
      *
-     * Con los grupos de fecha va además **el día**, que no es lo que se ve escrito —la
-     * pestaña dice «Hoy»— sino lo que ese texto significa. En Markdown el exportador lo
-     * prefiere a la cabecera: «Hoy» deja de ser verdad mañana, y lo exportado se guarda.
-     * Ver [TaskExporter.Section].
+     * Existe por la Fase 3. Desde la Fase 2 exportar vuelve a pedir la lista sin tope
+     * —el árbol sólo tiene las páginas cargadas—, y mientras el corpus vivía en memoria
+     * eso era una sublista de algo ya ordenado. Ahora es leer del almacén, y hacerlo en
+     * el hilo de interfaz congelaría la ventana durante lo que tarde en salir un estado
+     * entero.
+     *
+     * Así que se parte en dos: **en el EDT** se decide qué secciones hay —que es leer el
+     * árbol, y sólo el EDT puede— y **en segundo plano** se leen. Lo que la Fase 5 cambie
+     * es cómo se escribe lo leído, no quién decide qué leer.
+     *
+     * Las **cabeceras** salen de aquí y no del exportador porque son lo que el usuario ve
+     * escrito en la pestaña: el nombre del estado y, si agrupa, el del grupo de fecha. Con
+     * los grupos de fecha va además **el día**, que no es lo que se ve escrito —la pestaña
+     * dice «Hoy»— sino lo que ese texto significa: en Markdown el exportador lo prefiere a
+     * la cabecera, porque «Hoy» deja de ser verdad mañana y lo exportado se guarda.
      */
-    fun exportSections(scope: ExportScope): List<TaskExporter.Section> {
+    class ExportRequest(val sections: List<Pending>) {
+        class Pending(val heading: String, val date: LocalDate?, val load: () -> List<Task>)
+    }
+
+    /**
+     * Las secciones a exportar, resueltas a medias: la cabecera y de dónde salen las
+     * tareas. Ver [ExportRequest].
+     */
+    fun exportRequest(scope: ExportScope): ExportRequest {
         val state = snapshot.config.state(stateId)?.name.orEmpty()
         fun heading(key: GroupKey?): String =
             if (key == null) state else "$state · ${GroupLabels.of(key, snapshot.config)}"
@@ -858,28 +873,24 @@ internal class TasklanePanel(
         val today = LocalDate.now(ZoneId.systemDefault())
         fun day(key: GroupKey?): LocalDate? = (key as? GroupKey.OfDate)?.group?.dayOn(today)
 
-        fun section(key: GroupKey?, tasks: List<Task>) = TaskExporter.Section(heading(key), tasks, day(key))
+        fun pending(key: GroupKey?) = ExportRequest.Pending(heading(key), day(key)) { list.contents(key) }
 
-        // Ya no se exporta lo que hay **en el árbol**: el árbol sólo tiene las páginas
-        // cargadas. Se vuelve a pedir la misma lista sin tope, que es lo que deja
-        // escrito el §2.5 del plan de escala —y lo que la Fase 5 pasará a escribir en
-        // streaming, porque exportar un millón de tareas es leer un millón de tareas—.
-        // Los grupos vacíos —«hoy», cuando se enseña sin tareas— no se copian: una
-        // cabecera con nada debajo no es lo que se quería pegar.
         val outline = list.outline
-        return when (scope) {
-            ExportScope.STATE ->
-                if (outline.isEmpty()) listOf(section(null, list.contents(null)))
-                else outline.map { section(it.key, list.contents(it.key)) }
+        return ExportRequest(
+            when (scope) {
+                ExportScope.STATE ->
+                    if (outline.isEmpty()) listOf(pending(null)) else outline.map { pending(it.key) }
 
-            ExportScope.GROUP -> selectedGroup()
-                ?.let { key -> listOf(section(key, list.contents(key))) }
-                .orEmpty()
+                ExportScope.GROUP -> selectedGroup()?.let { listOf(pending(it)) }.orEmpty()
 
-            // La selección puede cruzar grupos —y repositorios, buscando en todos—,
-            // así que sale como un bloque único bajo el nombre del estado.
-            ExportScope.SELECTION -> listOf(section(null, selectedTasks()))
-        }.filter { it.tasks.isNotEmpty() }
+                // La selección puede cruzar grupos —y repositorios, buscando en todos—,
+                // así que sale como un bloque único bajo el nombre del estado. Y ya está
+                // leída: son las filas que el usuario tiene señaladas.
+                ExportScope.SELECTION -> selectedTasks().let { tasks ->
+                    listOf(ExportRequest.Pending(heading(null), null) { tasks })
+                }
+            },
+        )
     }
 
     /** El grupo donde está la selección. `null` si la pestaña no agrupa. */

@@ -353,6 +353,8 @@
                 class="com.tasklane.ui.actions.ExportSelectionAction"/>
         <action id="Tasklane.ExportMarkdown"
                 class="com.tasklane.ui.actions.ExportMarkdownAction"/>
+        <action id="Tasklane.ExportXml"
+                class="com.tasklane.ui.actions.ExportXmlAction"/>
         <action id="Tasklane.ExportAndRemoveRepo"
                 class="com.tasklane.ui.actions.ExportAndRemoveRepoAction"
                 icon="AllIcons.Actions.GC"/>
@@ -373,6 +375,7 @@
             <separator/>
             <reference ref="Tasklane.ExportMarkdown"/>
             <separator/>
+            <reference ref="Tasklane.ExportXml"/>
             <reference ref="Tasklane.ExportAndRemoveRepo"/>
         </group>
 

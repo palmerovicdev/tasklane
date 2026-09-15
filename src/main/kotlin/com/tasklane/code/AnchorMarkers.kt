@@ -107,10 +107,14 @@ internal class AnchorMarkers(
      * que leer las capturas— y sin esto podría estar mirando un modelo viejo.
      */
     @Volatile
-    private var model = Model(_style.value, TasklaneConfig.DEFAULT, emptyMap())
+    private var model = Model(_style.value, TasklaneConfig.DEFAULT, -1L)
 
     /** Lo que hay puesto en cada editor, para poder quitarlo exactamente. */
     private val marks = HashMap<Editor, Marks>()
+
+    /** Ver [anchorsIn]. Se vacía cuando cambia la revisión del almacén. */
+    private val anchorCache = java.util.concurrent.ConcurrentHashMap<String, List<AnchoredTask>>()
+    private var cachedRevision = -1L
 
     /** El hint de las pastillas. Ver [AnchorHover]: lo escondemos nosotros, no la plataforma. */
     private val hover = AnchorHover(this)
@@ -126,7 +130,7 @@ internal class AnchorMarkers(
 
         scope.launch {
             TaskService.getInstance(project).snapshot
-                .combine(_style) { snapshot, style -> Model(style, snapshot.config, AnchoredTasks.byPath(snapshot)) }
+                .combine(_style) { snapshot, style -> Model(style, snapshot.config, snapshot.revision) }
                 // El snapshot se reemite por cosas que no cambian ni una marca —qué
                 // repositorio está activo, cuál acaba de terminar de cargar—, y repintar
                 // el margen de cada editor abierto por cada una de ellas se notaría.
@@ -159,7 +163,7 @@ internal class AnchorMarkers(
         // Un documento sin líneas no tiene dónde poner nada, y preguntarle por el
         // principio de la línea 0 sería pedirle un sitio que no existe.
         if (editor.document.lineCount <= 0) return
-        val entries = model.index[CodeAnchors.pathOf(project, file)].orEmpty()
+        val entries = anchorsIn(CodeAnchors.pathOf(project, file))
         if (entries.isEmpty()) return
 
         val fresh = Marks()
@@ -396,12 +400,40 @@ internal class AnchorMarkers(
         marks.keys.toList().forEach(::forget)
     }
 
-    /** Lo que hace falta para pintar, junto: estilo, configuración e índice. */
+    /**
+     * Lo que hace falta para pintar, junto: estilo, configuración y de qué versión del
+     * almacén habla.
+     *
+     * Hasta la Fase 2 llevaba **el índice entero** del proyecto —ruta → tareas
+     * ancladas—, y construirlo era recorrer todas las tareas en **cada** cambio del
+     * modelo. Ahora lleva el número de revisión, que es lo único que hace falta para
+     * saber que lo cacheado ya no vale: las anclas de un fichero se piden por ruta
+     * cuando se abre, que es el §3.6.
+     */
     private data class Model(
         val style: AnchorMarkerStyle,
         val config: TasklaneConfig,
-        val index: Map<String, List<AnchoredTask>>,
+        val revision: Long,
     )
+
+    /**
+     * Qué cuelga de un fichero, cacheado mientras el almacén no cambie.
+     *
+     * La consulta es un salto sobre `anchor_by_path` y un puñado de filas, pero ocurre
+     * en el EDT —instalar las marcas lo exige— y un fichero se reinstala cada vez que
+     * gana el foco. La caché la vacía un número de revisión distinto, que es
+     * exactamente «alguien escribió».
+     */
+    private fun anchorsIn(path: String): List<AnchoredTask> {
+        val model = this.model
+        if (cachedRevision != model.revision) {
+            anchorCache.clear()
+            cachedRevision = model.revision
+        }
+        return anchorCache.computeIfAbsent(path) {
+            TaskService.getInstance(project).anchorsIn(it).sortedWith(AnchoredTasks.order(model.config))
+        }
+    }
 
     private class Marks {
         val highlighters = mutableListOf<RangeHighlighter>()

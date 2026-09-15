@@ -9,7 +9,6 @@ import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
-import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.domain.query.TaskQuery
 import com.tasklane.domain.text.TextNormalizer
 import java.util.concurrent.ConcurrentHashMap
@@ -43,10 +42,10 @@ class LinearScanIndex : TaskSearchIndex {
     private val documents = ConcurrentHashMap<TaskId, Entry>()
 
     @Volatile
-    private var corpus: TasklaneSnapshot = TasklaneSnapshot.EMPTY
+    private var corpus: SearchCorpus = SearchCorpus(TasklaneConfig.DEFAULT)
 
-    override fun setCorpus(snapshot: TasklaneSnapshot) {
-        corpus = snapshot
+    override fun setCorpus(corpus: SearchCorpus) {
+        this.corpus = corpus
         // Una tarea borrada se lleva su documento. Sin esto el mapa crecería con la
         // sesión: el usuario que borra 500 tareas seguiría pagando su memoria.
         //
@@ -56,22 +55,16 @@ class LinearScanIndex : TaskSearchIndex {
         // construía siempre: un `HashSet` con todos los ids del proyecto, en **cada**
         // snapshot, o sea en cada pulsación de tecla y detrás de cada comando. A
         // 100.000 tareas eran 8 ms por vuelta para, casi siempre, no borrar nada.
-        val live = snapshot.tasksByRepo.values.sumOf { it.size }
+        val live = corpus.tasks.size
         if (documents.size <= live) return
-        documents.keys.retainAll(
-            snapshot.tasksByRepo.values.asSequence().flatten().mapTo(HashSet()) { it.id },
-        )
-    }
-
-    override fun invalidate(ids: Collection<TaskId>) {
-        ids.forEach(documents::remove)
+        documents.keys.retainAll(corpus.tasks.mapTo(HashSet()) { it.id })
     }
 
     override fun search(query: TaskQuery, scope: SearchScope): List<ScoredTask> {
         val snapshot = corpus
         val tasks = when (scope) {
-            is SearchScope.All -> snapshot.tasksByRepo.values.flatten()
-            is SearchScope.Repo -> snapshot.tasksOf(scope.key)
+            is SearchScope.All -> snapshot.tasks
+            is SearchScope.Repo -> snapshot.tasks.filter { it.repo == scope.key }
         }
         // Sin consulta no hay nada que filtrar ni que ordenar: se devuelve el corpus
         // tal cual y quien llama decide. Evita que el caso «campo vacío» tenga que

@@ -50,10 +50,17 @@ object DiagnosticsReport {
                     "    blobs          ${repo.blobCount}${if (repo.blobsTruncated) "+" else ""}, " +
                         humanBytes(repo.blobBytes) + unreferencedNote(repo),
                 )
-                appendLine(
-                    "    tasks.xml      ${humanBytes(repo.tasksFileBytes)}" +
-                        if (repo.backupBytes > 0) " (+ ${humanBytes(repo.backupBytes)} backup)" else "",
-                )
+                // Desde la Fase 3 lo que pesa es la base, y es UNA por proyecto: se le
+                // atribuye al primer repositorio del informe para que el total no la
+                // cuente N veces. Los ficheros XML que queden —el `.migrated` y el
+                // `.bak`— se dicen aparte, porque son espacio que el usuario puede
+                // recuperar en cuanto se fíe de la migración.
+                if (repo.tasksFileBytes > 0) {
+                    appendLine("    database       ${humanBytes(repo.tasksFileBytes)} (whole project)")
+                }
+                if (repo.backupBytes > 0) {
+                    appendLine("    old xml files  ${humanBytes(repo.backupBytes)}")
+                }
             }
         }
         appendLine()

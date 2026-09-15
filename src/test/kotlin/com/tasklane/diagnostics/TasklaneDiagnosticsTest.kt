@@ -22,12 +22,28 @@ import java.nio.file.Files
 class TasklaneDiagnosticsTest {
 
     private val repo = RepoKey.ROOT
-    private fun orphans(tasks: List<Task>) = TaskReducer.orphans(tasks).size
+
+    /**
+     * Las cuentas de un repositorio, como las daría el almacén.
+     *
+     * Desde la Fase 3 el informe recibe agregados y no tareas —siete `count(*)` en vez
+     * de un recorrido del corpus—, así que aquí se calculan a mano sobre el corpus
+     * sintético. Que la consulta de SQLite dé lo mismo lo fija `TaskStoreTest`.
+     */
+    private fun statsOf(tasks: List<Task>) = TaskStats(
+        tasks = tasks.size,
+        bodyChars = tasks.sumOf { it.body.length.toLong() },
+        anchors = tasks.sumOf { it.anchors.size },
+        tags = tasks.sumOf { it.tags.size },
+        imageRefs = tasks.sumOf { it.attachments.size },
+        distinctImages = tasks.flatMap { task -> task.attachments.map { it.id.value } }.distinct().size,
+        orphans = TaskReducer.orphans(tasks).size,
+    )
 
     @Test
     fun `cuenta tareas, anclas, etiquetas y referencias`() {
         val tasks = SyntheticCorpus.tasks(20, blobPool = 20)
-        val report = TasklaneDiagnostics.collect(null, mapOf(repo to tasks), ::orphans)
+        val report = TasklaneDiagnostics.collect(null, mapOf(repo to statsOf(tasks)))
 
         val only = report.repos.single()
         assertEquals(20, only.tasks)
@@ -46,7 +62,7 @@ class TasklaneDiagnosticsTest {
     @Test
     fun `mide la deduplicacion real de las imagenes`() {
         val tasks = SyntheticCorpus.tasks(20, blobPool = 20)
-        val only = TasklaneDiagnostics.collect(null, mapOf(repo to tasks), ::orphans).repos.single()
+        val only = TasklaneDiagnostics.collect(null, mapOf(repo to statsOf(tasks))).repos.single()
 
         assertEquals(200, only.imageRefs)
         assertEquals(20, only.distinctImages)
@@ -61,7 +77,7 @@ class TasklaneDiagnosticsTest {
      */
     @Test
     fun `solo informa de lo que esta cargado`() {
-        val report = TasklaneDiagnostics.collect(null, emptyMap(), ::orphans)
+        val report = TasklaneDiagnostics.collect(null, emptyMap())
         assertTrue(report.repos.isEmpty())
         assertEquals(0, report.tasks)
         assertTrue(DiagnosticsReport.render(report).contains("(none loaded yet)"))
@@ -78,9 +94,11 @@ class TasklaneDiagnosticsTest {
             // no existen, que es exactamente el caso que la tarjeta pinta como hueco.
             SyntheticBlobs.writeAll(layout.attachmentsDir(repo), 10)
 
-            val only = TasklaneDiagnostics.collect(layout, mapOf(repo to tasks), ::orphans).repos.single()
+            val only = TasklaneDiagnostics.collect(layout, mapOf(repo to statsOf(tasks))).repos.single()
 
-            assertTrue("el tasks.xml pesa", only.tasksFileBytes > 30 * 2_000)
+            // El `tasks.xml` ya no es lo que pesa: desde la Fase 3 es la base, y el
+            // fichero viejo cuenta como copia conservada.
+            assertTrue("el fichero conservado pesa", only.backupBytes > 30 * 2_000)
             assertEquals(10, only.blobCount)
             assertTrue("los blobs pesan", only.blobBytes > 10 * 10_000)
             assertFalse(only.blobsTruncated)
@@ -93,7 +111,7 @@ class TasklaneDiagnosticsTest {
     /** Sin `StorageLayout` —proyecto por defecto, tests ligeros— no se cae: informa lo que sabe. */
     @Test
     fun `sin layout informa solo de lo que hay en memoria`() {
-        val only = TasklaneDiagnostics.collect(null, mapOf(repo to SyntheticCorpus.tasks(5)), ::orphans).repos.single()
+        val only = TasklaneDiagnostics.collect(null, mapOf(repo to statsOf(SyntheticCorpus.tasks(5)))).repos.single()
         assertEquals(5, only.tasks)
         assertEquals(0L, only.tasksFileBytes)
         assertEquals(0, only.blobCount)
@@ -108,5 +126,5 @@ class TasklaneDiagnosticsTest {
     }
 
     private fun report(tasks: List<Task>) =
-        TasklaneDiagnostics.collect(null, mapOf(repo to tasks), ::orphans)
+        TasklaneDiagnostics.collect(null, mapOf(repo to statsOf(tasks)))
 }
