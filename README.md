@@ -65,7 +65,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.3.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.4.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -555,8 +555,20 @@ actúan al pulsarlos.
   `.gitignore`: nada entra en el `git status` si no lo pides.
 - **Copia diaria**, `tasklane.db.backup`, en segundo plano y sólo si hubo cambios. Ver
   [Qué se versiona y qué no](#qué-se-versiona-y-qué-no).
-- **Comprobación tras un cierre inesperado del IDE.** Si la base tiene daños se avisa, con
-  la fecha de la última copia, y se deja de copiar encima de ella.
+- **Comprobación tras un cierre inesperado del IDE.** Si la base tiene daños se deja de
+  escribir en ella —lo que se escribiera se perdería con el fichero—, se deja de copiar
+  encima de la última copia buena y se ofrece reabrir el proyecto para repararla.
+- **Una base dañada se repara sola** al abrir. El fichero dañado se aparta como
+  `tasklane.db.corrupt-<fecha>` —nunca se borra—, **todo lo que todavía se deja leer se
+  rescata**, y sólo lo que no se lee sale de la copia diaria. Casi todo daño es de un índice,
+  y ahí no se pierde nada. Mientras dura, las tareas se ven en solo lectura; al terminar, un
+  aviso dice si se reparó sin pérdidas, con huecos —cuántas tareas y de qué fecha es la copia
+  de la que salieron— o si no había de dónde sacarlas. Tras una reparación con huecos las
+  imágenes no se limpian mientras siga ahí el fichero dañado.
+- **Probado matando el proceso**: a mitad de una edición, de la migración, de la limpieza
+  de imágenes, de la copia diaria y de la propia reparación. Lo confirmado sobrevive entero,
+  lo que estaba a medias no deja nada, y la apertura siguiente termina lo que quedó
+  pendiente.
 - **Cambiar la configuración no pierde tareas.** Las que apuntan a un estado o una
   prioridad que ya no existe van a la de por defecto, un aviso dice cuántas —con *Show them*
   para verlas— y **vuelven solas** si el original reaparece.
@@ -609,11 +621,21 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.3.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.4.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
+
+# Endurecimiento (Fase 6)
+./gradlew test --tests '*CrashTest' -PcrashRounds=50            # matar el proceso 50 veces por escenario
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=100000 -PtestHeap=4g   # el banco, con techos que rompen el build
 ```
+
+Cada noche, [`nightly.yml`](.github/workflows/nightly.yml) lanza el banco sobre **un millón
+de tareas** con el heap de fábrica del IDE —2 GB— y las pruebas de caída con treinta muertes
+por escenario en los tres sistemas. Los techos son los presupuestos de cada fase —16 ms en el
+EDT, 50 ms para editar, 150 MB de heap— y no cifras de un portátil, así que un runner más
+lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en un CSV.
 
 ## Atajos por defecto
 
@@ -695,7 +717,7 @@ puerta y su versión.
 | E3 | El almacén (SQLite + FTS5) | `2.0.0` | ✅ |
 | E4 | Adjuntos a escala | `2.1.0` | ✅ |
 | E5 | Las operaciones grandes | `2.2.0` | ✅ |
-| E6 | Endurecimiento | | |
+| E6 | Endurecimiento | `2.4.0` | ✅ |
 
 Las dos primeras salieron juntas en la `1.5.0`: la acción *Tasklane: Diagnostics*, que
 convierte «va lento» en una cifra, y el recorte del trabajo por comando —editar una
@@ -779,7 +801,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.3.0 && git push origin v2.3.0
+git tag v2.4.0 && git push origin v2.4.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

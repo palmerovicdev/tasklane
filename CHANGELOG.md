@@ -9,6 +9,52 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.4.0] — Endurecimiento
+
+La **Fase 6** del plan de escala (`docs/plan-escala.md`), la última: comprobar a la fuerza
+lo que las cinco anteriores daban por hecho —que una caída no rompe nada, que una base
+dañada se recupera y que el rendimiento no se degrada con el uso ni en silencio— y dejarlo
+vigilado cada noche.
+
+### Añadido
+- **Una base dañada se repara sola.** Hasta la 2.3 se detectaba y se avisaba. Ahora el
+  fichero dañado se aparta como `tasklane.db.corrupt-<fecha>` —nunca se borra—, se rescata
+  **todo lo que todavía se deja leer**, y sólo lo que no se lee sale de la copia diaria.
+  Una página rota de un índice, que es el daño más común, se repara **sin perder nada**; una
+  hoja rota de la tabla pierde sólo las tareas de esa hoja, que vuelven en su versión de la
+  copia. Mientras dura se ve todo en solo lectura, y al terminar un aviso dice cuál de los
+  casos fue. Si la recuperación se interrumpe, la apertura siguiente la termina.
+- **Daño visto con el proyecto abierto** —la comprobación tras un cierre sucio, o un error
+  de base dañada al guardar—: se deja de escribir, para no perder más dentro de un fichero
+  roto, y el aviso ofrece reabrir el proyecto para repararla.
+- *Tasklane: Diagnostics* dice si hay una reparación pendiente y cuándo fue la última.
+
+### Cambiado
+- **SQLite va empaquetado** (`org.xerial:sqlite-jdbc`) en vez de usar el que trae el IDE: el
+  de la plataforma es API interna y el Marketplace rechaza el plugin por usarlo. **Mismo
+  fichero y mismo esquema**: nada que migrar.
+- Tras una recuperación con huecos, las imágenes que ya no nombra ninguna tarea **no se
+  borran** mientras siga en disco el fichero dañado: las tareas que no se pudieron leer
+  pueden nombrarlas.
+
+### Pruebas
+- **Pruebas de caída de verdad**: un proceso aparte al que se mata a mitad de una
+  transacción, de la migración de un `tasks.xml`, del recolector de imágenes, de la copia
+  diaria y de la propia recuperación. Se comprueba la base y la contabilidad que el plugin
+  lleva a mano —contadores, índice de texto, etiquetas—, no sólo `integrity_check`.
+- **Corrupción deliberada**: cabecera, página de índice, hoja de la tabla, índice de texto
+  y diario pisados con basura.
+- **Techos de rendimiento que rompen el build**: el banco de escala afirma el p99 y el heap
+  contra el presupuesto de cada fase, y una prueba de longevidad aplica 100.000 comandos
+  seguidos vigilando heap, diario y latencia.
+- **CI nocturna** (`nightly.yml`): el banco sobre un millón de tareas con el heap de fábrica
+  del IDE, y las pruebas de caída con treinta muertes por escenario en los tres sistemas.
+
+### Compatibilidad
+- Sin cambio de formato: el esquema sigue en la versión 1, y la 2.3.0 abre un proyecto usado
+  por la 2.4.0 y al revés. Los ficheros nuevos —la cuarentena y la marca de reparación— van
+  al lado de la base y una versión anterior los ignora.
+
 ## [2.3.0] — Un día por grupo, y un repositorio que se puede vaciar
 
 Una iteración pedida de una vez: siete cosas de uso diario, ninguna del plan de escala.

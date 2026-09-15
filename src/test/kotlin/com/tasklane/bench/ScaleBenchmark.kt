@@ -14,6 +14,7 @@ import com.tasklane.domain.export.ExportFormat
 import com.tasklane.domain.export.TaskExporter
 import kotlinx.coroutines.runBlocking
 import com.tasklane.data.sqlite.TaskDb
+import com.tasklane.data.sqlite.TaskImport
 import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.data.sqlite.TasksXmlReader
 import com.tasklane.data.store.StorageLayout
@@ -127,7 +128,7 @@ class ScaleBenchmark {
                 db.close()
             }
         }
-        record(fuera)
+        record(fuera, ceiling = OPEN_MILLIS, why = "abrir en frío, puerta de la Fase 3")
 
         val db = TaskDb.open(file.parent)!!
         try {
@@ -141,7 +142,7 @@ class ScaleBenchmark {
                 list(tree, pager, state, outline).sync()
                 settle(tree)
             }
-            record(dentro)
+            record(dentro, ceiling = EDT_MILLIS, why = "primer pintado en el EDT")
         } finally {
             db.close()
         }
@@ -170,6 +171,8 @@ class ScaleBenchmark {
                     store.apply(plan.config, plan.mutations)
                 }
             },
+            ceiling = WRITE_MILLIS,
+            why = "volcado de una edición, puerta de la Fase 3",
         )
 
         // Y el desglose, que es lo que dice dónde está el coste si algún día sube.
@@ -210,10 +213,16 @@ class ScaleBenchmark {
         val index = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(config)) }
 
         for (query in listOf("token", "revision del despliegue", "is:done token", "#api token")) {
+            // «token» está en el 98 % del corpus sintético: es el peor término posible y su
+            // coste crece con los aciertos, no con las tareas (§3-bis.5). Su techo es el de
+            // una regresión, no el de la puerta.
+            val worst = query == "token"
             record(
                 Bench.measure("buscar · «$query»", runs = 20, warmup = 5) {
                     index.search(QueryParser.parse(query), SearchScope.Repo(repo))
                 },
+                ceiling = if (worst) SEARCH_WORST_MILLIS else SEARCH_MILLIS,
+                why = if (worst) "el término presente en casi todo" else "tecla en el buscador, puerta de la Fase 3",
             )
         }
     }
@@ -270,6 +279,7 @@ class ScaleBenchmark {
         )
         // Referenciado hasta el final para que el GC de la última medida no se lo lleve.
         assertTrue(found.isNotEmpty() && tree.rowCount > 0 && outline.isNotEmpty())
+        heap("memoria · abrir + pintar + buscar", afterSearch - baseline, PLUGIN_HEAP_MB, "presupuesto del §2.6")
     }
 
     /**
@@ -284,36 +294,38 @@ class ScaleBenchmark {
     @Test
     fun `migracion desde tasks_xml`() {
         val source = corpusFile()
-        val dir = Files.createTempDirectory("tasklane-bench-migrate")
-        try {
-            val db = TaskDb.open(dir)!!
-            val store = TaskStore(db)
-            val baseline = Bench.heapMegabytes()
-            var peak = 0.0
-            var written = 0
+        // El bucle de producción, `TaskImport`, y al lado el experimento que el §5-bis.8 dejó
+        // pendiente: espaciar el volcado del diario como se hizo al quitar un repositorio.
+        // A más de 200.000 sólo la de producción: cada variante es otra base entera en disco.
+        val variants = if (n > 200_000) listOf(TaskImport.CHECKPOINT_PAGES) else listOf(TaskImport.CHECKPOINT_PAGES, TaskStore.REMOVAL_CHECKPOINT_PAGES)
+        for (pages in variants) {
+            val dir = Files.createTempDirectory("tasklane-bench-migrate")
+            try {
+                val db = TaskDb.open(dir)!!
+                val store = TaskStore(db)
+                val baseline = Bench.heapMegabytes()
+                var peak = 0.0
+                var written = 0
+                val label = if (pages == 0) "volcado de SQLite" else "volcado cada $pages páginas"
 
-            val result = Bench.measure("migración · StAX + importBatch de $n tareas", runs = 1, warmup = 0) {
-                store.bulk {
-                    TasksXmlReader.read(source, repo) { chunk ->
-                        store.write {
-                            store.importBatch(chunk, config)
-                            written += chunk.size
-                            store.markImported(repo, TasksCodec.CURRENT_VERSION, written, false, 0L)
-                        }
-                        if (written % 100_000 < TasksXmlReader.CHUNK) {
-                            peak = maxOf(peak, Bench.heapMegabytes() - baseline)
-                        }
+                val result = Bench.measure("migración · $n tareas, $label", runs = 1, warmup = 0) {
+                    val outcome = TaskImport.run(store, source, repo, config, checkpointPages = pages) { total ->
+                        written = total
+                        // Cada diez tandas y al final: pesar el heap fuerza cuatro GC y no puede ir en cada una.
+                        if (total % (TasksXmlReader.CHUNK * 10) == 0 || total == n) peak = maxOf(peak, Bench.heapMegabytes() - baseline)
                     }
+                    assertTrue("${outcome.result}", outcome.result is TasksXmlReader.Result.Done)
                 }
-            }
-            record(result)
+                record(result)
 
-            assertEquals("tienen que estar todas", n, written)
-            println("  pico de heap durante la migración: %.1f MB".format(peak))
-            println("  la base pesa: ${Files.size(dir.resolve(TaskDb.FILE_NAME)) / (1024 * 1024)} MB")
-            db.close()
-        } finally {
-            dir.toFile().deleteRecursively()
+                assertEquals("tienen que estar todas", n, written)
+                println("  pico de heap durante la migración: %.1f MB".format(peak))
+                println("  la base pesa: ${Files.size(dir.resolve(TaskDb.FILE_NAME)) / (1024 * 1024)} MB")
+                if (pages == TaskImport.CHECKPOINT_PAGES) heap("migración · pico de heap", peak, MIGRATION_HEAP_MB, "puerta de la Fase 3")
+                db.close()
+            } finally {
+                dir.toFile().deleteRecursively()
+            }
         }
     }
 
@@ -404,7 +416,7 @@ class ScaleBenchmark {
             list(tree, pager, state, outline).sync()
             settle(tree)
         }
-        record(ahora)
+        record(ahora, ceiling = EDT_MILLIS, why = "pintar la pestaña en el EDT")
     }
 
     /**
@@ -450,6 +462,8 @@ class ScaleBenchmark {
                 sync.sync()
                 settle(tree)
             },
+            ceiling = EDT_MILLIS,
+            why = "repintado en el EDT",
         )
 
         // 2. Y lo que el usuario nota al pulsar el marcador: la transacción, el
@@ -467,6 +481,8 @@ class ScaleBenchmark {
                 touched = maxOf(touched, sync.sync())
                 settle(tree)
             },
+            ceiling = UI_MILLIS,
+            why = "crear/editar/completar, puerta de la Fase 3",
         )
         // Si esto fuera cero el escenario no estaría midiendo nada: querría decir que la
         // tarea que cambió no estaba en ninguna página cargada.
@@ -500,7 +516,103 @@ class ScaleBenchmark {
             sync.loadMore(sentinel)
             settle(tree)
         }
-        record(result)
+        record(result, ceiling = EDT_MILLIS, why = "desplazarse en el EDT")
+    }
+
+    // ===================================================== longevidad (Fase 6, §6.4)
+
+    /**
+     * **§6.4 — muchos comandos seguidos sobre el corpus grande, y que nada crezca.**
+     *
+     * Es la clase de fallo que ya apareció una vez (`dc3f601`, `lastScrollAt`): nada va lento
+     * el primer minuto, y a las tres horas el heap es otro. Se aplican [commands] comandos
+     * —marcar, editar el cuerpo, mover de estado, crear y borrar— con el camino de producción,
+     * con repintados de la pestaña y búsquedas entre medias, y se vigilan tres cosas:
+     *
+     * - **El heap retenido** no crece entre la primera muestra y las siguientes.
+     * - **El diario** no crece: una lectura que se quedara abierta sujetaría el WAL y lo haría
+     *   crecer sin techo, que en WAL es la fuga que no se ve en el heap.
+     * - **La latencia** del último tramo no se aleja de la del primero.
+     *
+     * Sobre quinientas tareas del corpus, que se dejan al final **como estaban**: los demás
+     * escenarios comparten la base.
+     */
+    @Test
+    fun `longevidad · muchos comandos seguidos`() {
+        val db = openDb()
+        val store = TaskStore(db)
+        val victims = SqlitePager(db.reader, repo, config, TaskFilter.ALL, Instant.now())
+            .page(PageQuery(TasklaneConfig.TODO, null, LONGEVITY_VICTIMS)).items
+        assertTrue("hacen falta tareas sobre las que trabajar", victims.size >= 100)
+        val originals = store.tasks(victims.map { it.id })
+        val index = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(config)) }
+        val tree = Bench.edt { newTree() }
+        val state = TasklaneConfig.TODO
+
+        fun command(i: Int) {
+            val victim = victims[i % victims.size]
+            when (i % 10) {
+                0, 1, 2, 3 -> apply(store, TaskCommand.ToggleBookmark(repo, victim.id))
+                4, 5 -> apply(store, TaskCommand.UpdateBody(repo, victim.id, victim.body + " · vuelta $i"))
+                6, 7 -> apply(store, TaskCommand.ChangeState(repo, victim.id, if (i % 20 < 10) TasklaneConfig.DOING else TasklaneConfig.TODO))
+                8 -> store.apply(config, listOf(Mutation.Upsert(listOf(victim.copy(id = com.tasklane.domain.model.TaskId("longevidad-$i"))))))
+                else -> store.apply(config, listOf(Mutation.Delete(listOf(com.tasklane.domain.model.TaskId("longevidad-${i - 1}")))))
+            }
+        }
+
+        val windows = 10
+        val perWindow = (commands / windows).coerceAtLeast(1)
+        val heaps = ArrayList<Double>()
+        val wal = ArrayList<Long>()
+        val p99 = ArrayList<Double>()
+        var i = 0
+        try {
+            repeat(windows) { w ->
+                val samples = DoubleArray(perWindow)
+                for (k in 0 until perWindow) {
+                    val start = System.nanoTime()
+                    command(i++)
+                    samples[k] = (System.nanoTime() - start) / 1_000_000.0
+                    // Lo que la ventana hace detrás de cada comando, cada tanto: pedir la
+                    // pestaña de nuevo y repintarla, y una tecla en el buscador.
+                    if (i % 1_000 == 0) {
+                        val pager = SqlitePager(db.reader, repo, config, TaskFilter.ALL, Instant.now()).also { it.counts() }
+                        Bench.edt {
+                            list(tree, pager, state, emptyList()).sync()
+                            settle(tree)
+                        }
+                    }
+                    if (i % 2_000 == 0) index.search(QueryParser.parse("token"), SearchScope.Repo(repo))
+                }
+                samples.sort()
+                p99 += samples[(samples.size * 99 / 100).coerceAtMost(samples.size - 1)]
+                heaps += Bench.heapMegabytes()
+                wal += runCatching { Files.size(TaskDb.walOf(db.file)) }.getOrDefault(0L)
+                println("  longevidad · tramo ${w + 1}/$windows · p99 %.2f ms · heap %.1f MB · diario %d MB".format(p99.last(), heaps.last(), wal.last() / (1 shl 20)))
+            }
+        } finally {
+            // Las tareas como estaban, y fuera las que se crearon.
+            store.apply(config, listOf(Mutation.Upsert(originals)))
+            store.apply(config, listOf(Mutation.Delete((0 until i).map { com.tasklane.domain.model.TaskId("longevidad-$it") })))
+        }
+
+        // La primera muestra es la de después de calentar: clases cargadas, JIT, cachés
+        // llenas. Lo que importa es que de ahí no se mueva.
+        val growth = heaps.drop(1).max() - heaps.first()
+        heap("longevidad · crecimiento del heap en $commands comandos", growth, LONGEVITY_HEAP_GROWTH_MB, "sin fugas, §6.4")
+        heap("longevidad · diario al final", wal.last() / (1024.0 * 1024.0), LONGEVITY_WAL_MB, "ninguna lectura sujeta el WAL")
+        val drift = p99.last()
+        assertTrue(
+            "la latencia se alejó: p99 del primer tramo %.2f ms, del último %.2f ms".format(p99.first(), drift),
+            drift <= maxOf(p99.first() * 2, p99.first() + 2.0),
+        )
+    }
+
+    private fun apply(store: TaskStore, command: TaskCommand) {
+        store.write {
+            val plan = reducer.plan(TaskReducer.Subject(config, store.tasks(reducer.targetsOf(command))), command)
+            if (!plan.isEmpty) store.apply(plan.config, plan.mutations)
+        }
     }
 
     // ======================================================== las puertas de la Fase 4
@@ -824,6 +936,7 @@ class ScaleBenchmark {
         var peak = 0.0
         stream { peak = maxOf(peak, Bench.heapMegabytes() - baseline) }
         println("  %d MB de texto · pico de heap en streaming: %.1f MB".format(chars / (1024 * 1024), peak))
+        heap("exportar un estado · pico de heap", peak, PLUGIN_HEAP_MB, "memoria constante, Fase 5")
 
         if (n > 200_000) return
         record(
@@ -878,6 +991,7 @@ class ScaleBenchmark {
         var peak = 0.0
         stream { peak = maxOf(peak, Bench.heapMegabytes() - baseline) }
         println("  %d MB de XML · pico de heap en streaming: %.1f MB".format(bytes / (1024 * 1024), peak))
+        heap("exportar a XML · pico de heap", peak, PLUGIN_HEAP_MB, "memoria constante, Fase 5")
 
         if (n > 200_000) return
         record(
@@ -930,6 +1044,9 @@ class ScaleBenchmark {
                 },
             )
             val batch = TaskCommand.Batch(ids.map { TaskCommand.ToggleBookmark(repo, it) })
+            // El lote que `TaskService.applyAll` aplica en el acto —hasta `BULK_INLINE`— lo hace
+            // en el EDT, así que ése tiene el techo del EDT. Los demás van en segundo plano.
+            val inline = size <= com.tasklane.service.TaskService.BULK_INLINE
             record(
                 Bench.measure("masiva · $size en un lote", runs = if (size <= 50) 20 else 3, warmup = if (size <= 50) 6 else 1) {
                     store.write {
@@ -937,6 +1054,8 @@ class ScaleBenchmark {
                         store.apply(plan.config, plan.mutations)
                     }
                 },
+                ceiling = if (inline) EDT_MILLIS else null,
+                why = "lote aplicado en el acto, en el EDT",
             )
 
             if (size != 2_000) continue
@@ -997,6 +1116,9 @@ class ScaleBenchmark {
      */
     @Test
     fun `quitar un repositorio y copiar la base`() {
+        // Tres copias enteras de la base: a un millón son treinta gigas, y no caben en el
+        // runner de la CI nocturna. Lo que mide ya se midió a 100.000 (§5-bis).
+        Assume.assumeTrue("tres copias de la base no caben a este tamaño", n <= 200_000)
         val db = openDb()
         val dir = Files.createTempDirectory("tasklane-bench-remove")
         try {
@@ -1281,9 +1403,32 @@ class ScaleBenchmark {
             .lastOrNull { it.direction == MoreNode.Direction.AFTER }
     }
 
-    private fun record(result: Bench.Result) {
-        results += result
-        println("  $result")
+    private fun record(result: Bench.Result, ceiling: Double? = null, why: String = "") {
+        results += Recorded(result, ceiling, why)
+        println("  $result" + (ceiling?.let { "   techo %.0f ms".format(it) } ?: ""))
+        // Después de apuntarlo: un techo roto tiene que dejar su cifra en el informe.
+        if (ceiling != null) {
+            assertTrue(
+                "${result.name}: p99 %.2f ms por encima del techo de %.0f ms ($why)".format(result.p99Millis, ceiling),
+                result.p99Millis <= ceiling,
+            )
+        }
+    }
+
+    /**
+     * Un techo de memoria (§6.3). Como [record], pero la cifra es megabytes retenidos y no
+     * milisegundos; va al mismo CSV con la columna de heap.
+     */
+    private fun heap(name: String, megabytes: Double, ceiling: Double, why: String) {
+        val result = Bench.Result(name, 1, 0.0, 0.0, 0.0, megabytes)
+        results += Recorded(result, ceiling, why, memory = true)
+        println("  %-46s heap %8.1f MB   techo %.0f MB".format(name, megabytes, ceiling))
+        assertTrue("$name: %.1f MB por encima del techo de %.0f MB ($why)".format(megabytes, ceiling), megabytes <= ceiling)
+    }
+
+    /** Una cifra con su techo, para el CSV de la CI nocturna. */
+    private class Recorded(val result: Bench.Result, val ceiling: Double?, val why: String, val memory: Boolean = false) {
+        val ok: Boolean get() = ceiling == null || (if (memory) result.heapMegabytes else result.p99Millis) <= ceiling
     }
 
     companion object {
@@ -1312,7 +1457,54 @@ class ScaleBenchmark {
          */
         private var held: List<java.awt.image.BufferedImage> = emptyList()
 
-        private val results = mutableListOf<Bench.Result>()
+        private val results = mutableListOf<Recorded>()
+
+        // ------------------------------------------------ los techos (§6.3)
+        //
+        // **Presupuestos del plan, no medidas de hoy.** Un techo sacado de la cifra de esta
+        // máquina saltaría en un runner más lento sin que nada hubiera empeorado; uno sacado
+        // de la puerta de cada fase salta cuando el plugin deja de cumplir lo que prometió,
+        // que es lo que tiene que romper el build. Todos sobre el p99, no sobre la media: lo
+        // que congela una ventana es la cola.
+
+        /** Un fotograma a 60 Hz: todo lo que ocurre en el EDT. */
+        const val EDT_MILLIS = 16.0
+
+        /** Crear, editar o completar visto desde la interfaz: comando y repintado. */
+        const val UI_MILLIS = 50.0
+
+        /** Lo que tarda en escribirse una edición. */
+        const val WRITE_MILLIS = 20.0
+
+        /** Abrir en frío: contadores y cabeceras, fuera del EDT. */
+        const val OPEN_MILLIS = 300.0
+
+        /** Una tecla en el buscador hasta tener resultados. */
+        const val SEARCH_MILLIS = 100.0
+
+        /**
+         * El término que está en casi todas las tareas. Crece con los aciertos (§3-bis.5), así
+         * que no puede tener el techo de la puerta; tiene el de una regresión de un orden de
+         * magnitud.
+         */
+        const val SEARCH_WORST_MILLIS = 1_000.0
+
+        /** El heap del plugin, §2.6. */
+        const val PLUGIN_HEAP_MB = 150.0
+
+        /** El pico de heap migrando, puerta de la Fase 3. */
+        const val MIGRATION_HEAP_MB = 300.0
+
+        /** Cuántos comandos aplica la prueba de longevidad. `-PbenchCommands=100000`. */
+        val commands: Int = System.getProperty("tasklane.bench.commands")?.toIntOrNull() ?: 100_000
+
+        const val LONGEVITY_VICTIMS = 500
+
+        /** Lo que puede moverse el heap retenido entre muestras sin que sea una fuga: ruido del GC y cachés con tope. */
+        const val LONGEVITY_HEAP_GROWTH_MB = 16.0
+
+        /** Cuatro volcados automáticos del diario: más, y algo lo está sujetando. */
+        const val LONGEVITY_WAL_MB = 32.0
 
         private var cached: List<Task>? = null
         private var cachedFile: Path? = null
@@ -1376,10 +1568,44 @@ class ScaleBenchmark {
             println("\n═══ Banco de escala · n = $n · heap máx = ${Runtime.getRuntime().maxMemory() / (1 shl 20)} MB ═══")
         }
 
+        /**
+         * Las cifras de esta ejecución, con su techo, en `build/bench/results-<n>.csv`. Lo que la
+         * CI nocturna guarda de cada noche: una fila por medida, para poder ver una tendencia y
+         * no sólo un rojo o un verde.
+         */
+        private fun writeCsv() {
+            if (results.isEmpty()) return
+            val dir = Path.of(System.getProperty("tasklane.bench.out") ?: "build/bench")
+            runCatching {
+                Files.createDirectories(dir)
+                val file = dir.resolve("results-$n.csv")
+                val fresh = !Files.exists(file)
+                val stamp = Instant.now().toString()
+                val lines = buildList {
+                    if (fresh) add("when,n,name,runs,p50_ms,p99_ms,max_ms,heap_mb,ceiling,unit,ok,why")
+                    for (r in results) {
+                        val x = r.result
+                        add(
+                            listOf(
+                                stamp, n.toString(), "\"" + x.name.replace("\"", "'") + "\"", x.runs.toString(),
+                                "%.3f".format(java.util.Locale.ROOT, x.p50Millis), "%.3f".format(java.util.Locale.ROOT, x.p99Millis),
+                                "%.3f".format(java.util.Locale.ROOT, x.maxMillis), "%.1f".format(java.util.Locale.ROOT, x.heapMegabytes),
+                                r.ceiling?.let { "%.0f".format(java.util.Locale.ROOT, it) }.orEmpty(), if (r.memory) "MB" else "ms",
+                                r.ok.toString(), "\"" + r.why.replace("\"", "'") + "\"",
+                            ).joinToString(","),
+                        )
+                    }
+                }
+                Files.write(file, lines, java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+                println("Resultados en ${file.toAbsolutePath()}")
+            }.onFailure { println("No se pudieron escribir los resultados: $it") }
+        }
+
         @AfterClass
         @JvmStatic
         fun summary() {
-            Bench.report("Resumen · n = $n", results)
+            Bench.report("Resumen · n = $n", results.map { it.result })
+            writeCsv()
             openedDb?.close()
             cachedFile?.parent?.toFile()?.deleteRecursively()
             cachedDb?.parent?.toFile()?.deleteRecursively()

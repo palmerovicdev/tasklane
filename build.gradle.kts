@@ -118,6 +118,29 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.4.0 &mdash; hardening</h3>
+            <p><b>What the previous releases took for granted is now tested by force:</b>
+               crashes, damaged databases and long sessions.</p>
+            <ul>
+              <li><b>A damaged task database repairs itself.</b> The damaged file is set aside
+                  and never deleted, everything that can still be read is rescued, and only
+                  what cannot comes from the daily backup. A broken index &mdash; the most
+                  common kind of damage &mdash; is repaired with nothing lost. Tasks are
+                  read-only while it runs, a notice says what happened, and an interrupted
+                  repair finishes on the next start.</li>
+              <li><b>Damage found while the project is open</b> stops all writes, so nothing
+                  more is lost inside a broken file, and offers to reopen the project to
+                  repair it.</li>
+              <li><b>SQLite is now bundled</b> instead of using the one inside the IDE, which is
+                  internal API. Same database file, same schema: nothing to migrate.</li>
+              <li>Crash tests kill the process in the middle of an edit, the migration, the
+                  image cleanup, the backup and the repair itself; a nightly build runs the
+                  scale benchmark on a million tasks with the IDE&rsquo;s default 2&nbsp;GB heap
+                  and fails if any latency or memory budget is exceeded.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.3.0 and 2.4.0 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.3.0 &mdash; a day per section, and a repository you can empty</h3>
             <ul>
               <li><b>Date sections are days.</b> <i>Today</i>, then one section per day that
@@ -489,6 +512,11 @@ tasks {
         // millon de tareas son 10 GB de base y un millon de capturas son 33 GB de PNG,
         // asi que pedirlos a la vez es una noche de disco y ninguna puerta lo necesita.
         providers.gradleProperty("benchBlobs").orNull?.let { systemProperty("tasklane.bench.blobs", it) }
+
+        // Fase 6: cuantos comandos aplica la prueba de longevidad, y donde deja el banco sus
+        // cifras en CSV para la CI nocturna.
+        providers.gradleProperty("benchCommands").orNull?.let { systemProperty("tasklane.bench.commands", it) }
+        providers.gradleProperty("benchOut").orNull?.let { systemProperty("tasklane.bench.out", it) }
 
         // Las pruebas de caida de la Fase 6 (CrashTest): cuantas veces se mata cada escenario
         // y con que semilla. El build normal hace dos vueltas; -PcrashRounds=50 es la de verdad.

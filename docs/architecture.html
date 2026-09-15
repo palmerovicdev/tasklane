@@ -586,6 +586,23 @@ data class RepositoryRef(
       <li><strong><code>PRAGMA optimize</code> al cerrar</strong>, con <code>analysis_limit</code>. Con el SQLite 3.42 de la plataforma y sin estadísticas previas hoy no hace nada; un test fija que un <code>ANALYZE</code> completo no le cambia el plan a ninguna consulta de la lista, que es lo que no se podía arriesgar.</li>
     </ul>
   </div>
+  <div class="adr warn">
+    <span class="tag">2.4.0 · SQLite empaquetado (Fase 6)</span>
+    <p><strong>La elección de la Fase 0 se revierte, por una razón que no era técnica.</strong> <code>org.jetbrains.sqlite</code> funcionaba —FTS5, WAL, la nativa para las seis plataformas— y su módulo se declara <code>visibility="public"</code>, pero el paquete lleva <code>@ApiStatus.Internal</code> en su <code>package-info</code>, y el Marketplace rechaza un plugin que usa API interna. Se empaqueta <code>org.xerial:sqlite-jdbc</code>, que es lo que el §2.3 del plan proponía desde el principio y del que el módulo de la plataforma deriva.</p>
+    <p><strong>Lo que no cambió: el fichero.</strong> Mismo <code>tasklane.db</code>, mismo esquema, mismo <code>user_version</code>; una base de la 2.3 se abre sin migrar. El cambio cupo en <code>Sql.kt</code> —la envoltura de cuatro operaciones que ya separaba el almacén del driver— más la firma de los lectores de fila, que siguen numerando columnas desde cero porque <code>Sql.Row</code> traduce. Las tres suites de equivalencia (<code>MemoryPager</code>/<code>SqlitePager</code>, <code>LinearScanIndex</code>/<code>Fts5Index</code>, <code>TasksCodec</code>/<code>TasksXmlReader</code>) pasan sin tocar una línea, que es exactamente para lo que existían. De paso llega lo que el módulo interno no exponía: <code>sqlite3_interrupt</code>.</p>
+    <p>Lo que cuesta: el driver pesa unos 12&nbsp;MB con sus nativas y las extrae a un temporal la primera vez. El riesgo de classloader que hizo descartar <code>kotlinx-serialization</code> no aplica: el paquete <code>org.sqlite</code> no lo trae la plataforma, así que no hay dos copias que choquen.</p>
+  </div>
+  <div class="adr warn">
+    <span class="tag">2.4.0 · una base dañada se recupera sola (Fase 6)</span>
+    <p>La 2.2 detectaba el daño y avisaba. La 2.4 lo arregla con <strong>el mismo comportamiento que tenía un <code>tasks.xml</code> ilegible</strong> —cuarentena, lo legible dentro, lo que falta desde la copia, y un aviso que dice cuál de los casos fue— más un paso que el XML no necesitaba: como la copia es de un día y no del último guardado, <strong>la copia sólo rellena lo que el fichero dañado no deja leer</strong>. Casi toda página rota es de un índice, y ahí no se pierde nada.</p>
+    <ul>
+      <li><strong>Al abrir</strong>: una base que no abre por daño —<code>SQLITE_CORRUPT</code>, <code>SQLITE_NOTADB</code>— o con una recuperación apuntada no se usa. El servicio arranca sin almacén y en solo lectura, y en segundo plano <code>StoreRecovery</code> mueve el fichero a <code>tasklane.db.corrupt-&lt;fecha&gt;</code>, salva tabla a tabla <strong>por rangos de rowid</strong> —sin tocar un índice del fichero dañado—, completa desde <code>tasklane.db.backup</code> los huecos de <code>task</code> por <code>seq</code>, rehace lo derivado (índice de texto, contadores, tupla de orden) con <code>StoreAudit.rebuild</code>, lo comprueba con <code>StoreAudit.check</code> y sólo entonces la pone en su sitio.</li>
+      <li><strong>Con la base abierta</strong>: si la comprobación tras un cierre sucio encuentra daño, o una escritura falla con <code>SQLITE_CORRUPT</code>, se deja de escribir —lo que se escribiera en un fichero dañado se perdería con él—, se apunta la recuperación en una marca <strong>fuera</strong> de la base y se ofrece reabrir el proyecto. No se cambia el fichero en caliente: la conexión la comparten la lista, la búsqueda y las marcas del editor, y reabrir es el camino que ya está probado.</li>
+      <li><strong>Reanudable</strong>: la marca dice si ya se movió a cuarentena; la base reconstruida lleva dentro la fecha de su recuperación. Una prueba de caída mata el proceso a mitad y comprueba que reabrir la termina sin segunda cuarentena.</li>
+      <li><strong>Las imágenes esperan</strong>: tras una recuperación con huecos, mientras siga en disco su fichero dañado, el recolector no borra nada — las tareas que no se pudieron leer pueden nombrar imágenes.</li>
+    </ul>
+    <p>La trampa que costó un test en rojo, y que decide cómo se salva: con una hoja rota, la búsqueda de una fila concreta <strong>puede no encontrarla sin dar error</strong>, y un rango que la abarca devuelve las de alrededor saltándosela en silencio. Por eso un rango que falla se sondea fila a fila, y un vacío cerca de una fila que falla se trata como hueco.</p>
+  </div>
 </section>
 
 <!-- ============ 5 ============ -->
@@ -824,6 +841,23 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <p>Qué hace el motor y qué seguimos haciendo nosotros: el tokenizador <code>unicode61 remove_diacritics 2</code> <strong>es</strong> <code>TextNormalizer</code>, pero dentro de SQLite; <code>bm25()</code> con peso 10 en la columna del título sustituye al escalón de <code>TITLE_WEIGHT = 1_000_000</code> sin el tope contra el desbordamiento; <code>QueryParser</code> no se toca y sigue produciendo el mismo <code>TaskQuery</code>. Lo que es texto —libre, etiquetas y rutas ancladas— va al <code>MATCH</code>; lo que es propiedad de la fila —<code>state:</code>, <code>p:</code>, <code>repo:</code>, <code>is:</code>, <code>has:</code>— va al <code>WHERE</code>.</p>
     <p><strong>Lo que cambia para quien busca, dicho claro:</strong> el escaneo hacía <code>contains</code> sobre el cuerpo entero, así que escribir <code>ogin</code> encontraba <code>login</code>. FTS5 casa palabras y prefijos de palabra: <code>log</code> lo sigue encontrando, <code>ogin</code> no. Se acepta porque buscar desde la tercera letra de una palabra es un accidente y no un gesto, y porque ese <code>contains</code> era justamente la operación que obligaba a recorrer el corpus. <code>LinearScanIndex</code> <strong>no se borró</strong>: se queda como implementación de referencia, y un test compara las dos sobre el mismo corpus consulta por consulta.</p>
     <p><code>invalidate</code> desapareció de la interfaz —no lo llamaba nadie— y <code>setCorpus</code> pasó a recibir un <code>SearchCorpus</code>: la configuración y los repositorios, que son los nombres que hay que traducir a ids. El corpus ya no entra, porque el índice vive en disco.</p>
+  </div>
+
+  <div class="adr">
+    <span class="tag">Fase 6 · por qué no indexar era correcto, y qué lo revirtió</span>
+    <p>Esta sección se deja entera, con su primer párrafo incluido, porque <strong>no se equivocó</strong>. Dijo un techo y el techo resultó estar donde dijo. Medido después con el banco de la Fase 0 sobre el corpus de la especificación —cuerpos diez veces más largos que los ~200 caracteres que suponía—, una tecla en el buscador costaba:</p>
+    <div class="tw"><table>
+      <thead><tr><th>Tareas</th><th>Escaneo lineal</th><th>Presupuesto de la tecla</th></tr></thead>
+      <tbody>
+        <tr><td>5.000 <em>(el punto de diseño)</em></td><td>5,6 ms</td><td>holgado</td></tr>
+        <tr><td>10.000</td><td>9,9 ms</td><td>holgado</td></tr>
+        <tr><td>50.000</td><td>52,7 ms</td><td>se nota</td></tr>
+        <tr><td>100.000</td><td>99,3 ms</td><td>en el límite</td></tr>
+      </tbody>
+    </table></div>
+    <p>Con 5.000 tareas un índice invertido habría ahorrado cinco milisegundos a cambio de su invalidación incremental, que es la parte que se rompe. La decisión era la buena para el problema que había.</p>
+    <p><strong>Lo que la revirtió no fue la latencia, fue el objetivo.</strong> El plan de escala subió el techo a un millón de tareas, y a esa escala el escaneo tiene dos costes y el de tiempo es el menor: ~0,9 s por tecla, sí, pero sobre todo <strong>3 KB por tarea de documentos normalizados que había que tener vivos</strong> —3 GB de heap sólo para poder buscar—, en un plugin cuyo presupuesto entero es de 150 MB. Ninguna constante arreglaba eso: buscar recorriendo exige tener delante lo que se recorre. Con FTS5 el índice vive en disco, cuesta 0,15 ms una consulta selectiva a 100.000 tareas y 40 ms la peor —un término presente en el 98 % del corpus—, y el coste que queda crece con los <em>aciertos</em>, no con las tareas.</p>
+    <p>Las dos lecciones que esta sección deja, y por las que merece quedarse: <strong>la decisión se tomó con un número y se revisó con otro número</strong>, no con una intuición sobre qué «escala»; y <strong>la costura que la hacía reversible se pagó por adelantado</strong> —<code>TaskSearchIndex</code> no tenía una segunda implementación durante cuatro versiones— y fue lo que convirtió revertirla en un cambio de dos ficheros sin tocar la UI. Lo mismo pasó dos veces más en el plan: con <code>TaskPager</code> al mover la lista a SQL, y con <code>Sql</code> al cambiar de driver en la Fase 6.</p>
   </div>
 </section>
 

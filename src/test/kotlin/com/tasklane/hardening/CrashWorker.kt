@@ -4,6 +4,7 @@ import com.tasklane.bench.SyntheticCorpus
 import com.tasklane.data.attachment.AttachmentStore
 import com.tasklane.data.attachment.BlobRecord
 import com.tasklane.data.attachment.BlobSweeper
+import com.tasklane.data.sqlite.StoreRecovery
 import com.tasklane.data.sqlite.TaskDb
 import com.tasklane.data.sqlite.TaskImport
 import com.tasklane.data.sqlite.TaskStore
@@ -46,6 +47,7 @@ internal object CrashWorker {
                 "migration" -> migration(Path.of(args[1]), Path.of(args[2]))
                 "gc" -> gc(Path.of(args[1]), Path.of(args[2]), Instant.parse(args[3]))
                 "backup" -> backup(Path.of(args[1]), Path.of(args[2]))
+                "recover" -> recover(Path.of(args[1]), Path.of(args[2]))
                 else -> error("modo desconocido: ${args[0]}")
             }
             say("EXIT")
@@ -106,6 +108,13 @@ internal object CrashWorker {
         say("START")
         val bytes = db.backupTo(target)
         say("DONE $bytes")
+    }
+
+    // ---------------------------------------------------------------- recuperación
+
+    private fun recover(dir: Path, backup: Path) {
+        val outcome = StoreRecovery.recover(dir, backup) { phase -> say("PHASE $phase") }
+        say("DONE $outcome")
     }
 
     /** Veinte minutos: lo máximo que un escenario puede tardar antes de darlo por colgado. */

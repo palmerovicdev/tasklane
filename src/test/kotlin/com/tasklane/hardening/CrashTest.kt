@@ -317,6 +317,77 @@ class CrashTest {
         }
     }
 
+    // --------------------------------------------------------------- recuperación
+
+    /**
+     * **A mitad de recuperar una base dañada.** La recuperación del §6.2 mueve ficheros y
+     * reconstruye una base entera; si el IDE muere en cualquier punto, la apertura siguiente
+     * tiene que terminarla sin perder nada, sin una segunda cuarentena y sin dejar la base a
+     * medio hacer en su sitio.
+     */
+    @Test
+    fun `morir a mitad de la recuperacion y reabrir la termina`() = repeat(rounds) { n ->
+        val random = round("recuperación", n)
+        withDir { root ->
+            val dir = root.resolve("tasklane")
+            val backup = dir.resolve("tasklane.db.backup")
+            TaskDb.open(dir)!!.let { setup ->
+                val store = TaskStore(setup)
+                store.importBatch(SyntheticCorpus.tasks(RECOVERY_TASKS, Commands.REPO, config = Commands.CONFIG), Commands.CONFIG)
+                setup.backupTo(backup)
+                store.importBatch(
+                    SyntheticCorpus.tasks(BACKUP_EXTRA, Commands.REPO, seed = 11, config = Commands.CONFIG)
+                        .map { it.copy(id = TaskId("despues-" + it.id.value)) },
+                    Commands.CONFIG,
+                )
+                setup.writer.execute("VACUUM")
+                setup.close()
+            }
+            // Un índice roto: la recuperación lo tiene que dejar todo, las de después de la
+            // copia incluidas.
+            val file = dir.resolve(TaskDb.FILE_NAME)
+            val (pageSize, rootPage) = Sql(file, readOnly = true).let { sql ->
+                try {
+                    sql.count("PRAGMA page_size") to sql.count("SELECT rootpage FROM sqlite_master WHERE name = 'task_board'")
+                } finally {
+                    sql.close()
+                }
+            }
+            java.io.RandomAccessFile(file.toFile(), "rw").use { raf ->
+                raf.seek((rootPage - 1).toLong() * pageSize + 16)
+                raf.write(ByteArray(pageSize - 32) { 0x5A })
+            }
+            com.tasklane.data.sqlite.StoreRecovery.markDamaged(dir, "prueba de caída")
+
+            var finished = false
+            ChildJvm.start(CrashWorker.MAIN, "recover", dir.toString(), backup.toString()).use { child ->
+                val phase = listOf("backup", "rebuild", "check")[random.nextInt(3)]
+                child.await { it == "PHASE $phase" }
+                Thread.sleep(random.nextLong(0, 150))
+                child.kill()
+                finished = child.output.any { it.startsWith("DONE") }
+            }
+
+            // Reabrir: lo que haga falta para terminar.
+            com.tasklane.data.sqlite.StoreRecovery.recover(dir, backup)
+            assertFalse("no queda nada pendiente", com.tasklane.data.sqlite.StoreRecovery.pending(dir))
+            assertFalse("ni una base a medio hacer", Files.exists(dir.resolve(com.tasklane.data.sqlite.StoreRecovery.RECOVERING)))
+            val quarantines = Files.list(dir).use { files ->
+                files.filter { it.fileName.toString().matches(Regex("tasklane\\.db\\.corrupt-\\d+")) }.count()
+            }
+            assertEquals("una sola cuarentena", 1L, quarantines)
+
+            val db = TaskDb.open(dir)!!
+            try {
+                auditClean(db)
+                assertEquals("nada se perdió", RECOVERY_TASKS + BACKUP_EXTRA, TaskStore(db).countOf(Commands.REPO))
+            } finally {
+                db.close()
+            }
+            println("[recuperación] muerta ${if (finished) "después de terminar" else "a mitad"}; reabrir la terminó")
+        }
+    }
+
     private fun task(id: String, body: String) = com.tasklane.data.sqlite.StoreFixture.task(id, body = body, repo = Commands.REPO)
 
     private companion object {
@@ -324,5 +395,6 @@ class CrashTest {
         const val REFERENCED = 1_000
         const val BACKUP_TASKS = 3_000
         const val BACKUP_EXTRA = 500
+        const val RECOVERY_TASKS = 3_000
     }
 }

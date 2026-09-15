@@ -1,0 +1,111 @@
+name: Nightly scale
+
+# §6.3 del plan de escala: el corpus de un millón de tareas, cada noche, con techos.
+#
+# El banco (ScaleBenchmark) no mide por mirar: cada escenario lleva el techo que su fase
+# prometió —16 ms en el EDT, 50 ms de interfaz para una edición, 150 MB de heap del plugin,
+# 300 MB migrando…— y un p99 por encima es un test en rojo. Una regresión de rendimiento
+# rompe el build igual que la rompe un test.
+#
+# Los techos son presupuestos del plan y no cifras de un portátil, precisamente para que un
+# runner más lento no los rompa sin que nada haya empeorado.
+#
+# Con -PtestHeap=2g, que es el heap de fábrica del IDE: si algo vuelve a retener el corpus,
+# esto no da una cifra mala, da un OutOfMemoryError.
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: Tareas del corpus
+        default: '1000000'
+      heap:
+        description: Heap de la JVM de test
+        default: '2g'
+      commands:
+        description: Comandos de la prueba de longevidad
+        default: '100000'
+
+concurrency:
+  group: nightly-scale
+  cancel-in-progress: false
+
+jobs:
+  # §6.1: las pruebas de caída, con muchas más muertes que en el build de cada push —ahí
+  # son dos por escenario— y en los tres sistemas: matar un proceso en Windows no es lo
+  # mismo que en Linux, y el diario de SQLite tampoco se comporta igual.
+  crash:
+    name: Crash tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Crash tests, 30 deaths per scenario
+        run: ./gradlew test --tests '*CrashTest' --tests '*StoreRecoveryTest' -PcrashRounds=30 -PlocalIdePath=
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-report-${{ matrix.os }}
+          path: build/reports/tests/test
+
+  scale:
+    name: Scale benchmark (${{ github.event.inputs.tasks || '1000000' }} tasks)
+    runs-on: ubuntu-latest
+    # Construir la base de un millón y la de la migración son horas; seis es el máximo de un
+    # runner alojado.
+    timeout-minutes: 350
+    env:
+      N: ${{ github.event.inputs.tasks || '1000000' }}
+      HEAP: ${{ github.event.inputs.heap || '2g' }}
+      COMMANDS: ${{ github.event.inputs.commands || '100000' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Un millón de tareas de la especificación son ~10 GB de base, y la migración construye
+      # otra; más los 2,9 GB del tasks.xml. No caben en el disco raíz del runner: se liberan
+      # las herramientas que no se usan y los temporales van a /mnt.
+      - name: Make room on disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo mkdir -p /mnt/tasklane-tmp && sudo chown "$USER" /mnt/tasklane-tmp
+          df -h / /mnt
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Scale benchmark with ceilings
+        env:
+          # Lo lee también la JVM hija de las pruebas de caída y el driver de SQLite, que
+          # extrae su nativa al temporal.
+          JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/mnt/tasklane-tmp
+        run: >
+          ./gradlew test --tests '*ScaleBenchmark' -PlocalIdePath=
+          -PbenchN=$N -PtestHeap=$HEAP -PbenchCommands=$COMMANDS
+          -PbenchOut=build/bench
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-${{ env.N }}-${{ github.run_number }}
+          path: |
+            build/bench/*.csv
+            build/reports/tests/test
+          retention-days: 90

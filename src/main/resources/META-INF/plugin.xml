@@ -293,8 +293,15 @@
                 to be committed: that is how a team shares a workflow.</li>
             <li><b>A daily backup</b>, <code>tasklane.db.backup</code>, made in the background
                 only when something changed.</li>
-            <li><b>A check after an unclean shutdown</b>: if the database is damaged you are told,
-                with the date of the last backup.</li>
+            <li><b>A check after an unclean shutdown</b>: if the database is damaged, nothing more
+                is written into it and reopening the project repairs it.</li>
+            <li><b>A damaged database repairs itself</b>: the damaged file is set aside and never
+                deleted, <b>everything that can still be read is rescued</b>, and only what
+                cannot comes from the daily backup. Most damage is to an index, and then nothing
+                is lost; a notice always says which case it was.</li>
+            <li><b>Tested by killing the process</b> in the middle of an edit, the migration, the
+                image cleanup, the backup and the repair itself: what was committed survives, what
+                was halfway leaves nothing behind, and the next start finishes the job.</li>
             <li><b>Changing the configuration never loses tasks</b>: tasks whose state or priority
                 disappears move to the default one, you are told how many with a <i>Show
                 them</i> link, and they go back on their own if it reappears.</li>
