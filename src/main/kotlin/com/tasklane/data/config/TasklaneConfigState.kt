@@ -61,9 +61,6 @@ class TasklaneConfigState {
     var repoDepth: Int = TasklaneConfig.DEFAULT_REPO_DEPTH
 
     @Attribute
-    var imageMaxSize: Int = TasklaneConfig.DEFAULT_IMAGE_MAX_SIZE
-
-    @Attribute
     var imageQuotaMegabytes: Int = TasklaneConfig.DEFAULT_IMAGE_QUOTA_MB
 }
 
@@ -79,7 +76,7 @@ fun TasklaneConfigState.toDomain(): TasklaneConfig? {
     val states = states.mapIndexedNotNull { i, bean -> bean.toDomain(i) }
     val priorities = priorities.mapIndexedNotNull { i, bean -> bean.toDomain(i) }
     if (states.isEmpty() || priorities.isEmpty()) return null
-    return TasklaneConfig(states, priorities, triggersEnabled, repoDepth, imageMaxSize, imageQuotaMegabytes)
+    return TasklaneConfig(states, priorities, triggersEnabled, repoDepth, imageQuotaMegabytes)
         .normalized()
 }
 
@@ -132,7 +129,6 @@ fun TasklaneConfig.toState(): TasklaneConfigState = TasklaneConfigState().also {
     }
     state.triggersEnabled = triggersEnabled
     state.repoDepth = repoDepth
-    state.imageMaxSize = imageMaxSize
     state.imageQuotaMegabytes = imageQuotaMegabytes
 }
 

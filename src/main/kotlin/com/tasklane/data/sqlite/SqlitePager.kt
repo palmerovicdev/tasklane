@@ -17,7 +17,6 @@ import com.tasklane.paging.PageQuery
 import com.tasklane.paging.Reveal
 import com.tasklane.paging.TaskPage
 import com.tasklane.paging.TaskPager
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -67,7 +66,6 @@ internal class SqlitePager(
     private val now: Instant,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val today: LocalDate = LocalDate.now(zone),
-    private val firstDayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
     /**
      * Cómo abrir una conexión de lectura **propia** para [snapshot]. `null` == este
      * paginador no sabe congelarse y exporta sobre la conexión compartida, que es lo que
@@ -157,6 +155,12 @@ internal class SqlitePager(
      * a qué grupo pertenece la siguiente fila que existe; de ahí sale el intervalo del
      * grupo —[DateGrouper.rangeOf]— y su cuenta es un rango contiguo del mismo índice.
      * Son dos consultas por cabecera **que se va a pintar**, y ninguna por las que no.
+     *
+     * Desde la 2.3.0 cada día con tareas es una cabecera —antes los años anteriores se
+     * juntaban por meses—, así que el coste es proporcional a **los días distintos con
+     * tareas**, y sigue sin serlo al número de tareas: una lista de dos años son como
+     * mucho unas setecientas cabeceras, se tenga cien tareas o un millón. Ocurre fuera
+     * del EDT, y el árbol pagina las cabeceras como todo lo demás.
      */
     private fun dateOutline(stateId: StateId): List<GroupOutline> {
         val out = ArrayList<GroupOutline>()
@@ -168,8 +172,8 @@ internal class SqlitePager(
                 *params(repo.value, stateId.value, ceiling),
             ) { it.getLong(0) } ?: break
 
-            val group = DateGrouper.groupOf(Instant.ofEpochMilli(next), today, zone, firstDayOfWeek)
-            val range = DateGrouper.rangeOf(group, today, zone, firstDayOfWeek) ?: break
+            val group = DateGrouper.groupOf(Instant.ofEpochMilli(next), today, zone)
+            val range = DateGrouper.rangeOf(group, today, zone) ?: break
             val n = countRange(stateId, range.first, range.last)
             if (n > 0) out += GroupOutline(GroupKey.OfDate(group), n)
             // Estrictamente por debajo del principio del grupo que se acaba de contar.
@@ -335,7 +339,7 @@ internal class SqlitePager(
         val sql = open()
         try {
             return sql.transaction {
-                block(SqlitePager(sql, repo, config, filter, now, zone, today, firstDayOfWeek, detach = null))
+                block(SqlitePager(sql, repo, config, filter, now, zone, today, detach = null))
             }
         } finally {
             sql.close()
@@ -389,7 +393,7 @@ internal class SqlitePager(
             Grouping.NONE -> null
             Grouping.BY_DATE -> GroupKey.OfDate(
                 if (located.undated) DateGroup.Undated
-                else DateGrouper.groupOf(Instant.ofEpochMilli(located.sortDate), today, zone, firstDayOfWeek),
+                else DateGrouper.groupOf(Instant.ofEpochMilli(located.sortDate), today, zone),
             )
 
             Grouping.BY_PRIORITY -> GroupKey.OfPriority(config.priorityOrDefault(located.task.priorityId).id)
@@ -438,7 +442,7 @@ internal class SqlitePager(
 
         when (group) {
             is GroupKey.OfDate -> {
-                val range = DateGrouper.rangeOf(group.group, today, zone, firstDayOfWeek)
+                val range = DateGrouper.rangeOf(group.group, today, zone)
                 if (range == null) {
                     // «Sin fecha» no es un rango: es la marca. La fila tiene fecha de
                     // orden —la de modificación— y por eso no se puede reconocer por ella.

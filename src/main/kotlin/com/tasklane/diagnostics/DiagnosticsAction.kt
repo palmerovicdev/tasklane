@@ -78,12 +78,11 @@ internal fun showDiagnostics(project: Project) {
                     stats = repos.associateWith(service::statsOf),
                     // Y las imágenes, de la tabla `blob`: cinco agregados por
                     // repositorio en vez del recorrido del directorio (§4.2).
-                    blobs = repos.associateWith { service.blobStatsOf(it, config.imageMaxSize) },
+                    blobs = repos.associateWith(service::blobStatsOf),
                     reconciled = repos.filterTo(HashSet()) {
                         service.chore(AttachmentChore.reconcile(it.value)) != null
                     },
                     quotaBytes = AttachmentQuota.bytesOf(config.imageQuotaMegabytes),
-                    imageMaxSize = config.imageMaxSize,
                     metrics = metrics,
                     store = service.integrityState().let { (last, pending) ->
                         val backup = service.backupFile()?.takeIf { Files.exists(it) }

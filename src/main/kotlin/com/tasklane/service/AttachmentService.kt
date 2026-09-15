@@ -14,6 +14,7 @@ import com.tasklane.data.attachment.AttachmentGc
 import com.tasklane.data.attachment.AttachmentQuota
 import com.tasklane.data.attachment.AttachmentStore
 import com.tasklane.data.attachment.BlobRecord
+import com.tasklane.data.attachment.BlobSweeper
 import com.tasklane.data.attachment.ImageNormalizer
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.diagnostics.TasklaneDiagnostics
@@ -25,9 +26,10 @@ import com.tasklane.ui.settings.TasklaneConfigurable
 import java.awt.Image
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
+import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.time.Instant
-import javax.imageio.ImageIO
 
 /**
  * Las imágenes de las tareas: guardar lo que se pega, servir lo que se pinta, tirar lo
@@ -71,45 +73,82 @@ class AttachmentService(private val project: Project) {
      * miniaturas que la lista está pintando detrás.
      */
     private val decoded = ByteBoundedCache<Key, Holder>(DECODED_BYTES) { it.bytes }
+    private val masters = ByteBoundedCache<Key, Holder>(MASTER_BYTES) { it.bytes }
     private val thumbnails = ByteBoundedCache<Key, Holder>(THUMBNAIL_BYTES) { it.bytes }
     private val scaled = ByteBoundedCache<ScaledKey, BufferedImage>(SCALED_BYTES, ::imageBytes)
 
     // ------------------------------------------------------------- escritura
 
     /**
-     * Normaliza y guarda una imagen. **Bloqueante**: llamar fuera del EDT.
+     * Guarda una imagen **a su tamaño**. **Bloqueante**: llamar fuera del EDT.
      *
-     * Deja tres cosas en disco y una en la base: el blob, su miniatura si hace falta, el
-     * `.gitignore` de los datos, y la fila de contabilidad. La fila se escribe **después**
-     * del fichero a propósito: una fila sin fichero es una imagen que la lista pinta como
-     * ausente y la reconciliación arregla; un fichero sin fila es basura que nadie
-     * recogería.
+     * Es el camino de lo que llega como píxeles —una captura en el portapapeles—, que hay
+     * que codificar a PNG. Hasta la 2.2 se reescalaba antes al tope de los ajustes; desde
+     * la 2.3 no, ver [ImageNormalizer]. La miniatura se saca **de los píxeles que ya están
+     * en memoria**, que cuesta un par de milisegundos, en vez de dejársela a la lista, que
+     * tendría que volver a descodificar el original para hacerla.
+     *
+     * Deja en disco el blob, su miniatura si hace falta y el `.gitignore` de los datos, y
+     * en la base la fila de contabilidad. La fila va **después** del fichero a propósito:
+     * una fila sin fichero es una imagen que la lista pinta como ausente y la
+     * reconciliación arregla; un fichero sin fila es peso que nadie contaría.
      *
      * @return el ID con el que referenciarla, o `null` si no hay dónde escribir
      *   (proyecto sin directorio base) o si falló el disco.
      */
     fun attach(repo: RepoKey, image: Image): AttachmentId? {
         val store = store ?: return null
-        val maxSize = TaskService.getInstance(project).snapshot.value.config.imageMaxSize
         return try {
             val now = Instant.now()
-            val bytes = ImageNormalizer.normalize(image, maxSize)
+            val pixels = ImageNormalizer.pixels(image)
+            val bytes = ImageNormalizer.encode(pixels)
             val id = store.put(repo, bytes)
-            val size = ImageNormalizer.dimensions(bytes) ?: ImageNormalizer.Size(maxSize, maxSize)
-            writeThumbnail(repo, id, bytes)
-            TaskService.getInstance(project).recordBlob(
-                repo,
-                BlobRecord(id, bytes.size.toLong(), size.width, size.height, now),
-                now,
-            )
-            // Que el blob acabe de escribirse no significa que la caché esté vacía:
-            // la misma imagen pudo pegarse antes, borrarse y volver.
-            forget(repo, id)
+            runCatching { ImageNormalizer.thumbnail(pixels)?.let { store.putThumbnail(repo, id, it) } }
+                .onFailure { thisLogger().warn("Tasklane: no se pudo crear la miniatura de ${id.value}", it) }
+            record(repo, id, bytes.size.toLong(), ImageNormalizer.Size(pixels.width, pixels.height), now)
             id
         } catch (e: Exception) {
             thisLogger().warn("Tasklane: no se pudo guardar la imagen pegada", e)
             null
         }
+    }
+
+    /**
+     * Guarda un fichero de imagen **tal cual**: sus bytes, sin descodificarlo ni volver a
+     * codificarlo. Es el camino de soltar, elegir y pegar un fichero copiado.
+     *
+     * Lo único que se mira del contenido es la cabecera, por dos razones: saber que es una
+     * imagen que se podrá pintar —un `.webp` sin lector en esta JVM se guardaría para
+     * enseñarse siempre como ausente— y apuntar su tamaño en la tabla. La miniatura no se
+     * hace aquí: haría falta descodificar el original entero, y la lista ya la hace la
+     * primera vez que la pinta, en segundo plano.
+     *
+     * @return `null` si no es una imagen legible o si falló el disco.
+     */
+    fun attachFile(repo: RepoKey, file: Path): AttachmentId? {
+        val store = store ?: return null
+        return try {
+            val now = Instant.now()
+            val bytes = Files.readAllBytes(file)
+            val size = ImageNormalizer.sizeOf(bytes)
+            if (size == null) {
+                thisLogger().warn("Tasklane: ${file.fileName} no es una imagen que se pueda leer")
+                return null
+            }
+            val id = store.put(repo, bytes)
+            record(repo, id, bytes.size.toLong(), size, now)
+            id
+        } catch (e: Exception) {
+            thisLogger().warn("Tasklane: no se pudo guardar la imagen ${file.fileName}", e)
+            null
+        }
+    }
+
+    private fun record(repo: RepoKey, id: AttachmentId, bytes: Long, size: ImageNormalizer.Size, now: Instant) {
+        TaskService.getInstance(project).recordBlob(repo, BlobRecord(id, bytes, size.width, size.height, now), now)
+        // Que el blob acabe de escribirse no significa que la caché esté vacía: la misma
+        // imagen pudo pegarse antes, borrarse y volver.
+        forget(repo, id)
     }
 
     /** El texto que se inserta en el cuerpo para referenciar [id]. */
@@ -131,11 +170,12 @@ class AttachmentService(private val project: Project) {
         store?.let { it.locate(repo, id, thumbnail = true) ?: it.locate(repo, id) }
 
     /**
-     * La imagen **original**, descodificada.
+     * La imagen **original**, descodificada. **Nunca desde el EDT**: desde la 2.3 un
+     * original es una captura a su tamaño —33 MB descodificada a 2880 px, y 45 ms de
+     * disco y CPU—.
      *
-     * Desde la Fase 4 esto lo piden dos sitios y ninguno es la lista: el editor del
-     * diálogo —que enseña una tarea cada vez— y el popup de ampliar. La lista pide
-     * [thumbnail], que es lo que evita tener diez capturas de 10 MB vivas a la vez.
+     * La pide un solo sitio, el popup de ampliar, y la pide en segundo plano. El diálogo
+     * pinta desde [master] y la lista desde [thumbnail].
      *
      * @return `null` si el blob no está. Ausente no es un error: el cuerpo puede
      *   referenciar algo que ya se recogió, y quien pinta lo resuelve con un marcador
@@ -152,19 +192,45 @@ class AttachmentService(private val project: Project) {
     }
 
     /**
+     * La imagen a un tamaño **acotado** —[MASTER_SIZE] de lado mayor—: de donde saca el
+     * diálogo de la tarea sus vistas previas. **Bloqueante la primera vez**: la descodifica
+     * `ImageInlays` en segundo plano antes de marcarla como lista.
+     *
+     * Existe por la 2.3. Con el tope de 400 px, el diálogo pintaba escalando el original
+     * en el EDT y no pasaba nada: un original eran 640 KB y cabían cien en la caché. Con
+     * las capturas a su tamaño, un original son 33 MB, en la caché de 64 caben dos, y
+     * repintar un diálogo con tres imágenes volvería a descodificar del disco **en el
+     * EDT** en cada pasada. Una copia de 1280 px son 4 MB, caben ocho, y escalar desde ella
+     * al ancho del diálogo son milisegundos.
+     *
+     * No se guarda en disco: se deriva al vuelo, sólo de lo que un diálogo abierto enseña.
+     */
+    fun master(repo: RepoKey, id: AttachmentId): BufferedImage? {
+        val store = store ?: return null
+        val key = Key(repo, id)
+        masters.get(key)?.let { return it.image }
+        // Directo del disco y no por [image]: meter en la caché de originales una captura
+        // de 33 MB sólo para encogerla echaría de ahí lo que el popup acaba de abrir.
+        val original = store.load(repo, id)
+        val master = original?.let { shrink(it, MASTER_SIZE) }
+        masters.put(key, Holder(master))
+        return master
+    }
+
+    /**
      * La miniatura: lo que pinta la lista (§4.4).
      *
      * Tres caminos, en este orden:
      *
      * 1. El fichero `<sha>.thumb.png`, que es el caso normal.
      * 2. **No hay miniatura porque no merecía la pena** —el original no llega a
-     *    [ImageNormalizer.THUMB_THRESHOLD], que con el tope nuevo de 400 px es *todo* lo
-     *    que se pegue a partir de ahora—: se devuelve el original. Un fichero que no se
-     *    escribe es un fichero que no hay que recolectar ni contar.
+     *    [ImageNormalizer.THUMB_THRESHOLD]—: se devuelve el original. Un fichero que no
+     *    se escribe es un fichero que no hay que recolectar ni contar.
      * 3. **No hay miniatura y el original es grande**: se descodifica una vez, se
      *    escribe la miniatura y a partir de ahí manda el camino 1. Es la generación
-     *    perezosa que el §4.4 pide para lo que ya estaba guardado, y ocurre **una vez
-     *    por blob y en segundo plano**, nunca en el EDT.
+     *    perezosa que el §4.4 pide para lo que ya estaba guardado, y desde la 2.3 también
+     *    el camino normal de un fichero soltado, que se guarda sin descodificar. Ocurre
+     *    **una vez por blob y en segundo plano**, nunca en el EDT.
      */
     fun thumbnail(repo: RepoKey, id: AttachmentId): BufferedImage? {
         val store = store ?: return null
@@ -194,14 +260,6 @@ class AttachmentService(private val project: Project) {
         return image
     }
 
-    private fun writeThumbnail(repo: RepoKey, id: AttachmentId, bytes: ByteArray) {
-        val store = store ?: return
-        runCatching {
-            val source = ImageIO.read(bytes.inputStream()) ?: return
-            ImageNormalizer.thumbnail(source)?.let { store.putThumbnail(repo, id, it) }
-        }.onFailure { thisLogger().warn("Tasklane: no se pudo crear la miniatura de ${id.value}", it) }
-    }
-
     /**
      * La imagen encogida para que quepa en [maxWidth] × [maxHeight], o la original si
      * ya cabe. Nunca se amplía: una captura pequeña ampliada sólo se ve borrosa.
@@ -212,8 +270,17 @@ class AttachmentService(private val project: Project) {
      *
      * La caché va por `(repo, id, ancho resultante)` porque el ancho depende del ancho
      * del editor: redimensionar el diálogo reescala una vez, no en cada repintado.
+     *
+     * Parte de [master], no del original: es lo que pinta el diálogo, en el EDT.
      */
     fun preview(repo: RepoKey, id: AttachmentId, maxWidth: Int, maxHeight: Int): BufferedImage? =
+        fit(master(repo, id), repo, id, maxWidth, maxHeight)
+
+    /**
+     * Lo mismo pero **desde el original**: lo que abre el popup de ampliar, que es donde se
+     * quiere cada píxel. **Bloqueante**: el popup la pide en segundo plano.
+     */
+    fun fullPreview(repo: RepoKey, id: AttachmentId, maxWidth: Int, maxHeight: Int): BufferedImage? =
         fit(image(repo, id), repo, id, maxWidth, maxHeight)
 
     /**
@@ -226,6 +293,22 @@ class AttachmentService(private val project: Project) {
      */
     fun cardPreview(repo: RepoKey, id: AttachmentId, maxWidth: Int, maxHeight: Int): BufferedImage? =
         fit(thumbnail(repo, id), repo, id, maxWidth, maxHeight)
+
+    /** [source] encogida a [maxSize] de lado mayor, o ella misma si ya cabe. */
+    private fun shrink(source: BufferedImage, maxSize: Int): BufferedImage {
+        val factor = maxSize.toDouble() / maxOf(source.width, source.height)
+        if (factor >= 1.0) return source
+        val width = (source.width * factor).toInt().coerceAtLeast(1)
+        val height = (source.height * factor).toInt().coerceAtLeast(1)
+        return BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).also { target ->
+            target.createGraphics().run {
+                setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+                drawImage(source, 0, 0, width, height, null)
+                dispose()
+            }
+        }
+    }
 
     private fun fit(
         source: BufferedImage?,
@@ -289,47 +372,140 @@ class AttachmentService(private val project: Project) {
      * @return cuántos ficheros se borraron.
      */
     fun collectGarbage(cancelled: () -> Boolean = { false }): Int {
-        val store = store ?: return 0
+        val sweeper = sweeper() ?: return 0
         val tasks = TaskService.getInstance(project)
         val now = Instant.now()
-        val cutoff = now.minus(AttachmentGc.DEFAULT_GRACE)
         var deleted = 0
 
         for (ref in tasks.snapshot.value.repositories) {
+            if (cancelled()) break
             val repo = ref.key
             if (!tasks.referencesComplete(repo)) continue
-            // Si el traslado ya terminó, en el directorio plano no queda nada y buscar
-            // ahí son dos `unlink` por blob que no pueden encontrar nada.
-            val flatToo = tasks.chore(AttachmentChore.relocation(repo.value)) == null
-
-            while (!cancelled()) {
-                val batch = tasks.collectibleBlobs(repo, cutoff, GC_BATCH)
-                if (batch.isEmpty()) break
-
-                // La segunda comprobación de referencias, y **acotada por la tanda**: se
-                // pregunta por estos mil, no por los diez millones del repositorio. Que
-                // la consulta de candidatos ya los excluya no la hace redundante — es la
-                // única comprobación que se hace con el `blob_ref` de *ahora mismo*, y lo
-                // que protege es lo único que no se puede deshacer.
-                val referenced = tasks.referencedAmong(repo, batch.map { it.id })
-                    .mapTo(HashSet(), ::AttachmentId)
-                val collectible = AttachmentGc.collectible(batch, referenced, now)
-                for (blob in collectible) {
-                    if (store.delete(repo, blob.id, flatToo)) deleted++
-                    forget(repo, blob.id)
-                }
-                tasks.forgetBlobs(repo, collectible.map { it.id })
-                // Si la tanda entera sobrevivió a la comprobación de referencias, la
-                // consulta siguiente devolvería exactamente lo mismo: se para en vez de
-                // dar vueltas. Sólo puede pasar si la tabla y las referencias discrepan.
-                if (collectible.size < batch.size) break
-                if (batch.size < GC_BATCH) break
-            }
+            deleted += sweeper.collect(repo, now, flatToo = flatToo(repo), cancelled = cancelled) { forget(repo, it) }.files
         }
 
         if (deleted > 0) thisLogger().info("Tasklane: $deleted adjunto(s) sin referencias borrados")
         return deleted
     }
+
+    // ------------------------------------------------ limpiar desde los ajustes (2.3)
+
+    /** Lo que hizo una limpieza pedida desde los ajustes. */
+    sealed interface Cleanup {
+        /** Se borraron [images] imágenes y se liberaron [bytes]. [complete] es `false` si se canceló. */
+        data class Done(val images: Int, val bytes: Long, val complete: Boolean) : Cleanup
+
+        /**
+         * No se tocó nada: el repositorio se está importando, es de solo lectura o no hay
+         * almacén. Borrar «lo que no usa nadie» con las referencias a medias sería borrar
+         * imágenes que sí se usan.
+         */
+        data object Refused : Cleanup
+    }
+
+    /**
+     * Borra **ya** las imágenes de [repo] que no nombra ninguna tarea: fichero, miniatura
+     * y fila. Es el botón «borrar las no usadas» de los ajustes, y es siempre del
+     * repositorio activo.
+     *
+     * Dos diferencias con el recolector del mantenimiento, y las dos son lo que el usuario
+     * pide al pulsarlo:
+     *
+     * 1. **Sin periodo de gracia.** Ver `BlobSweeper.collect` para por qué aquí no hace
+     *    falta.
+     * 2. **Primero se reconcilia el árbol** de ese repositorio, sin esperar a la semana.
+     *    Si no, lo que haya en disco sin fila —de una versión anterior, de una copia del
+     *    `.idea`— no existiría para la limpieza, y «no usadas» dejaría peso sin tocar.
+     *
+     * Las mismas salvaguardas de siempre: sólo con las referencias del repositorio
+     * completas, y la segunda comprobación por tanda antes de borrar.
+     *
+     * **Bloqueante**: con barra y fuera del EDT.
+     */
+    fun purgeUnused(repo: RepoKey, cancelled: () -> Boolean = { false }): Cleanup {
+        val sweeper = sweeper() ?: return Cleanup.Refused
+        val tasks = TaskService.getInstance(project)
+        if (!tasks.referencesComplete(repo)) return Cleanup.Refused
+
+        reconcile(force = true, only = repo, cancelled = cancelled)
+        if (cancelled()) return Cleanup.Done(0, 0, complete = false)
+
+        val swept = sweeper.collect(repo, Instant.now(), Duration.ZERO, flatToo(repo), cancelled) { forget(repo, it) }
+        finish(repo)
+        return Cleanup.Done(swept.files, swept.bytes, swept.complete)
+    }
+
+    /**
+     * Borra **todas** las imágenes de [repo], se usen o no. Es el botón «borrar todas» de
+     * los ajustes, siempre del repositorio activo y siempre tras confirmarlo.
+     *
+     * Las tareas no se tocan: sus cuerpos siguen nombrando las imágenes y la tarjeta pinta
+     * el hueco. Ver `BlobSweeper.deleteAll`, que es donde está el orden y el porqué.
+     *
+     * [onFile] recibe cuántos ficheros van borrados.
+     */
+    fun purgeAll(repo: RepoKey, cancelled: () -> Boolean = { false }, onFile: (Long) -> Unit = {}): Cleanup {
+        val sweeper = sweeper() ?: return Cleanup.Refused
+        val tasks = TaskService.getInstance(project)
+        if (tasks.isReadOnly(repo)) return Cleanup.Refused
+
+        val images = tasks.blobStatsOf(repo).present
+        val swept = sweeper.deleteAll(
+            repo,
+            cancelled,
+            onFile,
+            // A medias, la tabla ya no cuadra con el disco: que la reconciliación pase en
+            // la próxima apertura en vez de esperar a que se cumpla la semana.
+            onIncomplete = { tasks.forgetChore(AttachmentChore.reconcile(repo.value)) },
+        )
+        finish(repo)
+        return Cleanup.Done(if (swept.complete) images else 0, swept.bytes, swept.complete)
+    }
+
+    /**
+     * Lo que hay que hacer después de quitar imágenes a mano: olvidar lo descodificado,
+     * que la lista vuelva a preguntar y que el aviso de cuota mire la cifra nueva.
+     */
+    private fun finish(repo: RepoKey) {
+        forgetRepo(repo)
+        epoch++
+        TaskService.getInstance(project).refreshView()
+        runCatching { checkQuota() }
+    }
+
+    /**
+     * Sube cada vez que se quitan imágenes a mano. La lista lo mira en cada repintado: una
+     * imagen que ya había cargado como presente no vuelve a preguntarse sola, y sin esto
+     * una tarjeta seguiría creyendo que la tiene.
+     */
+    @Volatile
+    var epoch: Long = 0L
+        private set
+
+    private fun sweeper(): BlobSweeper? {
+        val store = store ?: return null
+        val tasks = TaskService.getInstance(project)
+        return BlobSweeper(
+            store,
+            object : BlobSweeper.Ledger {
+                override fun collectible(repo: RepoKey, before: Instant, limit: Int) = tasks.collectibleBlobs(repo, before, limit)
+
+                override fun referencedAmong(repo: RepoKey, ids: List<AttachmentId>) =
+                    tasks.referencedAmong(repo, ids).mapTo(HashSet(), ::AttachmentId)
+
+                override fun forget(repo: RepoKey, ids: List<AttachmentId>) = tasks.forgetBlobs(repo, ids)
+
+                override fun forgetBatch(repo: RepoKey): Int = tasks.forgetBlobBatch(repo)
+            },
+        )
+    }
+
+    /**
+     * Si hay que buscar también en el directorio plano. Con el traslado ya terminado, ahí
+     * no queda nada y serían dos `unlink` por blob que no pueden encontrar nada.
+     */
+    private fun flatToo(repo: RepoKey): Boolean =
+        TaskService.getInstance(project).chore(AttachmentChore.relocation(repo.value)) == null
 
     // -------------------------------------------------- traslado y reconciliación
 
@@ -399,7 +575,7 @@ class AttachmentService(private val project: Project) {
      * visto el árbol entero, así que «no lo he visto» no significa «no está»— ni se
      * apunta la marca semanal.
      */
-    fun reconcile(force: Boolean = false, cancelled: () -> Boolean = { false }): Reconciliation {
+    fun reconcile(force: Boolean = false, only: RepoKey? = null, cancelled: () -> Boolean = { false }): Reconciliation {
         val store = store ?: return Reconciliation(0, 0, 0)
         val tasks = TaskService.getInstance(project)
         val now = Instant.now()
@@ -407,8 +583,8 @@ class AttachmentService(private val project: Project) {
         var missing = 0
         var temporaries = 0
 
-        for (ref in tasks.snapshot.value.repositories) {
-            val repo = ref.key
+        val repos = only?.let(::listOf) ?: tasks.snapshot.value.repositories.map { it.key }
+        for (repo in repos) {
             val chore = AttachmentChore.reconcile(repo.value)
             val last = tasks.chore(chore)
             if (!force && last != null &&
@@ -468,42 +644,48 @@ class AttachmentService(private val project: Project) {
     // ---------------------------------------------------------------- cuota
 
     /**
-     * Mira lo que ocupan los adjuntos y avisa si cruza el umbral (§4.5).
+     * Mira lo que ocupan las imágenes **del repositorio activo** y avisa si cruza el
+     * umbral (§4.5).
      *
-     * **No borra nada, y ése es el punto.** De las tres opciones del plan se eligió la
-     * cuota con aviso: se enseña el peso, se dicen las salidas y decide el usuario. El
-     * aviso no sale en cada apertura —ver [AttachmentQuota]—, y el umbral se puede
-     * subir o apagar desde los ajustes.
+     * **Por repositorio desde la 2.3**, como todo lo demás de las imágenes: el aviso lleva
+     * a los ajustes, y lo que los ajustes enseñan y limpian es el repositorio activo. Un
+     * aviso por el total del proyecto diría una cifra que no aparece en ningún sitio.
+     *
+     * **No borra nada, y ése es el punto.** Se enseña el peso, se dicen las salidas y
+     * decide el usuario. El aviso no sale en cada apertura —ver [AttachmentQuota]—, y el
+     * umbral se puede subir o apagar desde los ajustes.
      *
      * @return `true` si se avisó.
      */
     fun checkQuota(): Boolean {
         val tasks = TaskService.getInstance(project)
-        val megabytes = tasks.snapshot.value.config.imageQuotaMegabytes
-        val limit = AttachmentQuota.bytesOf(megabytes)
-        val bytes = tasks.blobBytes()
-        val warned = tasks.chore(AttachmentChore.QUOTA)?.n ?: 0L
+        val snapshot = tasks.snapshot.value
+        val repo = snapshot.activeRepo
+        val limit = AttachmentQuota.bytesOf(snapshot.config.imageQuotaMegabytes)
+        val bytes = tasks.blobStatsOf(repo).bytes
+        val chore = AttachmentChore.quota(repo.value)
+        val warned = tasks.chore(chore)?.n ?: 0L
 
         return when (val decision = AttachmentQuota.decide(bytes, limit, warned)) {
             AttachmentQuota.Decision.Quiet -> false
             AttachmentQuota.Decision.Forget -> {
-                tasks.saveChore(AttachmentChore.QUOTA, Instant.now(), 0L)
+                tasks.saveChore(chore, Instant.now(), 0L)
                 false
             }
 
             is AttachmentQuota.Decision.Warn -> {
-                tasks.saveChore(AttachmentChore.QUOTA, Instant.now(), decision.bytes)
-                warn(decision.bytes, limit)
+                tasks.saveChore(chore, Instant.now(), decision.bytes)
+                warn(snapshot.activeRepository?.displayName ?: repo.value, decision.bytes, limit)
                 true
             }
         }
     }
 
-    private fun warn(bytes: Long, limit: Long) {
+    private fun warn(repo: String, bytes: Long, limit: Long) {
         NotificationGroupManager.getInstance()
             .getNotificationGroup(TaskService.NOTIFICATION_GROUP)
             .createNotification(
-                TasklaneBundle.message("notification.quota.title", TasklaneDiagnostics.humanBytes(bytes)),
+                TasklaneBundle.message("notification.quota.title", repo, TasklaneDiagnostics.humanBytes(bytes)),
                 TasklaneBundle.message("notification.quota.content", TasklaneDiagnostics.humanBytes(limit)),
                 NotificationType.WARNING,
             )
@@ -531,7 +713,16 @@ class AttachmentService(private val project: Project) {
      */
     private fun forget(repo: RepoKey, id: AttachmentId) {
         decoded.remove(Key(repo, id))
+        masters.remove(Key(repo, id))
         thumbnails.remove(Key(repo, id))
+    }
+
+    /** Olvida todo lo descodificado de un repositorio, escalado incluido. */
+    private fun forgetRepo(repo: RepoKey) {
+        decoded.removeIf { it.repo == repo }
+        masters.removeIf { it.repo == repo }
+        thumbnails.removeIf { it.repo == repo }
+        scaled.removeIf { it.repo == repo }
     }
 
     private data class Key(val repo: RepoKey, val id: AttachmentId)
@@ -554,13 +745,22 @@ class AttachmentService(private val project: Project) {
         /**
          * Lo que puede ocupar el conjunto de imágenes **originales** descodificadas.
          *
-         * 64 MB es el valor del §2.6. Con el tope de 400 px de la Fase 4 —640 KB por
-         * imagen— dan para un centenar largo; con las capturas de 1600 px que puede
-         * haber ya en disco, para seis. Que sean seis es exactamente el punto: seis
-         * imágenes grandes ocupan lo que ocupan, y antes cabían dieciséis sin que nadie
-         * llevara la cuenta.
+         * 64 MB es el valor del §2.6. Con capturas a su tamaño —desde la 2.3, una de
+         * 2880 px son 33 MB descodificada— dan para dos, y es exactamente el punto: lo
+         * grande ocupa lo que ocupa, y sólo lo piden el diálogo y el popup de ampliar, que
+         * enseñan una cada vez. La lista va por miniaturas y no pasa por aquí.
          */
         private const val DECODED_BYTES = 64L * 1024 * 1024
+
+        /**
+         * El lado mayor de la copia de la que pinta el diálogo. Ver [master]. 1280 px es
+         * más de lo que mide el editor de una tarea en cualquier pantalla razonable, así que
+         * la vista previa sale igual de nítida que desde el original.
+         */
+        const val MASTER_SIZE = 1280
+
+        /** Ocho copias de 1280×800: más imágenes de las que caben en un diálogo abierto. */
+        private const val MASTER_BYTES = 32L * 1024 * 1024
 
         /**
          * Y lo que pueden ocupar las miniaturas, aparte.
@@ -575,8 +775,7 @@ class AttachmentService(private val project: Project) {
         private const val SCALED_BYTES = 16L * 1024 * 1024
 
         /** Cuántos candidatos se recogen por tanda. Es el `LIMIT 1000` del §4.2. */
-        const val GC_BATCH = 1_000
-
+        const val GC_BATCH = BlobSweeper.BATCH
 
         /** `INT_ARGB`: cuatro bytes por píxel. No hay que estimar nada. */
         private fun imageBytes(image: BufferedImage): Long =

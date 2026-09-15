@@ -423,7 +423,7 @@ data class RepositoryRef(
     <thead><tr><th>Componente</th><th>Responsabilidad</th></tr></thead>
     <tbody>
       <tr><td><code>TriggerParser</code></td><td>Resolver el prefijo de prioridad por coincidencia más larga y devolver el texto ya limpio</td></tr>
-      <tr><td><code>DateGrouper</code></td><td><code>Instant</code> + <code>ZoneId</code> → <code>Today</code> / <code>Yesterday</code> / <code>This week</code> / <code>Sep 10</code> / <code>Sep 2025</code></td></tr>
+      <tr><td><code>DateGrouper</code></td><td><code>Instant</code> + <code>ZoneId</code> → <code>Today</code> / un día: <code>Sep 10</code>, <code>Sep 10, 2025</code> (2.3.0; antes también <code>Yesterday</code>, <code>This week</code> y meses)</td></tr>
       <tr><td><code>LinkExtractor</code></td><td>URLs sueltas y <code>[texto](url)</code>, ignorando bloques de código; acortado con dominio primero</td></tr>
       <tr><td><code>InlineMarkdown</code></td><td>Énfasis en línea (<code>**</code>, <code>*</code>, <code>`</code>, <code>~~</code>) como rangos del original, para que la fila lo pinte sin las marcas</td></tr>
       <tr><td><code>TaskExporter</code></td><td>Colección de tareas → texto de clipboard según <code>ExportFormat</code></td></tr>
@@ -609,7 +609,7 @@ data class RepositoryRef(
 │ ╭────────────────────────────────────────╮   │
 │ ┃ ☐ Update docs                          │   │
 │ ╰────────────────────────────────────────╯   │
-│ ▾ Yesterday                                  │
+│ ▾ Sep 14                                     │
 │ ┃ ☑ Implement login                          │
 └──────────────────────────────────────────────┘
    └─ franja de 3 px con el color de la prioridad,
@@ -849,7 +849,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <h4>Editor de tareas</h4>
   <ul>
     <li><strong>Componente:</strong> <code>EditorTextField</code> — un editor real de IntelliJ, con undo, selección múltiple y el keymap del usuario. Con el plugin Markdown presente (dependencia opcional) se obtiene resaltado de sintaxis; sin él, texto plano.</li>
-    <li><strong>Pegar:</strong> una acción registrada con el atajo de <em>pegar</em> del keymap mira el portapapeles; si trae una imagen —o un fichero de imagen— la normaliza fuera del EDT (reescalado al máximo configurado en los ajustes, re-codificación a PNG) e inserta la referencia en la posición del cursor dentro de un <code>WriteCommandAction</code>, para que <code>⌘Z</code> funcione. Si no la trae, delega en el manejador de pegado del editor y el texto se pega como siempre.</li>
+    <li><strong>Pegar:</strong> una acción registrada con el atajo de <em>pegar</em> del keymap mira el portapapeles; si trae una imagen —o un fichero de imagen— la guarda fuera del EDT (desde la 2.3 a su tamaño: los píxeles en PNG sin pérdida, un fichero con sus bytes) e inserta la referencia en la posición del cursor dentro de un <code>WriteCommandAction</code>, para que <code>⌘Z</code> funcione. Si no la trae, delega en el manejador de pegado del editor y el texto se pega como siempre.</li>
     <li><strong>Referencia plegada:</strong> el rango del <code>![](tasklane:…)</code> se colapsa a <code>[image]</code> con el <code>FoldingModel</code>. Sin eso, el cuerpo de una tarea con dos capturas serían dos líneas de SHA que no significan nada para nadie.</li>
     <li><strong>Previsualización en línea:</strong> <code>InlayModel.addBlockElement</code> con un <code>EditorCustomElementRenderer</code> que pinta la imagen escalada bajo la línea de la referencia. Los inlays se recalculan con debounce al cambiar el documento y la <code>BufferedImage</code> escalada se cachea por <code>(repo, id, ancho)</code>; <code>JBUIScale</code> mantiene la nitidez en HiDPI. La imagen se decodifica fuera del EDT: mientras tanto el hueco ya está puesto, con su marcador.</li>
     <li><strong>Ampliar:</strong> el clic sobre el inlay abre la imagen en un <code>JBPopup</code>, escalada a la pantalla.</li>
@@ -869,6 +869,12 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <p><strong>El tope de escalado baja de 1600 a 400&nbsp;px</strong> para lo que se pegue a partir de ahora. <strong>Lo ya guardado no se toca</strong>, y la razón es la misma propiedad que hace bueno el direccionamiento por contenido: el nombre de un blob es el hash de sus bytes, así que reescalarlo cambiaría su nombre y obligaría a reescribir el cuerpo de todas las tareas que lo nombran. Lo que sí se hace es contarlo — <em>Diagnostics</em> dice cuántas capturas quedan por encima del tope y cuánto ocupan— y no descodificarlo nunca en la lista, que es de donde venía el coste.</p>
     <p><strong>Las dos tablas entran sin subir <code>user_version</code></strong>, y es una decisión: subirla dejaría en <strong>solo lectura</strong> cualquier proyecto que luego se abriera con la 2.0 —la promesa de la Fase 3, aplicada donde no toca—, o sea bloquearía editar tareas para proteger contabilidad que la reconciliación sabe reconstruir. La regla queda escrita en <code>TaskSchema.VERSION</code>: se sube cuando una versión anterior escribiendo perdería datos <em>irreconstruibles</em>, no por tablas derivadas.</p>
     <p><strong>Y una política, porque la aritmética no la arregla el diseño:</strong> diez millones de capturas a 400&nbsp;px son 315&nbsp;GB, o 31&nbsp;GB con deduplicación 10:1. El plugin va igual de rápido con ellas; lo que no puede es inventar disco. Al cruzar un umbral configurable —5&nbsp;GB por defecto— se avisa una vez, con el peso y con las salidas. Nunca se borra nada por cuota.</p>
+  </div>
+  <div class="adr warn">
+    <span class="tag">2.3.0 · el tope de escalado se retira</span>
+    <p><strong>La decisión del tope de 400&nbsp;px se revisó a petición del usuario</strong>: una captura de código a 400&nbsp;px no se lee, y el disco se gestiona mejor a la vista que degradando lo que entra. Desde la 2.3 <strong>nada se reescala</strong>: los píxeles del portapapeles se guardan como PNG sin pérdida a su tamaño, y un fichero soltado o copiado <strong>con sus bytes tal cual</strong> —ni se descodifica ni se vuelve a codificar—. El nombre sigue siendo el SHA-256 de lo guardado, así que la deduplicación se conserva salvo entre los dos caminos: soltar un PNG y pegar sus píxeles dan bytes distintos.</p>
+    <p><strong>Medido</strong> sobre una captura de 2880&nbsp;px, en <code>ScaleBenchmark</code>: pegar pasa de 8&nbsp;ms a 129&nbsp;ms de CPU —codificar PNG cuesta lo que cuestan los píxeles, y reescalar primero era lo que lo abarataba— y de 46&nbsp;KB a 1,25&nbsp;MB; soltar un fichero pasa de 47&nbsp;ms a 1&nbsp;ms. Todo fuera del EDT. La miniatura, que antes casi nunca hacía falta, vuelve a ser lo que evita que la lista descodifique 33&nbsp;MB por captura: al pegar se saca de los píxeles que ya están en memoria (2&nbsp;ms), y de un fichero soltado la hace la lista la primera vez que lo pinta.</p>
+    <p><strong>A cambio, el peso se ve y se limpia, siempre por repositorio</strong> —la regla de Tasklane: todo afecta al repositorio activo—. Los ajustes enseñan lo que pesan las imágenes del activo y ofrecen dos botones: borrar ya, sin gracia, lo que no nombra ninguna tarea (tras reconciliar el árbol, para no dejar peso sin apuntar), o borrar todo el directorio y sus filas, tras confirmarlo y sin tocar las tareas. El bucle vive en <code>BlobSweeper</code>, sin IDE, con sus tests sobre una base y un directorio de verdad. La cuota con aviso pasa a ser también por repositorio.</p>
   </div>
   <p class="cap">Se descartó incrustar el preview JCEF del plugin Markdown: viola la restricción de no usar WebView y añade una dependencia dura a un plugin que no está en todos los IDEs.</p>
   <div class="adr warn">
@@ -939,7 +945,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   </ul>
 
   <h3>Agrupación por fecha, por estado</h3>
-  <p>Cada estado tiene su propia <code>Grouping</code> y su propio <code>DateAnchor</code>. <code>Done</code> agrupa por <code>completedAt</code>; <code>ToDo</code> no agrupa; otro estado podría agrupar por <code>createdAt</code>. Los grupos son <code>Today</code>, <code>Yesterday</code>, <code>This week</code>, luego <code>Sep 10</code> dentro del año en curso y <code>Sep 2025</code> más atrás, todo con <code>DateFormatUtil</code> para respetar el locale.</p>
+  <p>Cada estado tiene su propia <code>Grouping</code> y su propio <code>DateAnchor</code>. <code>Done</code> agrupa por <code>completedAt</code>; <code>ToDo</code> no agrupa; otro estado podría agrupar por <code>createdAt</code>. Los grupos son <code>Today</code> y, debajo, <b>uno por cada día que tenga alguna tarea</b> —<code>Sep 10</code> dentro del año en curso, <code>Sep 10, 2025</code> más atrás—, con el patrón localizado para respetar el locale. Hasta la 2.2 había además <code>Yesterday</code>, <code>This week</code> y meses para los años anteriores; los retiró la 2.3.0 a petición del usuario.</p>
 
   <h3>Página de ajustes</h3>
   <p><code>BoundSearchableConfigurable</code> con Kotlin UI DSL v2 y dos tablas envueltas en <code>ToolbarDecorator</code> (añadir, quitar, subir, bajar). La columna de color usa <code>ColorPanel</code>, con celdas separadas para claro y oscuro. Los atajos <strong>no</strong> se configuran aquí: hay un enlace a <em>Settings → Keymap</em> filtrado por el grupo de acciones del plugin, porque duplicar el sistema de keymap sería exactamente lo que el requisito prohíbe.</p>
@@ -1008,7 +1014,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <h4>UI</h4>
   <ul>
     <li>Tool window por debajo de ~220 px: el renderer retira fecha y segunda línea antes que truncar el título.</li>
-    <li>Miles de tareas en un estado: modelo construido fuera del EDT; grupos anteriores a «Yesterday» colapsados por defecto.</li>
+    <li>Miles de tareas en un estado: modelo construido fuera del EDT; los grupos grandes salen plegados y las cabeceras se paginan como las filas.</li>
     <li>Cambio de tema en caliente: colores vía <code>JBColor</code>, repintado por <code>LafManagerListener</code>.</li>
     <li>Escalado al 200 %: todas las medidas del renderer y de los inlays pasan por <code>JBUI.scale</code>.</li>
     <li>Tarea vacía: el diálogo deshabilita <em>Create</em> —medido sobre el cuerpo sin el trigger, o <code>!!!</code> a secas pasaría por tarea—.</li>
@@ -1021,7 +1027,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <li>URL dentro de un bloque de código: no se extrae.</li>
     <li>Adjunto referenciado pero ausente: marcador de posición en el inlay; la referencia no se borra.</li>
     <li>Misma imagen en dos tareas: un solo blob; sólo se recoge cuando no queda ninguna referencia.</li>
-    <li>Captura enorme del portapapeles: se reescala al máximo configurado antes de guardar.</li>
+    <li>Captura enorme del portapapeles: se guarda a su tamaño (desde la 2.3); la lista pinta su miniatura y el peso se ve y se limpia en los ajustes, por repositorio.</li>
     <li>Deshacer tras pegar: el texto se revierte; el blob queda huérfano y lo recoge el GC tras el periodo de gracia. Volver a verlo en un escaneo <strong>no</strong> reinicia ese periodo, o no se recogería nunca.</li>
   </ul>
 </section>

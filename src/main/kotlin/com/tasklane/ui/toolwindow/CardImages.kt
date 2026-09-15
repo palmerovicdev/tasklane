@@ -79,8 +79,19 @@ internal class CardImages(project: Project, private val onLoaded: () -> Unit) : 
      * así que la comprobación es una consulta a un mapa.
      */
     fun forgetMissing() {
+        // Y si desde los ajustes se han borrado imágenes, también las que había: una
+        // tarjeta que ya la tenía cargada no volvería a preguntar, y seguiría pintando
+        // el hueco de una imagen que ya no está como si estuviera.
+        val now = service.epoch
+        if (now != epoch) {
+            epoch = now
+            loaded.clear()
+            return
+        }
         loaded.values.removeAll { !it }
     }
+
+    private var epoch = service.epoch
 
     private fun load(key: Key) {
         if (!loading.add(key)) return

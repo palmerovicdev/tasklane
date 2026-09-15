@@ -60,13 +60,6 @@ data class TasklaneConfig(
      */
     val repoDepth: Int = DEFAULT_REPO_DEPTH,
     /**
-     * Lado mayor al que se reescala una imagen pegada, en píxeles.
-     *
-     * Se guarda antes de escribir y no al pintar: la resolución que nadie va a mirar
-     * no vale lo que ocupa en el `.idea` del usuario.
-     */
-    val imageMaxSize: Int = DEFAULT_IMAGE_MAX_SIZE,
-    /**
      * A partir de cuántos megabytes de imágenes se avisa, o `0` para no avisar nunca.
      *
      * Es la cuota con aviso del §4.5 del plan de escala, y **es un aviso y no un tope**:
@@ -97,7 +90,6 @@ data class TasklaneConfig(
         val defaultPriorityIndex = priorities.indexOfFirst { it.isDefault }.takeIf { it >= 0 } ?: 0
         return copy(
             repoDepth = repoDepth.coerceIn(0, MAX_REPO_DEPTH),
-            imageMaxSize = imageMaxSize.coerceIn(MIN_IMAGE_MAX_SIZE, MAX_IMAGE_MAX_SIZE),
             // El cero es «apagado» y tiene que sobrevivir a la normalización: acotarlo
             // al mínimo convertiría «no me avises» en «avísame a partir de un giga».
             imageQuotaMegabytes = if (imageQuotaMegabytes <= NO_IMAGE_QUOTA) NO_IMAGE_QUOTA
@@ -121,36 +113,11 @@ data class TasklaneConfig(
         const val MAX_REPO_DEPTH = 5
 
         /**
-         * El tope de escalado, en píxeles del lado mayor. **400 desde la Fase 4**, y era
-         * 1600.
+         * El umbral de aviso por defecto: 5 GB **por repositorio**, el valor del §4.5.
          *
-         * Es la decisión del §4.5 del plan de escala, tomada con la medida del §0-bis.5
-         * delante: sobre PNG calibrados contra una captura real, una captura a 1600 px
-         * ocupa 407 KB y la misma a 400 px ocupa 33 KB. Divide por doce y medio el peso
-         * de las imágenes en el `.idea` del usuario y, de paso, lo que ocupa
-         * descodificarlas —de 10,2 MB a 640 KB cada una—, que es lo que hacía que una
-         * tarjeta con diez imágenes fuera un problema de memoria y no de disco.
-         *
-         * **Lo que ya esté guardado a 1600 px no se toca**: el nombre de un blob es el
-         * SHA de sus bytes, así que reescalarlo cambiaría su nombre y habría que
-         * reescribir todos los cuerpos que lo nombran. Lo que sí se hace es contarlo —la
-         * acción *Diagnostics* dice cuántas son y cuánto ocupan— y no descodificarlo
-         * nunca en la lista, que es para lo que están las miniaturas del §4.4.
-         */
-        const val DEFAULT_IMAGE_MAX_SIZE = 400
-
-        /** Por debajo de esto el reescalado destruye la captura en vez de aligerarla. */
-        const val MIN_IMAGE_MAX_SIZE = 200
-
-        /** Por encima, lo que se guarda pesa más de lo que la vista previa aprovecha. */
-        const val MAX_IMAGE_MAX_SIZE = 4000
-
-        /**
-         * El umbral de aviso por defecto: 5 GB, el valor del §4.5.
-         *
-         * Cinco gigas son ~150.000 capturas al tope de 400 px, o ~12.000 de las de
-         * 1600 px que puede haber guardadas de antes. Por debajo de eso, avisar sería
-         * ruido.
+         * Desde la 2.3 las capturas se guardan a su tamaño —una de 2880 px en PNG ronda
+         * el mega y cuarto—, así que cinco gigas son unas cuatro mil. Por debajo de eso,
+         * avisar sería ruido.
          */
         const val DEFAULT_IMAGE_QUOTA_MB = 5 * 1024
 

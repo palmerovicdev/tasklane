@@ -4,52 +4,52 @@ import com.tasklane.domain.model.DateGroup
 import com.tasklane.domain.model.DateGrouper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.YearMonth
 import java.time.ZoneId
 
 class DateGrouperTest {
 
     private val zone: ZoneId = ZoneId.of("Europe/Madrid")
 
-    /** Jueves, para que la semana en curso tenga anteayer dentro y no empiece en hoy. */
+    /** Jueves: hasta la 2.2 el lunes y el martes de esta semana compartían cabecera. */
     private val today: LocalDate = LocalDate.of(2026, 9, 10)
 
     private fun groupOf(date: LocalDate?) = DateGrouper.groupOf(
         instant = date?.atTime(LocalTime.NOON)?.atZone(zone)?.toInstant(),
         today = today,
         zone = zone,
-        firstDayOfWeek = DayOfWeek.MONDAY,
     )
 
     @Test
-    fun `hoy y ayer tienen grupo propio`() {
+    fun `hoy tiene grupo propio`() {
         assertEquals(DateGroup.Today, groupOf(today))
-        assertEquals(DateGroup.Yesterday, groupOf(today.minusDays(1)))
+    }
+
+    /**
+     * Lo que pidió la 2.3.0: **ningún** grupo junta días. Ayer ya no es «Yesterday», el
+     * martes ya no es «This week» y un día de 2025 ya no se pierde dentro de su mes.
+     */
+    @Test
+    fun `cualquier otro dia es su propio grupo con su fecha`() {
+        for (date in listOf(
+            today.minusDays(1),
+            LocalDate.of(2026, 9, 8),
+            LocalDate.of(2026, 9, 7),
+            LocalDate.of(2026, 1, 2),
+            LocalDate.of(2025, 9, 30),
+            LocalDate.of(2025, 9, 1),
+        )) {
+            assertEquals(DateGroup.Day(date), groupOf(date))
+        }
     }
 
     @Test
-    fun `anteayer cae en la semana en curso`() {
-        // Martes 8: dentro de la semana que empieza el lunes 7, y ya no es ayer.
-        assertEquals(DateGroup.ThisWeek, groupOf(LocalDate.of(2026, 9, 8)))
-        assertEquals(DateGroup.ThisWeek, groupOf(LocalDate.of(2026, 9, 7)))
-    }
-
-    @Test
-    fun `antes de esta semana pero dentro del ano se agrupa por dia`() {
-        // Domingo 6: la semana empieza el lunes, asi que ya queda fuera.
-        assertEquals(DateGroup.Day(LocalDate.of(2026, 9, 6)), groupOf(LocalDate.of(2026, 9, 6)))
-        assertEquals(DateGroup.Day(LocalDate.of(2026, 1, 2)), groupOf(LocalDate.of(2026, 1, 2)))
-    }
-
-    @Test
-    fun `los anos anteriores se agrupan por mes`() {
-        assertEquals(DateGroup.Month(YearMonth.of(2025, 9)), groupOf(LocalDate.of(2025, 9, 30)))
-        assertEquals(DateGroup.Month(YearMonth.of(2025, 9)), groupOf(LocalDate.of(2025, 9, 1)))
+    fun `dos dias del mismo mes no comparten grupo`() {
+        assertTrue(groupOf(LocalDate.of(2025, 9, 30)) != groupOf(LocalDate.of(2025, 9, 1)))
     }
 
     @Test
@@ -64,62 +64,74 @@ class DateGrouperTest {
         assertEquals(DateGroup.Today, groupOf(today.plusDays(3)))
     }
 
+    /**
+     * El dia lo decide la zona: a las 23:30 en Madrid ya es el dia siguiente en UTC, y
+     * la cabecera tiene que ser la del dia en que el usuario hizo la tarea.
+     */
     @Test
-    fun `el primer dia de la semana lo decide quien llama`() {
-        val sunday = LocalDate.of(2026, 9, 6)
-        assertEquals(
-            "con semana que empieza en domingo, el domingo 6 entra en la semana en curso",
-            DateGroup.ThisWeek,
-            DateGrouper.groupOf(
-                sunday.atTime(LocalTime.NOON).atZone(zone).toInstant(),
-                today,
-                zone,
-                DayOfWeek.SUNDAY,
-            ),
-        )
+    fun `el dia se cuenta en la zona de quien mira`() {
+        val lateNight = LocalDate.of(2026, 9, 8).atTime(23, 30).atZone(zone).toInstant()
+        assertEquals(DateGroup.Day(LocalDate.of(2026, 9, 8)), DateGrouper.groupOf(lateNight, today, zone))
     }
 
     /**
-     * La exportacion en Markdown encabeza cada grupo con su dia, y «hoy» y «ayer» solo
-     * son un dia concreto contra un calendario: por eso [DateGroup.dayOn] lo recibe.
+     * El intervalo es la inversa del reparto: todo lo que cae dentro es de ese grupo y lo
+     * de justo fuera no. Con el dia del cambio de hora, que mide 25 horas y es donde un
+     * «mas 24 horas» se habria dejado la ultima fuera.
      */
     @Test
-    fun `hoy y ayer se resuelven contra el calendario que se les pasa`() {
+    fun `el intervalo de un dia es exactamente ese dia aunque cambie la hora`() {
+        val change = LocalDate.of(2025, 10, 26)
+        val range = DateGrouper.rangeOf(DateGroup.Day(change), today, zone)!!
+        val first = Instant.ofEpochMilli(range.first)
+        val last = Instant.ofEpochMilli(range.last)
+
+        assertEquals(DateGroup.Day(change), DateGrouper.groupOf(first, today, zone))
+        assertEquals(DateGroup.Day(change), DateGrouper.groupOf(last, today, zone))
+        assertEquals(DateGroup.Day(change.plusDays(1)), DateGrouper.groupOf(last.plusMillis(1), today, zone))
+        assertEquals(DateGroup.Day(change.minusDays(1)), DateGrouper.groupOf(first.minusMillis(1), today, zone))
+        assertEquals(25 * 3_600_000L, range.last - range.first + 1)
+    }
+
+    @Test
+    fun `hoy llega hasta el infinito y sin fecha no es un intervalo`() {
+        assertEquals(Long.MAX_VALUE, DateGrouper.rangeOf(DateGroup.Today, today, zone)!!.last)
+        assertNull(DateGrouper.rangeOf(DateGroup.Undated, today, zone))
+    }
+
+    /** La exportacion en Markdown encabeza cada grupo con su dia. */
+    @Test
+    fun `hoy se resuelve contra el calendario que se le pasa`() {
         assertEquals(today, DateGroup.Today.dayOn(today))
-        assertEquals(LocalDate.of(2026, 9, 9), DateGroup.Yesterday.dayOn(today))
         assertEquals(LocalDate.of(2026, 1, 2), DateGroup.Day(LocalDate.of(2026, 1, 2)).dayOn(today))
     }
 
-    /** Un dia inventado —el lunes, el dia 1— acabaria escrito en una exportacion. */
+    /** Un dia inventado acabaria escrito en una exportacion. */
     @Test
-    fun `una semana, un mes y lo que no tiene fecha no son un dia`() {
-        assertNull(DateGroup.ThisWeek.dayOn(today))
-        assertNull(DateGroup.Month(YearMonth.of(2025, 9)).dayOn(today))
+    fun `lo que no tiene fecha no es un dia`() {
         assertNull(DateGroup.Undated.dayOn(today))
     }
 
     @Test
     fun `el orden natural es de mas reciente a mas antiguo`() {
         val shuffled = listOf(
-            DateGroup.Month(YearMonth.of(2025, 9)),
+            DateGroup.Day(LocalDate.of(2025, 9, 1)),
             DateGroup.Undated,
             DateGroup.Day(LocalDate.of(2026, 1, 2)),
             DateGroup.Today,
-            DateGroup.Month(YearMonth.of(2025, 12)),
-            DateGroup.ThisWeek,
+            DateGroup.Day(LocalDate.of(2025, 12, 31)),
+            DateGroup.Day(LocalDate.of(2026, 9, 9)),
             DateGroup.Day(LocalDate.of(2026, 9, 6)),
-            DateGroup.Yesterday,
         )
 
         assertEquals(
             listOf(
                 DateGroup.Today,
-                DateGroup.Yesterday,
-                DateGroup.ThisWeek,
+                DateGroup.Day(LocalDate.of(2026, 9, 9)),
                 DateGroup.Day(LocalDate.of(2026, 9, 6)),
                 DateGroup.Day(LocalDate.of(2026, 1, 2)),
-                DateGroup.Month(YearMonth.of(2025, 12)),
-                DateGroup.Month(YearMonth.of(2025, 9)),
+                DateGroup.Day(LocalDate.of(2025, 12, 31)),
+                DateGroup.Day(LocalDate.of(2025, 9, 1)),
                 DateGroup.Undated,
             ),
             shuffled.sorted(),

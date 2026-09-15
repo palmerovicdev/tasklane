@@ -102,7 +102,7 @@ class TasklaneDiagnosticsTest {
             val onDiskOnly = TasklaneDiagnostics.collect(layout, mapOf(repo to statsOf(tasks))).repos.single()
             assertEquals("lo que no está apuntado no se cuenta", 0, onDiskOnly.blobCount)
 
-            val blobs = BlobStats(count = 10, bytes = 330_000, oversized = 2, oversizedBytes = 800_000)
+            val blobs = BlobStats(count = 10, bytes = 330_000)
             val only = TasklaneDiagnostics
                 .collect(layout, mapOf(repo to statsOf(tasks)), blobs = mapOf(repo to blobs))
                 .repos.single()
@@ -133,24 +133,6 @@ class TasklaneDiagnosticsTest {
         val done = TasklaneDiagnostics.collect(null, stats, reconciled = setOf(repo))
         assertFalse(done.pending)
         assertFalse(DiagnosticsReport.render(done).contains("still being reconciled"))
-    }
-
-    /**
-     * Las capturas que ya estaban guardadas cuando el tope bajó a 400 px **no se tocan**
-     * —reescalarlas cambiaría su SHA, que es su nombre—, así que lo mínimo que se le debe
-     * a quien tenga tres gigas de ellas es decirle cuántas son.
-     */
-    @Test
-    fun `dice cuantas imagenes estan por encima del tope de hoy`() {
-        val text = DiagnosticsReport.render(
-            TasklaneDiagnostics.collect(
-                null,
-                mapOf(repo to statsOf(SyntheticCorpus.tasks(5))),
-                blobs = mapOf(repo to BlobStats(count = 50, bytes = 20_000_000, oversized = 7, oversizedBytes = 2_800_000)),
-                imageMaxSize = 400,
-            ),
-        )
-        assertTrue(text, text.contains("7 image(s) above the 400 px cap"))
     }
 
     /**
@@ -185,7 +167,10 @@ class TasklaneDiagnosticsTest {
         assertTrue(pending, pending.contains("check pending"))
     }
 
-    /** La cuota del §4.5 se enseña siempre que esté puesta, y se marca cuando se cruza. */
+    /**
+     * La cuota del §4.5 se enseña siempre que esté puesta, y se marca **en el repositorio
+     * que la pasa**: desde la 2.3 es por repositorio, como todo lo de las imágenes.
+     */
     @Test
     fun `el informe enseña la cuota y dice cuando se pasa`() {
         val stats = mapOf(repo to statsOf(SyntheticCorpus.tasks(5)))
@@ -194,7 +179,7 @@ class TasklaneDiagnosticsTest {
         val under = DiagnosticsReport.render(
             TasklaneDiagnostics.collect(null, stats, blobs = mapOf(repo to BlobStats(1, 1024)), quotaBytes = quota),
         )
-        assertTrue(under, under.contains("of 1.0 GB quota"))
+        assertTrue(under, under.contains("warning at 1.0 GB per repository"))
         assertFalse(under, under.contains("OVER"))
 
         val over = DiagnosticsReport.render(
@@ -205,7 +190,7 @@ class TasklaneDiagnosticsTest {
                 quotaBytes = quota,
             ),
         )
-        assertTrue(over, over.contains("OVER"))
+        assertTrue(over, over.contains("OVER the 1.0 GB quota"))
     }
 
     /** Sin `StorageLayout` —proyecto por defecto, tests ligeros— no se cae: informa lo que sabe. */

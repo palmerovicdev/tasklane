@@ -24,7 +24,6 @@ import com.intellij.ui.CheckedTreeNode
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
-import com.intellij.ui.render.RenderingUtil
 import com.intellij.ui.SearchTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
@@ -256,10 +255,10 @@ internal class TasklanePanel(
         // Altura variable por fila: desde la Fase 5 el renderer tiene una segunda
         // línea que sólo aparece cuando hay enlaces o etiquetas que enseñar.
         tree.rowHeight = 0
-        // El resalte del ratón lo pinta la tarjeta, no el árbol: el del árbol va
-        // detrás del renderer y más ancho que él, así que asomaba por los bordes
-        // redondeados. Ver [TaskTreeRenderer.paintComponent].
-        RenderingUtil.setHoverPaintingDisabled(tree, true)
+        // El resalte del ratón lo pinta el árbol, y la tarjeta que está debajo no pinta
+        // su fondo encima: ver [TaskTreeRenderer.paintComponent]. Hasta la 2.2 era al
+        // revés y se apagaba el del árbol con `RenderingUtil.setHoverPaintingDisabled`,
+        // que es API interna y el Marketplace la rechaza.
         // Sin la ventanita de «fila completa» de la plataforma. Cuando una fila no cabe
         // de ancho, `Tree` saca al pasar el ratón un trozo flotante con lo que falta,
         // **por fuera** del panel. Con estas filas eso es media tarjeta asomando sobre
@@ -412,7 +411,12 @@ internal class TasklanePanel(
         // El atajo se enseña dentro del campo. Es la única pista de que existe: no
         // hay botón de búsqueda que pueda llevar un tooltip con él, y ⌘K aquí no es
         // el ⌘K del resto del IDE.
-        val hint = searchShortcut().shortcuts.firstOrNull()?.let(KeymapUtil::getShortcutText)
+        // Una lambda y no `KeymapUtil::getShortcutText`: la referencia a función de un
+        // `object` de Kotlin se compila leyendo su `INSTANCE`, y en la 2026.1 `KeymapUtil`
+        // es todavía una clase Java sin ese campo —el verificador del Marketplace lo
+        // marcaba como `NoSuchFieldError`—. La llamada directa es un `invokestatic`, que
+        // existe en las dos.
+        val hint = searchShortcut().shortcuts.firstOrNull()?.let { KeymapUtil.getShortcutText(it) }
         searchField.textEditor.emptyText.text =
             if (hint.isNullOrBlank()) TasklaneBundle.message("search.placeholder")
             else TasklaneBundle.message("search.placeholder.shortcut", hint)

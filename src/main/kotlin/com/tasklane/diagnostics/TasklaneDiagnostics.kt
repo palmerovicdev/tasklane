@@ -81,10 +81,11 @@ object TasklaneDiagnostics {
         val heapUsedBytes: Long,
         val heapMaxBytes: Long,
         val latencies: List<TasklaneMetrics.Sample>,
-        /** El umbral de aviso del §4.5, o `0` si está apagado. */
+        /**
+         * El umbral de aviso del §4.5, o `0` si está apagado. **Por repositorio** desde la
+         * 2.3: es lo que enseñan los ajustes y sobre lo que actúan sus botones.
+         */
         val quotaBytes: Long = 0,
-        /** El tope de escalado vigente: es contra él contra lo que se cuenta lo sobredimensionado. */
-        val imageMaxSize: Int = 0,
         /** La copia diaria y la última comprobación de la base (Fase 5). */
         val store: StoreHealth = StoreHealth(),
     ) {
@@ -92,12 +93,12 @@ object TasklaneDiagnostics {
         val blobCount: Int get() = repos.sumOf { it.blobCount }
         val blobBytes: Long get() = repos.sumOf { it.blobBytes }
         val missingBlobs: Int get() = repos.sumOf { it.blobs.missing }
-        val oversizedBlobs: Int get() = repos.sumOf { it.blobs.oversized }
-        val oversizedBytes: Long get() = repos.sumOf { it.blobs.oversizedBytes }
         /** Con la copia diaria de la base: también es sitio que ocupa `.idea/tasklane`. */
         val totalBytes: Long get() = repos.sumOf { it.totalBytes } + store.backupBytes
         val pending: Boolean get() = repos.any { !it.reconciled }
-        val overQuota: Boolean get() = quotaBytes > 0 && blobBytes >= quotaBytes
+        val overQuota: Boolean get() = repos.any(::overQuota)
+
+        fun overQuota(repo: RepoReport): Boolean = quotaBytes > 0 && repo.blobBytes >= quotaBytes
     }
 
     /**
@@ -112,7 +113,6 @@ object TasklaneDiagnostics {
         blobs: Map<RepoKey, BlobStats> = emptyMap(),
         reconciled: Set<RepoKey> = emptySet(),
         quotaBytes: Long = 0,
-        imageMaxSize: Int = 0,
         metrics: List<TasklaneMetrics.Sample> = emptyList(),
         store: StoreHealth = StoreHealth(),
     ): Report {
@@ -130,7 +130,6 @@ object TasklaneDiagnostics {
             heapMaxBytes = runtime.maxMemory(),
             latencies = metrics,
             quotaBytes = quotaBytes,
-            imageMaxSize = imageMaxSize,
             store = store,
         )
     }
@@ -209,23 +208,15 @@ object TasklaneDiagnostics {
  * Lo que la tabla `blob` sabe de un repositorio, en agregados (§4.2).
  *
  * Es el sustituto exacto del recorrido del directorio que hacía el informe hasta la 2.0:
- * cinco números que SQLite saca de un índice, contra `Files.list` más un
- * `readAttributes` por fichero.
- *
- * [oversized] es la cifra que la Fase 4 se debe a sí misma. Al bajar el tope de escalado
- * de 1600 a 400 px se decidió **no tocar lo ya guardado** —el nombre de un blob es el
- * SHA de sus bytes, así que reescalarlo cambiaría su nombre y habría que reescribir
- * todos los cuerpos que lo nombran—, y lo mínimo que se le debe a quien tenga tres gigas
- * de capturas antiguas es decirle cuántas son y cuánto ocupan.
+ * tres números que SQLite saca de la tabla, contra `Files.list` más un
+ * `readAttributes` por fichero. Y es lo que enseñan los ajustes desde la 2.3.
  */
 data class BlobStats(
     val count: Int = 0,
+    /** Lo que ocupan en disco: las filas ausentes no pesan. */
     val bytes: Long = 0,
     /** Filas cuyo fichero ya no está. Lo detecta la reconciliación del §4.3. */
     val missing: Int = 0,
-    /** Blobs guardados por encima del tope de escalado de hoy. */
-    val oversized: Int = 0,
-    val oversizedBytes: Long = 0,
 ) {
     /** Los que de verdad están en disco. */
     val present: Int get() = (count - missing).coerceAtLeast(0)

@@ -1,5 +1,7 @@
 package com.tasklane.ui.common
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.ScreenUtil
@@ -38,22 +40,33 @@ internal object ImagePreviewPopup {
      */
     fun show(project: Project, repo: RepoKey, id: AttachmentId, at: RelativePoint, over: Component) {
         val screen = ScreenUtil.getScreenRectangle(over)
-        val image = AttachmentService.getInstance(project).preview(
-            repo,
-            id,
-            (screen.width * SCREEN_SHARE).toInt(),
-            (screen.height * SCREEN_SHARE).toInt(),
-        ) ?: return
-
-        val label = JLabel(ImageIcon(image)).apply { border = JBUI.Borders.empty() }
-        JBPopupFactory.getInstance()
-            .createComponentPopupBuilder(JBScrollPane(label), null)
-            .setResizable(true)
-            .setMovable(true)
-            .setRequestFocus(true)
-            .setTitle(TasklaneBundle.message("editor.image.popup.title"))
-            .createPopup()
-            .show(at)
+        // En segundo plano: desde la 2.3 el original es la captura a su tamaño, y
+        // descodificarla en el EDT congelaría el clic.
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val image = AttachmentService.getInstance(project).fullPreview(
+                repo,
+                id,
+                (screen.width * SCREEN_SHARE).toInt(),
+                (screen.height * SCREEN_SHARE).toInt(),
+            ) ?: return@executeOnPooledThread
+            ApplicationManager.getApplication().invokeLater(
+                {
+                    if (project.isDisposed || !over.isShowing) return@invokeLater
+                    val label = JLabel(ImageIcon(image)).apply { border = JBUI.Borders.empty() }
+                    JBPopupFactory.getInstance()
+                        .createComponentPopupBuilder(JBScrollPane(label), null)
+                        .setResizable(true)
+                        .setMovable(true)
+                        .setRequestFocus(true)
+                        .setTitle(TasklaneBundle.message("editor.image.popup.title"))
+                        .createPopup()
+                        .show(at)
+                },
+                // El editor del cuerpo vive en un diálogo modal: sin esto el popup esperaría
+                // a que se cerrara.
+                ModalityState.any(),
+            )
+        }
     }
 
     /** Cuánto de la pantalla puede ocupar la ampliación. */

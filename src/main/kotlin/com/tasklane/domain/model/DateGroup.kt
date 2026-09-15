@@ -1,22 +1,27 @@
 package com.tasklane.domain.model
 
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
-import java.time.YearMonth
 import java.time.ZoneId
-import java.time.temporal.TemporalAdjusters
 
 /**
  * Grupo de fecha al que cae una tarea dentro de un estado que agrupa.
  *
  * Es un **valor**, no un texto: el dominio decide la partición y la UI decide cómo
- * se escribe. Esa separación es la que permite formatear con `DateFormatUtil` para
- * respetar el locale sin meter Swing —ni el locale— dentro del dominio.
+ * se escribe. Esa separación es la que permite formatear con el locale sin meter
+ * Swing —ni el locale— dentro del dominio.
+ *
+ * **Un grupo por día, y sólo «hoy» sin fecha exacta** (2.3.0). Hasta la 2.2 había
+ * cinco familias —hoy, ayer, esta semana, días sueltos del año y meses de años
+ * anteriores—, y dos de ellas escondían días: «esta semana» metía cinco en una misma
+ * cabecera y un mes de 2025 metía treinta. Lo pidió el usuario: cada día que tenga
+ * alguna tarea es su propia cabecera, con su fecha. «Hoy» se queda con su nombre
+ * porque es el único que no necesita fecha para saber de qué habla, y el único que se
+ * enseña aunque esté vacío.
  *
  * El orden es el de lectura: lo más reciente arriba. Se compara por ([band],
- * [within]) en vez de por un único entero para que no haya que reservar rangos
- * numéricos ni preocuparse de colisiones entre días y meses.
+ * [within]) en vez de por un único entero para que «hoy» y «sin fecha» no tengan que
+ * reservarse un día imposible.
  */
 sealed interface DateGroup : Comparable<DateGroup> {
 
@@ -27,12 +32,12 @@ sealed interface DateGroup : Comparable<DateGroup> {
     val within: Long
 
     /**
-     * El día del que habla el grupo, o `null` si no habla de uno solo.
+     * El día del que habla el grupo, o `null` si no habla de uno.
      *
-     * «Hoy» y «ayer» son días concretos, pero cuáles depende de cuándo se pregunte: por
-     * eso entra [today] en vez de leerse el reloj aquí, igual que en [DateGrouper]. Una
-     * semana, un mes y «sin fecha» no tienen día, y devolver uno inventado —el lunes, el
-     * día 1— sería escribir en una exportación una fecha que nadie eligió.
+     * «Hoy» es un día concreto, pero cuál depende de cuándo se pregunte: por eso entra
+     * [today] en vez de leerse el reloj aquí, igual que en [DateGrouper]. «Sin fecha»
+     * no tiene día, y devolver uno inventado sería escribir en una exportación una fecha
+     * que nadie eligió.
      *
      * Lo usa la exportación en Markdown, que encabeza cada grupo con su fecha en ISO.
      */
@@ -47,31 +52,11 @@ sealed interface DateGroup : Comparable<DateGroup> {
         override fun dayOn(today: LocalDate): LocalDate = today
     }
 
-    data object Yesterday : DateGroup {
-        override val band = 1
-        override val within = 0L
-        override fun dayOn(today: LocalDate): LocalDate = today.minusDays(1)
-    }
-
-    /** Desde el primer día de la semana hasta anteayer. Puede quedar vacío a principio de semana. */
-    data object ThisWeek : DateGroup {
-        override val band = 2
-        override val within = 0L
-        override fun dayOn(today: LocalDate): LocalDate? = null
-    }
-
-    /** Un día suelto del año en curso: «Sep 10». */
+    /** Cualquier día anterior a hoy que tenga alguna tarea: «Sep 14», «Sep 10, 2025». */
     data class Day(val date: LocalDate) : DateGroup {
-        override val band = 3
+        override val band = 1
         override val within get() = -date.toEpochDay()
         override fun dayOn(today: LocalDate): LocalDate = date
-    }
-
-    /** Un mes de un año anterior: «Sep 2025». */
-    data class Month(val month: YearMonth) : DateGroup {
-        override val band = 4
-        override val within get() = -(month.year * 12L + month.monthValue)
-        override fun dayOn(today: LocalDate): LocalDate? = null
     }
 
     /**
@@ -80,7 +65,7 @@ sealed interface DateGroup : Comparable<DateGroup> {
      * Va al final en vez de desaparecer.
      */
     data object Undated : DateGroup {
-        override val band = 5
+        override val band = 2
         override val within = 0L
         override fun dayOn(today: LocalDate): LocalDate? = null
     }
@@ -89,9 +74,8 @@ sealed interface DateGroup : Comparable<DateGroup> {
 /**
  * Reparte tareas en [DateGroup]s. Kotlin puro: se testea sin arrancar un IDE.
  *
- * [firstDayOfWeek] entra por parámetro en vez de leerse de `Locale.getDefault()`
- * porque el dominio no debe depender del entorno: la UI pasa el del usuario y los
- * tests pasan el que necesiten.
+ * Hasta la 2.2 recibía también el primer día de la semana, que era lo que delimitaba
+ * «esta semana». Sin esa cabecera no queda nada que dependa de él, y se fue con ella.
  */
 object DateGrouper {
 
@@ -103,7 +87,7 @@ object DateGrouper {
     }
 
     /**
-     * El intervalo `[desde, hasta)` que ocupa un grupo, en milisegundos de época.
+     * El intervalo `[desde, hasta]` que ocupa un grupo, en milisegundos de época.
      *
      * Es la inversa de [groupOf] y existe por la Fase 3: sin corpus en memoria, las
      * cabeceras no salen de repartir tareas sino de **contar un rango del índice**, y
@@ -118,48 +102,23 @@ object DateGrouper {
      * [DateGroup.Undated] no tiene intervalo —devuelve `null`—: no es un rango de
      * fechas, es la ausencia de una.
      */
-    fun rangeOf(
-        group: DateGroup,
-        today: LocalDate,
-        zone: ZoneId,
-        firstDayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
-    ): LongRange? {
+    fun rangeOf(group: DateGroup, today: LocalDate, zone: ZoneId): LongRange? {
         fun startOf(date: LocalDate): Long = date.atStartOfDay(zone).toInstant().toEpochMilli()
         return when (group) {
             is DateGroup.Today -> startOf(today)..Long.MAX_VALUE
-            is DateGroup.Yesterday -> startOf(today.minusDays(1)) until startOf(today)
-            is DateGroup.ThisWeek -> {
-                val start = startOf(today.with(TemporalAdjusters.previousOrSame(firstDayOfWeek)))
-                val end = startOf(today.minusDays(1))
-                if (start >= end) LongRange.EMPTY else start until end
-            }
-
+            // Por el principio de un día y del siguiente, y no sumando 24 horas: el día
+            // en que cambia la hora mide 23 o 25.
             is DateGroup.Day -> startOf(group.date) until startOf(group.date.plusDays(1))
-            is DateGroup.Month ->
-                startOf(group.month.atDay(1)) until startOf(group.month.plusMonths(1).atDay(1))
-
             is DateGroup.Undated -> null
         }
     }
 
-    fun groupOf(
-        instant: Instant?,
-        today: LocalDate,
-        zone: ZoneId,
-        firstDayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
-    ): DateGroup {
+    fun groupOf(instant: Instant?, today: LocalDate, zone: ZoneId): DateGroup {
         if (instant == null) return DateGroup.Undated
         val date = instant.atZone(zone).toLocalDate()
-        val weekStart = today.with(TemporalAdjusters.previousOrSame(firstDayOfWeek))
-        return when {
-            // Una fecha futura sólo puede venir de un reloj desajustado o de un
-            // fichero editado a mano. Se trata como «ahora» en vez de inventarle
-            // un grupo que quedaría por encima de Today.
-            !date.isBefore(today) -> DateGroup.Today
-            date == today.minusDays(1) -> DateGroup.Yesterday
-            !date.isBefore(weekStart) -> DateGroup.ThisWeek
-            date.year == today.year -> DateGroup.Day(date)
-            else -> DateGroup.Month(YearMonth.from(date))
-        }
+        // Una fecha futura sólo puede venir de un reloj desajustado o de un fichero
+        // editado a mano. Se trata como «ahora» en vez de inventarle un grupo que
+        // quedaría por encima de Today.
+        return if (!date.isBefore(today)) DateGroup.Today else DateGroup.Day(date)
     }
 }

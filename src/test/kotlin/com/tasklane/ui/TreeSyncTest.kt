@@ -20,6 +20,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.time.LocalDate
 import javax.swing.JTree
 import javax.swing.tree.TreePath
 
@@ -248,7 +249,7 @@ class TreeSyncTest {
      */
     @Test
     fun `insertar una cabecera por encima no cierra las de abajo`() {
-        sync(listOf(Row.OfGroup(GroupKey.OfDate(DateGroup.Yesterday), 2)))
+        sync(listOf(Row.OfGroup(GroupKey.OfDate(DateGroup.Day(LocalDate.of(2026, 9, 14))), 2)))
         val yesterday = nodeAt(0) as GroupNode
         TreeSync.sync(model, yesterday, rows("a", "b"))
         tree.expandPath(TreePath(root))
@@ -257,7 +258,7 @@ class TreeSyncTest {
         sync(
             listOf(
                 Row.OfGroup(GroupKey.OfDate(DateGroup.Today), 1),
-                Row.OfGroup(GroupKey.OfDate(DateGroup.Yesterday), 2),
+                Row.OfGroup(GroupKey.OfDate(DateGroup.Day(LocalDate.of(2026, 9, 14))), 2),
             ),
         )
 

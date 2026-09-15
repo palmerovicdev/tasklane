@@ -23,6 +23,7 @@ import com.tasklane.data.sqlite.RepoSnapshot
 import com.tasklane.data.sqlite.SqlitePager
 import com.tasklane.data.sqlite.StoreMaintenance
 import com.tasklane.data.sqlite.TaskDb
+import com.tasklane.data.sqlite.TaskImport
 import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.data.sqlite.TasksXmlReader
 import com.tasklane.data.store.StorageLayout
@@ -477,7 +478,30 @@ class TaskService(
         return store.write { store.markMissingBlobs(repo, before.toEpochMilli()) }
     }
 
-    fun blobStatsOf(repo: RepoKey, maxSize: Int): BlobStats = store?.blobStatsOf(repo, maxSize) ?: BlobStats()
+    fun blobStatsOf(repo: RepoKey): BlobStats = store?.blobStatsOf(repo) ?: BlobStats()
+
+    /**
+     * Una tanda de filas de `blob` de un repositorio, fuera. Es la mitad de base de «borrar
+     * todas las imágenes»: ver `BlobSweeper.deleteAll`.
+     *
+     * @return cuántas; cero es que ya no queda ninguna.
+     */
+    fun forgetBlobBatch(repo: RepoKey): Int {
+        val store = store ?: return 0
+        if (store.readOnly) return 0
+        return store.forgetBlobRows(repo)
+    }
+
+    /**
+     * Pide a la ventana que se vuelva a pintar sin que haya cambiado ninguna tarea.
+     *
+     * Lo necesita quien cambia lo que las tarjetas **enseñan** sin pasar por un comando:
+     * borrar las imágenes de un repositorio deja las mismas tareas apuntando a ficheros
+     * que ya no están, y la lista tiene que enterarse para pintar el hueco.
+     */
+    fun refreshView() {
+        synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
+    }
 
     /** Lo que ocupan los adjuntos del proyecto. Es la cifra que vigila la cuota del §4.5. */
     fun blobBytes(): Long = store?.blobBytes() ?: 0L
@@ -586,17 +610,8 @@ class TaskService(
     fun removeRepo(repo: RepoKey, onProgress: (Removal, Long) -> Unit = { _, _ -> }) {
         val store = store
         if (store != null && !store.readOnly) {
-            var removed = 0L
-            // Con la caché grande y el volcado del diario espaciado: son cientos de
-            // transacciones pequeñas seguidas, justo el caso de `TaskStore.bulk`.
+            forgetTasks(store, repo) { onProgress(Removal.TASKS, it) }
             store.bulk(TaskStore.REMOVAL_CHECKPOINT_PAGES) {
-                while (true) {
-                    val batch = store.forgetBatch(repo)
-                    if (batch == 0) break
-                    removed += batch
-                    onProgress(Removal.TASKS, removed)
-                    synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
-                }
                 do {
                     val rows = store.forgetBlobRows(repo)
                 } while (rows > 0)
@@ -620,6 +635,56 @@ class TaskService(
 
     /** En qué va [removeRepo]. */
     enum class Removal { TASKS, FILES }
+
+    /**
+     * Vacía un repositorio: **borra todas sus tareas** y lo deja en la lista, sin nada.
+     *
+     * Es la mitad destructiva de *Delete All Tasks in Repository* (2.3.0), y a diferencia
+     * de [removeRepo] no se lleva el repositorio: sigue en el disco, sigue en el selector,
+     * y lo siguiente que se cree en él empieza de cero. Quien llama ya ha preguntado y ya
+     * ha puesto el repositorio en solo lectura con [beginRemoval], para que una tarea
+     * creada mientras tanto no se borre sin que nadie la haya visto; aquí se le quita.
+     *
+     * **Sólo las tareas.** Las capturas que nombraban se quedan sin referencias y las
+     * recoge el mantenimiento de siempre —con su periodo de gracia, ver
+     * `AttachmentService.collectGarbage`—: borrarlas aquí sería adelantarse a un
+     * recolector que ya sabe hacerlo sin pisarse con el traslado ni con la
+     * reconciliación, que pueden estar corriendo en ese momento.
+     *
+     * Por tandas y **bloqueante**, como [removeRepo]: llamar desde una tarea de fondo.
+     *
+     * @return cuántas tareas se borraron.
+     */
+    fun clearRepo(repo: RepoKey, onProgress: (Long) -> Unit = {}): Long {
+        try {
+            val store = store ?: return 0
+            if (store.readOnly) return 0
+            return forgetTasks(store, repo, onProgress)
+        } finally {
+            cancelRemoval(repo)
+        }
+    }
+
+    /**
+     * Las tareas de un repositorio fuera de la base, por tandas —ver
+     * [TaskStore.forgetBatch]—, repintando después de cada una: la lista se va vaciando
+     * mientras ocurre en vez de congelarse.
+     */
+    private fun forgetTasks(store: TaskStore, repo: RepoKey, onProgress: (Long) -> Unit): Long {
+        var removed = 0L
+        // Con la caché grande y el volcado del diario espaciado: son cientos de
+        // transacciones pequeñas seguidas, justo el caso de `TaskStore.bulk`.
+        store.bulk(TaskStore.REMOVAL_CHECKPOINT_PAGES) {
+            while (true) {
+                val batch = store.forgetBatch(repo)
+                if (batch == 0) break
+                removed += batch
+                onProgress(removed)
+                synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
+            }
+        }
+        return removed
+    }
 
     // ------------------------------------------------------ mantenimiento (Fase 5)
 
@@ -745,24 +810,19 @@ class TaskService(
 
         indicator.text = TasklaneBundle.message("migrate.repo", repo.value)
         val total = TasksXmlReader.count(file).coerceAtLeast(1)
-        var written = store.importedCount(repo)
 
-        val result = metrics.time(TasklaneMetrics.Op.LOAD) {
-            store.bulk {
-                TasksXmlReader.read(file, repo, skip = written, cancelled = { indicator.isCanceled }) { chunk ->
-                    store.write {
-                        store.importBatch(chunk, config)
-                        written += chunk.size
-                        store.markImported(repo, TasksCodec.CURRENT_VERSION, written, false, nowMillis())
-                    }
-                    indicator.fraction = written.toDouble() / total
-                    // La ventana se va llenando mientras se importa: cada tanda
-                    // confirmada es una lista un poco más larga, no una pantalla en
-                    // blanco de un minuto.
-                    synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
-                }
+        // El bucle es `TaskImport`, sin IDE, que es el que la prueba de caída del §6.1 mata
+        // a mitad y comprueba que continúa.
+        val outcome = metrics.time(TasklaneMetrics.Op.LOAD) {
+            TaskImport.run(store, file, repo, config, ::nowMillis, cancelled = { indicator.isCanceled }) { written ->
+                indicator.fraction = written.toDouble() / total
+                // La ventana se va llenando mientras se importa: cada tanda confirmada es
+                // una lista un poco más larga, no una pantalla en blanco de un minuto.
+                synchronized(gate) { _snapshot.value = _snapshot.value.touched() }
             }
         }
+        val result = outcome.result
+        val written = outcome.written
 
         when (result) {
             is TasksXmlReader.Result.Done -> {

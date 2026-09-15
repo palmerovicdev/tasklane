@@ -635,7 +635,7 @@ class ScaleBenchmark {
                     tasks.write { tasks.markMissingBlobs(repo, stamp) }
                 }
                 assertEquals("tiene que adoptarlos todos", blobs, adopted)
-                assertEquals(blobs, tasks.blobStatsOf(repo, SyntheticBlobs.DEFAULT_SIZE).count)
+                assertEquals(blobs, tasks.blobStatsOf(repo).count)
                 record(result)
 
                 // Y la pasada de verdad: la semanal, en la que no hay nada nuevo. No se
@@ -698,6 +698,86 @@ class ScaleBenchmark {
         } finally {
             root.toFile().deleteRecursively()
         }
+    }
+
+    /**
+     * **2.3 — guardar una imagen, antes y ahora.** Hasta la 2.2 toda imagen se reescalaba
+     * a 400 px y se volvía a codificar a PNG; desde la 2.3 se guarda a su tamaño: los
+     * píxeles del portapapeles en PNG, y un fichero soltado con sus bytes.
+     *
+     * Sobre una captura sintética de [SCREENSHOT_SIZE] px calibrada como las del §0-bis.5.
+     * Todo en memoria: lo que se compara es el trabajo de CPU, no el disco. Ocurre fuera
+     * del EDT en los dos caminos, al pegar.
+     */
+    @Test
+    fun `adjuntos · guardar una imagen, antes y ahora`() {
+        val source = SyntheticBlobs.png(7, SCREENSHOT_SIZE)
+        val decoded = javax.imageio.ImageIO.read(source.inputStream())
+        val clipboard = java.awt.image.BufferedImage(decoded.width, decoded.height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            .also { it.createGraphics().run { drawImage(decoded, 0, 0, null); dispose() } }
+        val file = Files.createTempFile("tasklane-drop", ".png").also { Files.write(it, source) }
+        try {
+            var before = ByteArray(0)
+            var after = ByteArray(0)
+            record(
+                Bench.measure("guardar · pegar píxeles, a 400 px (hasta la 2.2)", runs = 8, warmup = 2) {
+                    before = legacyNormalize(clipboard, 400)
+                    ImageNormalizer.sha256(before)
+                },
+            )
+            record(
+                Bench.measure("guardar · pegar píxeles, a su tamaño + miniatura (2.3)", runs = 8, warmup = 2) {
+                    val pixels = ImageNormalizer.pixels(clipboard)
+                    after = ImageNormalizer.encode(pixels)
+                    ImageNormalizer.thumbnail(pixels)
+                    ImageNormalizer.sha256(after)
+                },
+            )
+            record(
+                Bench.measure("guardar · soltar un fichero, descodificar + 400 px (hasta la 2.2)", runs = 8, warmup = 2) {
+                    ImageNormalizer.sha256(legacyNormalize(javax.imageio.ImageIO.read(file.toFile()), 400))
+                },
+            )
+            record(
+                Bench.measure("guardar · soltar un fichero, sus bytes (2.3)", runs = 8, warmup = 2) {
+                    val bytes = Files.readAllBytes(file)
+                    assertTrue(ImageNormalizer.sizeOf(bytes) != null)
+                    ImageNormalizer.sha256(bytes)
+                },
+            )
+            // Lo que el fichero soltado deja para después: su miniatura, que la lista hace
+            // la primera vez que lo pinta, en segundo plano.
+            record(
+                Bench.measure("guardar · la miniatura aplazada de un fichero (2.3)", runs = 8, warmup = 2) {
+                    ImageNormalizer.thumbnail(javax.imageio.ImageIO.read(file.toFile()))
+                },
+            )
+            println(
+                "  en disco: %d KB a 400 px, %d KB a su tamaño (%.0f×); un fichero soltado, %d KB tal cual"
+                    .format(before.size / 1024, after.size / 1024, after.size.toDouble() / before.size, source.size / 1024),
+            )
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    /** El `ImageNormalizer.normalize` de hasta la 2.2, para medirlo al lado: reescalar y PNG. */
+    private fun legacyNormalize(image: java.awt.image.BufferedImage, maxSize: Int): ByteArray {
+        val factor = maxSize.toDouble() / maxOf(image.width, image.height)
+        val scaled = if (factor >= 1.0) image else {
+            val w = (image.width * factor).toInt().coerceAtLeast(1)
+            val h = (image.height * factor).toInt().coerceAtLeast(1)
+            java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB).also { target ->
+                target.createGraphics().run {
+                    setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                    setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY)
+                    setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    drawImage(image, 0, 0, w, h, null)
+                    dispose()
+                }
+            }
+        }
+        return java.io.ByteArrayOutputStream().also { javax.imageio.ImageIO.write(scaled, "png", it) }.toByteArray()
     }
 
     // =========================================== las operaciones grandes (Fase 5)
@@ -1222,6 +1302,9 @@ class ScaleBenchmark {
 
         /** Las imágenes de una tarjeta desplegada, según la especificación del §1.1. */
         const val CARD_IMAGES = 10
+
+        /** El lado de una captura de un portátil con pantalla de alta densidad. */
+        const val SCREENSHOT_SIZE = 2880
 
         /**
          * Lo descodificado, retenido a propósito: sin esto el GC se lleva las imágenes

@@ -138,7 +138,8 @@ internal class ImageInlays(
     private fun load(id: AttachmentId) {
         if (!loading.add(id)) return
         ApplicationManager.getApplication().executeOnPooledThread {
-            val present = service.image(repo, id) != null
+            // La copia acotada y no el original: es de la que pinta el renderer en el EDT.
+            val present = service.master(repo, id) != null
             ApplicationManager.getApplication().invokeLater(
                 {
                     loading -= id

@@ -29,15 +29,6 @@ object DiagnosticsReport {
             "  Heap             ${humanBytes(report.heapUsedBytes)} used of " +
                 humanBytes(report.heapMaxBytes),
         )
-        // Lo que ya estaba guardado cuando el tope de escalado bajó a 400 px. No se
-        // reescala —cambiaría el SHA, que es el nombre del fichero, y con él todas las
-        // referencias de los cuerpos—, así que lo único honesto es decir cuánto es.
-        if (report.oversizedBlobs > 0) {
-            appendLine(
-                "  Oversized        ${report.oversizedBlobs} image(s) above the " +
-                    "${report.imageMaxSize} px cap, ${humanBytes(report.oversizedBytes)}",
-            )
-        }
         // Un informe que dijera «0 imágenes» de un directorio lleno mentiría. Mientras la
         // reconciliación no haya pasado, lo que la tabla sabe está incompleto y se dice.
         if (report.pending) {
@@ -76,14 +67,9 @@ object DiagnosticsReport {
                 )
                 appendLine(
                     "    blobs          ${repo.blobCount}, " +
-                        humanBytes(repo.blobBytes) + unreferencedNote(repo) + repoMissingNote(repo),
+                        humanBytes(repo.blobBytes) + unreferencedNote(repo) + repoMissingNote(repo) +
+                        repoQuotaNote(report, repo),
                 )
-                if (repo.blobs.oversized > 0) {
-                    appendLine(
-                        "    oversized      ${repo.blobs.oversized}, " +
-                            humanBytes(repo.blobs.oversizedBytes),
-                    )
-                }
                 // Desde la Fase 3 lo que pesa es la base, y es UNA por proyecto: se le
                 // atribuye al primer repositorio del informe para que el total no la
                 // cuente N veces. Los ficheros XML que queden —el `.migrated` y el
@@ -159,12 +145,13 @@ object DiagnosticsReport {
         if (report.missingBlobs > 0) " (${report.missingBlobs} missing from disk)" else ""
 
     /**
-     * El peso frente a la cuota del §4.5. Es la cifra que el aviso vigila, y enseñarla
-     * aquí es la mitad de la política: la otra mitad es que el aviso no borra nada.
+     * La cuota del §4.5. Es **por repositorio** desde la 2.3, así que en los totales sólo
+     * se dice cuál es; quién la pasa se dice en su fila. Enseñarla aquí es la mitad de la
+     * política: la otra mitad es que el aviso no borra nada.
      */
-    private fun quotaNote(report: TasklaneDiagnostics.Report): String = when {
-        report.quotaBytes <= 0 -> ""
-        report.overQuota -> " of ${humanBytes(report.quotaBytes)} quota — OVER"
-        else -> " of ${humanBytes(report.quotaBytes)} quota"
-    }
+    private fun quotaNote(report: TasklaneDiagnostics.Report): String =
+        if (report.quotaBytes <= 0) "" else " (warning at ${humanBytes(report.quotaBytes)} per repository)"
+
+    private fun repoQuotaNote(report: TasklaneDiagnostics.Report, repo: TasklaneDiagnostics.RepoReport): String =
+        if (report.overQuota(repo)) " — OVER the ${humanBytes(report.quotaBytes)} quota" else ""
 }

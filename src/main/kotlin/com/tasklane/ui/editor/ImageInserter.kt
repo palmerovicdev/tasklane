@@ -3,7 +3,6 @@ package com.tasklane.ui.editor
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.command.WriteCommandAction
-import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
@@ -12,7 +11,6 @@ import com.tasklane.domain.model.RepoKey
 import com.tasklane.service.AttachmentService
 import java.awt.Image
 import java.io.File
-import javax.imageio.ImageIO
 
 /**
  * Adjuntar una imagen al cuerpo que se está editando: guardarla y dejar la referencia
@@ -20,7 +18,7 @@ import javax.imageio.ImageIO
  *
  * Es un sitio único a propósito. Hay tres gestos que acaban aquí —pegar, soltar un
  * fichero y elegirlo con el botón— y los tres tienen que hacer exactamente lo mismo:
- * normalizar **fuera del EDT**, volver al hilo de UI sólo para insertar el texto, y
+ * guardar **fuera del EDT**, volver al hilo de UI sólo para insertar el texto, y
  * hacerlo dentro de un [WriteCommandAction] con nombre propio para que `⌘Z` deshaga
  * el gesto entero. Repartido por tres clases, cualquiera de las tres se saltaría una
  * de las tres cosas.
@@ -47,20 +45,15 @@ internal class ImageInserter(
     }
 
     /**
-     * Lo mismo desde un fichero. Decodificar es leer el disco, así que también va al
-     * hilo de fondo: un PNG de varios megas leído en el EDT congela el diálogo justo
-     * cuando el usuario acaba de soltarlo encima.
+     * Lo mismo desde un fichero, que desde la 2.3 **se guarda tal cual**: ni se
+     * descodifica ni se reescala. También va al hilo de fondo: leer un fichero de varios
+     * megas en el EDT congelaría el diálogo justo cuando el usuario acaba de soltarlo.
      */
     fun attachFile(file: File) {
         val offset = editor.caretModel.offset
         val service = AttachmentService.getInstance(project)
         ApplicationManager.getApplication().executeOnPooledThread {
-            val image = runCatching { ImageIO.read(file) }.getOrNull()
-            if (image == null) {
-                thisLogger().warn("Tasklane: no se pudo leer la imagen ${file.name}")
-                return@executeOnPooledThread
-            }
-            insertLater(service.attach(repo, image), offset)
+            insertLater(service.attachFile(repo, file.toPath()), offset)
         }
     }
 
@@ -93,7 +86,10 @@ internal class ImageInserter(
     }
 
     companion object {
-        /** Lo que se acepta soltar o elegir. El normalizador re-codifica todo a PNG. */
+        /**
+         * Lo que se acepta soltar o elegir. Se guarda con su formato; que se pueda leer lo
+         * comprueba el servicio por el contenido, no por la extensión.
+         */
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp")
 
         fun isImage(file: File): Boolean = file.isFile && file.extension.lowercase() in IMAGE_EXTENSIONS

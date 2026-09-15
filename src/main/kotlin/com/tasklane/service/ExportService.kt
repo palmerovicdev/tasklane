@@ -17,12 +17,18 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task as ProgressTask
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.MessageDialogBuilder
+import com.intellij.openapi.ui.Messages
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.data.sqlite.TasksXmlWriter
 import com.tasklane.data.store.StorageLayout
+import com.tasklane.data.sqlite.RepoSnapshot
 import com.tasklane.domain.export.ExportFormat
+import com.tasklane.domain.export.FileFormat
+import com.tasklane.domain.export.TaskCsvWriter
 import com.tasklane.domain.export.TaskExporter
+import com.tasklane.domain.model.Task
+import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.ui.toolwindow.TasklanePanel
@@ -37,7 +43,9 @@ import java.time.LocalDate
 
 /**
  * Sacar tareas del plugin: al portapapeles, a un fichero, al formato de intercambio, y
- * «Exportar y quitar».
+ * «Exportar y quitar». Y desde la 2.3.0, guardar un repositorio entero en CSV, Markdown o
+ * texto, y vaciarlo —[saveRepo] y [clearRepo]—, **siempre sobre el repositorio activo**:
+ * en Tasklane todo es por repositorio, y borrar también.
  *
  * El texto lo produce [TaskExporter], que es dominio puro y está cubierto por tests; aquí
  * queda hablar con el portapapeles, con los diálogos y con el disco.
@@ -101,7 +109,7 @@ class ExportService(private val project: Project) {
             .yesText(TasklaneBundle.message("export.tooMany.save"))
             .ask(project)
         if (!save) return
-        val file = chooseFile(request.name) ?: return
+        val file = chooseFile(request.name, textExtension()) ?: return
         toFile(request, file)
     }
 
@@ -301,7 +309,7 @@ class ExportService(private val project: Project) {
             .ask(project)
         if (!confirmed) return
 
-        val target = if (toFile) chooseFile("${ref.displayName}-tasks") ?: return else null
+        val target = if (toFile) chooseFile("${ref.displayName}-tasks", textExtension()) ?: return else null
         if (!service.beginRemoval(repo)) {
             notify(TasklaneBundle.message("export.remove.busy", ref.displayName), NotificationType.WARNING)
             return
@@ -326,16 +334,7 @@ class ExportService(private val project: Project) {
                     val export: (Appendable) -> Int = { out ->
                         service.snapshotOf(repo) { snapshot ->
                             val stream = TaskExporter.Stream(out, config, format)
-                            val expected = snapshot.total.coerceAtLeast(1)
-                            for (state in snapshot.states()) {
-                                val name = config.state(state)?.name ?: state.value
-                                stream.section("${ref.displayName} · $name")
-                                snapshot.eachInState(state) { chunk ->
-                                    indicator.checkCanceled()
-                                    chunk.forEach(stream::task)
-                                    indicator.fraction = stream.written.toDouble() / expected
-                                }
-                            }
+                            eachOfRepo(snapshot, config, indicator, { stream.section("${ref.displayName} · $it") }, stream::task)
                             // La comprobación que sostiene el borrado de después. Ver el KDoc.
                             if (stream.written != snapshot.total) {
                                 throw IncompleteExport(stream.written, snapshot.total)
@@ -405,14 +404,168 @@ class ExportService(private val project: Project) {
     private class IncompleteExport(val written: Int, val expected: Int) :
         IllegalStateException("exportadas $written de $expected")
 
-    // ---------------------------------------------------------------- disco
+    /**
+     * Las tareas de una foto de repositorio, **estado a estado** en el orden de las
+     * pestañas y, dentro de cada uno, en el orden de la lista. [onState] recibe el nombre
+     * del estado antes de sus tareas. Cada tanda mira si se canceló y mueve la barra.
+     */
+    private fun eachOfRepo(
+        snapshot: RepoSnapshot,
+        config: TasklaneConfig,
+        indicator: ProgressIndicator,
+        onState: (String) -> Unit,
+        onTask: (Task) -> Unit,
+    ): Int {
+        val expected = snapshot.total.coerceAtLeast(1)
+        var done = 0
+        for (state in snapshot.states()) {
+            onState(config.state(state)?.name ?: state.value)
+            snapshot.eachInState(state) { chunk ->
+                indicator.checkCanceled()
+                chunk.forEach(onTask)
+                done += chunk.size
+                indicator.fraction = done.toDouble() / expected
+            }
+        }
+        return done
+    }
+
+    // --------------------------------------------------- un repositorio entero (2.3.0)
 
     /**
-     * Pregunta dónde guardar. Markdown o texto según el formato elegido, que es lo que se
-     * va a escribir dentro.
+     * Guarda **todas** las tareas del repositorio activo en un fichero [format]: CSV para
+     * una hoja de cálculo, Markdown o texto para leerlas.
+     *
+     * No es «copiar este estado» con otro destino: aquello saca lo que se ve en una
+     * pestaña —con su búsqueda y su filtro—, y esto saca el repositorio entero, estado a
+     * estado, que es lo que se quiere tener a mano antes de vaciarlo con [clearRepo] o
+     * para llevárselo a otra herramienta.
+     *
+     * Por el mismo camino que «Exportar y quitar»: una foto de la base, en segundo plano,
+     * cancelable, a tandas, y a un temporal que sólo sustituye al fichero cuando está
+     * entero. Con un millón de tareas lo retenido sigue siendo una tanda.
      */
-    private fun chooseFile(name: String): Path? {
-        val extension = if (format == ExportFormat.MARKDOWN) "md" else "txt"
+    fun saveRepo(ref: RepositoryRef, format: FileFormat) {
+        val service = TaskService.getInstance(project)
+        val repo = ref.key
+        if (service.migrationPending(repo)) {
+            notify(TasklaneBundle.message("export.xml.pending"), NotificationType.WARNING)
+            return
+        }
+        val total = service.countOf(repo)
+        if (total == 0) {
+            notify(TasklaneBundle.message("export.repo.empty", ref.displayName), NotificationType.INFORMATION)
+            return
+        }
+        val target = chooseFile("${ref.displayName}-tasks", format.extension) ?: return
+        val config = service.snapshot.value.config
+
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(
+                project,
+                TasklaneBundle.message("export.repo.progress", total, ref.displayName),
+                true,
+            ) {
+                private var written = 0
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    written = writeAtomically(target) { out ->
+                        service.snapshotOf(repo) { snapshot ->
+                            when (format) {
+                                FileFormat.CSV -> {
+                                    val csv = TaskCsvWriter(out, config)
+                                    csv.begin()
+                                    eachOfRepo(snapshot, config, indicator, {}, csv::task)
+                                }
+
+                                FileFormat.MARKDOWN, FileFormat.PLAIN -> {
+                                    val text = if (format == FileFormat.MARKDOWN) ExportFormat.MARKDOWN else ExportFormat.PLAIN
+                                    val stream = TaskExporter.Stream(out, config, text)
+                                    eachOfRepo(snapshot, config, indicator, { stream.section("${ref.displayName} · $it") }, stream::task)
+                                }
+                            }
+                        } ?: 0
+                    }
+                }
+
+                override fun onSuccess() = notifyFile(TasklaneBundle.message("export.file.done", written, target), target)
+
+                override fun onThrowable(error: Throwable) {
+                    thisLogger().warn("Tasklane: no se pudo guardar $repo en $target", error)
+                    notify(TasklaneBundle.message("export.file.failed", error.message.orEmpty()), NotificationType.ERROR)
+                }
+            },
+        )
+    }
+
+    /**
+     * Vacía el repositorio activo: **borra todas sus tareas** de la base, después de
+     * preguntar con el número y el nombre delante.
+     *
+     * Es la otra mitad de lo que se pidió en la 2.3.0 —guardar y limpiar—, y va **separada**
+     * de [saveRepo] a propósito: vaciar no obliga a exportar antes. La pregunta lo recuerda
+     * y el menú lo tiene justo encima, que es lo que se puede hacer sin convertir un
+     * borrado en un trámite de dos pasos.
+     *
+     * El repositorio se queda en su sitio, vacío: ver [TaskService.clearRepo]. Mientras se
+     * borra está en solo lectura, y **no se cancela**: lo que se pidió es no tener estas
+     * tareas, y parar a medias dejaría una parte que nadie eligió.
+     */
+    fun clearRepo(ref: RepositoryRef) {
+        val service = TaskService.getInstance(project)
+        val repo = ref.key
+        if (service.migrationPending(repo)) {
+            notify(TasklaneBundle.message("export.xml.pending"), NotificationType.WARNING)
+            return
+        }
+        val total = service.countOf(repo)
+        if (total == 0) {
+            notify(TasklaneBundle.message("clear.empty", ref.displayName), NotificationType.INFORMATION)
+            return
+        }
+        val confirmed = MessageDialogBuilder
+            .yesNo(
+                TasklaneBundle.message("clear.title", ref.displayName),
+                TasklaneBundle.message("clear.question", total, ref.displayName),
+            )
+            .yesText(TasklaneBundle.message("clear.confirm", total))
+            .icon(Messages.getWarningIcon())
+            .ask(project)
+        if (!confirmed) return
+        if (!service.beginRemoval(repo)) {
+            notify(TasklaneBundle.message("export.remove.busy", ref.displayName), NotificationType.WARNING)
+            return
+        }
+
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(
+                project,
+                TasklaneBundle.message("clear.progress", ref.displayName),
+                false,
+            ) {
+                private var removed = 0L
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    removed = service.clearRepo(repo) { n -> indicator.fraction = n.toDouble() / total }
+                }
+
+                override fun onSuccess() =
+                    notify(TasklaneBundle.message("clear.done", removed, ref.displayName), NotificationType.INFORMATION)
+
+                override fun onThrowable(error: Throwable) {
+                    thisLogger().warn("Tasklane: no se pudo vaciar $repo", error)
+                    notify(TasklaneBundle.message("clear.failed", ref.displayName, error.message.orEmpty()), NotificationType.ERROR)
+                }
+            },
+        )
+    }
+
+    // ---------------------------------------------------------------- disco
+
+    /** Pregunta dónde guardar, con la extensión de lo que se va a escribir dentro. */
+    private fun chooseFile(name: String, extension: String): Path? {
         val descriptor = FileSaverDescriptor(
             TasklaneBundle.message("export.file.title"),
             TasklaneBundle.message("export.file.description"),
@@ -426,6 +579,10 @@ class ExportService(private val project: Project) {
             ?.file
             ?.toPath()
     }
+
+    /** Markdown o texto según el formato de la copia, que es lo que se va a escribir. */
+    private fun textExtension(): String =
+        if (format == ExportFormat.MARKDOWN) FileFormat.MARKDOWN.extension else FileFormat.PLAIN.extension
 
     /**
      * Escribe [target] **entero o nada**: a un temporal en el mismo directorio, forzado a

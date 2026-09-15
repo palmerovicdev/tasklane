@@ -58,10 +58,10 @@ import javax.swing.plaf.basic.BasicTreeUI
  * esquinas. Va en [paintComponent] y no en un borde porque el fondo es de la fila
  * entera, y un borde sólo puede pintar en sus insets. Una fila **seleccionada** no
  * pinta tarjeta: ahí el fondo lo pone el árbol —selección ancha, con el color y el
- * redondeo del tema— y taparlo sería pelear con la plataforma. El **resalte del
- * ratón**, en cambio, sí es nuestro: el del árbol se pinta detrás del renderer y más
- * ancho que él, así que asomaba por fuera de la tarjeta. Se apaga en [TasklanePanel]
- * con `RenderingUtil.setHoverPaintingDisabled`.
+ * redondeo del tema— y taparlo sería pelear con la plataforma. **Bajo el ratón, lo
+ * mismo** (2.3.0): el resalte del árbol se pinta detrás del renderer y más ancho que
+ * él, así que una tarjeta pintada encima lo dejaba asomar por los bordes. Hasta la 2.2
+ * se apagaba el del árbol, pero sólo se puede con API interna.
  *
  * El ancho de la fila **no se fuerza**: el árbol ya estira el renderer hasta el borde
  * visible, descontando el margen que él mismo reserva para pintar la selección.
@@ -234,7 +234,32 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Enlaces e imágenes. Es el único distintivo con contador clicable. */
     private val detail = line { _, _ -> pendingTask?.let(::renderDetail) }
 
-    private val chips = List(MAX_CHIPS) { SimpleColoredComponent().apply { isOpaque = false } }
+    private val chips = List(MAX_CHIPS) { chip() }
+
+    /**
+     * La prioridad y las anclas de código: los distintivos que **no se caen nunca** de la
+     * línea (2.3.0).
+     *
+     * Son los dos que se pulsan —uno abre la lista de prioridades, el otro lleva al
+     * código— y hasta la 2.2 eran distintivos como los demás: con la tool window
+     * estrecha y un par de etiquetas, `Auth.kt:42` era de los primeros en quedarse
+     * fuera, justo el que dice de qué parte del código habla la tarea. Ahora cada uno
+     * tiene un **gemelo que es sólo su icono**, y [ChipRow] coloca el gemelo cuando el
+     * entero no cabe: el punto de color de la prioridad, el icono de fichero del ancla.
+     * El gemelo responde al clic igual —su etiqueta va en [iconTags], porque no lleva
+     * texto donde colgarla— y el tooltip sigue diciendo adónde lleva.
+     *
+     * El reparto garantiza el sitio de los iconos antes de colocar nada más, así que se
+     * ven hasta el ancho mínimo de la ventana (`TasklanePanel.MIN_WIDTH`); lo fija
+     * `TaskTreeRendererTest`.
+     */
+    private val priorityChip = chip()
+    private val priorityIcon = chip()
+    private val anchorChips = List(MAX_ANCHORS) { chip() }
+    private val anchorIcons = List(MAX_ANCHORS) { chip() }
+
+    /** Lo que responde al clic sobre un gemelo de sólo icono. Ver [priorityChip]. */
+    private val iconTags = IdentityHashMap<SimpleColoredComponent, Any>()
 
     /**
      * Los dos controles de la derecha. El marcador se ve siempre que la tarea lo
@@ -252,7 +277,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private var menuActive = false
     private var expandActive = false
 
-    private val actions = JPanel(ChipRow()).apply { isOpaque = false }
+    /**
+     * Sin hueco entre uno y otro: cada icono ya trae [ICON_PAD] a cada lado, y con el de
+     * los distintivos encima los tres se leían como controles sueltos. Juntos son un
+     * grupo, y de paso le devuelven al título el ancho de dos huecos (2.3.0).
+     */
+    private val actions = JPanel(ChipRow(gap = 0)).apply { isOpaque = false }
 
     private val meta = JPanel(ChipRow()).apply { isOpaque = false }
 
@@ -264,6 +294,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         remove(textRenderer)
         lines.add(textRenderer)
         meta.add(detail)
+        meta.add(priorityChip)
+        meta.add(priorityIcon)
+        ChipRow.keep(priorityChip, priorityIcon)
+        anchorChips.zip(anchorIcons) { chip, icon ->
+            meta.add(chip)
+            meta.add(icon)
+            ChipRow.keep(chip, icon)
+        }
         chips.forEach(meta::add)
         lines.add(meta)
         add(lines, BorderLayout.CENTER)
@@ -522,20 +560,22 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      */
     private fun bodyLines(task: Task, available: Int, room: Int, open: Boolean): TitleWrap.Fit {
         val gray = SimpleTextAttributes.GRAYED_ATTRIBUTES
+        val texts = task.detailTexts
         if (!open) {
-            val one = ellipsize(markdownRuns(task.description, gray), available)
-            return TitleWrap.Fit(one.lines, one.clipped || task.detailLines.size > 1)
+            val first = texts.firstOrNull() ?: return TitleWrap.Fit(emptyList(), false)
+            val one = ellipsize(bodyRuns(first, gray), available)
+            return TitleWrap.Fit(one.lines, one.clipped || texts.size > 1)
         }
 
         val out = mutableListOf<List<Run>>()
         var clipped = false
-        for (paragraph in task.detailLines) {
+        for (paragraph in texts) {
             val budget = room - out.size
             if (budget <= 0) {
                 clipped = true
                 break
             }
-            val runs = markdownRuns(paragraph, gray)
+            val runs = bodyRuns(paragraph, gray)
             // Con una línea de margen no hay nada que envolver: lo que no quepa se
             // recorta, que es lo que hace `wrap` cuando se queda sin líneas.
             val fit = if (budget == 1) ellipsize(runs, available) else TitleWrap.fit(runs, available, budget, ::measure)
@@ -543,6 +583,22 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             clipped = clipped || fit.clipped
         }
         return TitleWrap.Fit(out, clipped)
+    }
+
+    /**
+     * Una línea del cuerpo, con **sus enlaces pulsables** (2.3.0).
+     *
+     * Hasta la 2.2 el cuerpo se pintaba como texto gris a secas y un enlace de ahí sólo
+     * se abría desde el contador de la línea de distintivos: en una tarjeta desplegada
+     * con la URL delante de los ojos, pulsarla no hacía nada. Ahora sale igual que los
+     * del título —un [Run] con su [TaskLink], con el color de enlace sobre el gris— y el
+     * clic se resuelve por el mismo camino. El contador sigue: es el que abre la lista
+     * de todos.
+     */
+    private fun bodyRuns(text: DetailBlock.Text, style: SimpleTextAttributes): List<Run> {
+        val links = text.links
+        if (links.isEmpty()) return markdownRuns(text.text, style)
+        return markdownRuns(text.text, style) { index -> links.firstOrNull { it.range.first == index } }
     }
 
     /**
@@ -803,15 +859,22 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         //
         // La etiqueta es la prioridad misma, igual que la del ancla es su
         // [CodeAnchor]; quien atiende el clic la reconoce en [hotspotAt].
-        config.priorityOrDefault(task.priorityId).let { priority ->
-            chip(priority.name, PriorityDot.chip(priority), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, priority)
-        }
+        val priority = config.priorityOrDefault(task.priorityId)
+        keep(priorityChip, priorityIcon, priority.name, PriorityDot.chip(priority), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, priority, foreground)
 
-        // El sitio del código va delante de todo lo demás: es lo que dice de qué habla
-        // la tarea, y de los distintivos es el único que además lleva a algún sitio. Se
-        // pinta con el color de enlace por eso mismo —lo que parece pulsable, lo es—.
-        for (anchor in task.anchors) {
-            chip(anchor.label, AllIcons.FileTypes.Any_type, ANCHOR_STYLE, anchor)
+        // El sitio del código, detrás de la prioridad. Se pinta con el color de enlace
+        // porque se pulsa como un enlace: lo que parece pulsable, lo es.
+        anchorChips.indices.forEach { index ->
+            val anchor = task.anchors.getOrNull(index)
+            if (anchor == null) {
+                drop(anchorChips[index], anchorIcons[index])
+            } else {
+                keep(anchorChips[index], anchorIcons[index], anchor.label, AllIcons.FileTypes.Any_type, ANCHOR_STYLE, anchor, foreground)
+            }
+        }
+        // Más anclas de las que tienen sitio garantizado: se cuentan, y se ven abriendo la tarea.
+        (task.anchors.size - MAX_ANCHORS).takeIf { it > 0 }?.let {
+            chip("+$it", AllIcons.FileTypes.Any_type, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
 
         // El vencimiento lleva calendario propio: `AllIcons` no trae ninguno, y sin él
@@ -840,7 +903,35 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         }
 
         for (index in next until chips.size) chips[index].isVisible = false
-        meta.isVisible = detail.isVisible || next > 0
+        // La prioridad está en todas: la línea también.
+        meta.isVisible = true
+    }
+
+    /** Rellena un distintivo que no se cae y su gemelo de sólo icono. Ver [priorityChip]. */
+    private fun keep(
+        full: SimpleColoredComponent,
+        compact: SimpleColoredComponent,
+        text: String,
+        icon: javax.swing.Icon,
+        attributes: SimpleTextAttributes,
+        tag: Any,
+        foreground: Color,
+    ) {
+        full.clear()
+        full.icon = icon
+        full.foreground = foreground
+        full.append(text, attributes, tag)
+        full.isVisible = true
+        compact.clear()
+        compact.icon = icon
+        compact.isVisible = true
+        iconTags[compact] = tag
+    }
+
+    private fun drop(full: SimpleColoredComponent, compact: SimpleColoredComponent) {
+        full.isVisible = false
+        compact.isVisible = false
+        iconTags.remove(compact)
     }
 
     /**
@@ -950,8 +1041,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /**
      * La tarjeta: fondo redondeado y, recortada por él, la franja de prioridad.
      *
-     * Seleccionada no se pinta fondo —lo pone el árbol— pero sí la franja: es lo que
-     * identifica la prioridad y desaparecería justo en la fila que se está mirando.
+     * Seleccionada o bajo el ratón no se pinta fondo —lo pone el árbol— pero sí la
+     * franja: es lo que identifica la prioridad y desaparecería justo en la fila que se
+     * está mirando.
      */
     override fun paintComponent(g: Graphics) {
         val card = cardColor
@@ -969,16 +1061,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                     arc,
                     arc,
                 )
-                if (!pendingSelected) {
+                // Seleccionada o bajo el ratón, el fondo lo pone el árbol: ver la nota
+                // de la clase.
+                if (!pendingSelected && !pendingHovered) {
                     g2.color = card
                     g2.fill(shape)
-                    // El resalte del ratón va **aquí dentro**, con la forma de la
-                    // tarjeta. El del árbol se apaga en el panel: lo pinta detrás del
-                    // renderer y más ancho que él, así que asomaba por los bordes.
-                    if (pendingHovered) {
-                        g2.color = JBUI.CurrentTheme.ActionButton.hoverBackground()
-                        g2.fill(shape)
-                    }
                 }
                 stripeColor?.let { color ->
                     g2.clip(shape)
@@ -1027,7 +1114,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val indent = indentOf(tree, node)
         val insets = border?.getBorderInsets(this)
         val stripe = insets?.left ?: 0
-        val box = if (checkbox.isVisible) checkbox.preferredSize.width else 0
+        // `threeStateCheckBox` y no `checkbox`: el accesor viejo está deprecado y el
+        // verificador del Marketplace lo cuenta. Es el mismo componente.
+        val box = threeStateCheckBox.let { if (it.isVisible) it.preferredSize.width else 0 }
         val right = (insets?.right ?: 0) + if (actions.isVisible) actions.preferredSize.width else 0
         return total - indent - stripe - box - right - JBUI.scale(MARGIN)
     }
@@ -1174,6 +1263,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             line = childAt(meta, x, y) ?: return null
         }
         val target = line as? SimpleColoredComponent ?: return null
+        // Un distintivo reducido a su icono es entero el icono, y no lleva fragmento.
+        iconTags[target]?.let { return it }
 
         val local = x - target.x
         if (local < 0) return null
@@ -1420,6 +1511,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         }
     }
 
+    /** Un distintivo de la línea de metadatos. */
+    private fun chip() = SimpleColoredComponent().apply { isOpaque = false }
+
     /** Un componente que sólo lleva icono: el marcador y el menú de la derecha. */
     private fun icon() = SimpleColoredComponent().apply {
         isOpaque = false
@@ -1507,6 +1601,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
          * ganado el distintivo que antes se callaba.
          */
         const val MAX_CHIPS = 9
+
+        /**
+         * Anclas con sitio garantizado en la línea; las demás se cuentan en un «+N». Tres
+         * iconos de fichero son lo que cabe junto a la prioridad al ancho mínimo, y una
+         * tarea que apunta a más sitios que eso se lee abriéndola.
+         */
+        const val MAX_ANCHORS = 3
 
         /** Holgura para la barra de desplazamiento y el borde derecho. */
         const val MARGIN = 12

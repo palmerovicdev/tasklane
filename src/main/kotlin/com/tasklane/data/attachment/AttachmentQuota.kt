@@ -4,9 +4,9 @@ package com.tasklane.data.attachment
  * La cuota con aviso del §4.5 del plan de escala, que es **una política y no una
  * arquitectura**, y conviene decirlo sin rodeos:
  *
- * > Diez imágenes únicas por tarea × un millón de tareas = diez millones de blobs. A
- * > 400 px son ~315 GB, y con deduplicación 10:1 unos 31 GB. No hay diseño que meta eso
- * > en un `.idea/`.
+ * > Diez imágenes únicas por tarea × un millón de tareas = diez millones de blobs. Con
+ * > las capturas a su tamaño —desde la 2.3, del orden de un mega cada una— son terabytes.
+ * > No hay diseño que meta eso en un `.idea/`.
  *
  * Lo que la Fase 4 **sí** garantiza es que el *número* de blobs no rompa nada: búsqueda
  * por índice, recolección por tabla, arranque constante y una lista que no descodifica
@@ -15,7 +15,8 @@ package com.tasklane.data.attachment
  *
  * **De las tres opciones del §4.5 se eligió la primera**: cuota con aviso. Nunca se
  * borra nada sin decirlo; lo único que hace esto es enseñar el peso y ofrecer las
- * salidas —bajar el tope de escalado, recolectar lo no referenciado, archivar—.
+ * salidas, que desde la 2.3 son los dos botones de los ajustes: borrar las imágenes que
+ * no usa nadie, o todas las del repositorio.
  *
  * Puro, y por el mismo motivo que [AttachmentGc]: una cifra que se le enseña al usuario
  * —y un aviso que puede volverse cargante— tienen que poder fijarse con un test. El
@@ -45,7 +46,7 @@ object AttachmentQuota {
     }
 
     /**
-     * @param bytes lo que ocupan hoy los adjuntos del proyecto.
+     * @param bytes lo que ocupan hoy las imágenes del repositorio.
      * @param limitBytes el umbral configurado, o `0` para no avisar nunca.
      * @param lastWarnedBytes el peso por el que se avisó la última vez, o `0` si no se
      *   ha avisado. Sale de la tabla `chore`, así que sobrevive a cerrar el IDE — que es

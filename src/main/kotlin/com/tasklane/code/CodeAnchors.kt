@@ -4,6 +4,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
@@ -99,16 +100,24 @@ object CodeAnchors {
      * línea se reescribió más corta, el principio de la línea buena sigue siendo el
      * sitio, y dejar el cursor pasado el final lo colocaría en un hueco virtual que el
      * usuario no escribió.
+     *
+     * **Dentro de una read action**, y la pide ella misma. Quien llega aquí es el clic
+     * sobre la tarjeta, desde un `MouseListener` del EDT, y desde la 2026.x el EDT ya no
+     * trae lectura implícita: `getDocument` lanzaba *Read access is allowed from inside
+     * read-action only* y el clic no llevaba a ningún sitio. Pedirla aquí y no en quien
+     * llama es lo que evita que el próximo que la use vuelva a olvidarse; anidada dentro
+     * de otra no cuesta nada.
      */
-    fun positionOf(anchor: CodeAnchor, file: VirtualFile): Pair<Int, Int> {
+    fun positionOf(anchor: CodeAnchor, file: VirtualFile): Pair<Int, Int> = ReadAction.compute<Pair<Int, Int>, RuntimeException> {
         // Un fichero binario o demasiado grande no da `Document`. Ahí no hay nada que
         // reencontrar y se va al número guardado, que es lo que se sabe.
-        val document = FileDocumentManager.getInstance().getDocument(file) ?: return anchor.line to anchor.column
+        val document = FileDocumentManager.getInstance().getDocument(file)
+            ?: return@compute anchor.line to anchor.column
         val line = AnchorResolver.resolve(anchor, document.lineCount) { index ->
             document.getText(TextRange(document.getLineStartOffset(index), document.getLineEndOffset(index)))
         }
         val length = document.getLineEndOffset(line) - document.getLineStartOffset(line)
-        return line to anchor.column.coerceIn(0, length)
+        line to anchor.column.coerceIn(0, length)
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.tasklane.data
 
+import com.intellij.openapi.util.JDOMUtil
 import com.intellij.util.xmlb.XmlSerializer
 import com.tasklane.data.config.TasklaneConfigState
 import com.tasklane.data.config.toDomain
@@ -13,6 +14,7 @@ import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TasklaneConfigStateTest {
@@ -115,21 +117,18 @@ class TasklaneConfigStateTest {
         assertEquals(0, TasklaneConfig.DEFAULT.copy(repoDepth = -1).normalized().repoDepth)
     }
 
+    /**
+     * **El tope de escalado desapareció en la 2.3**, pero los `tasklane.xml` escritos antes
+     * lo llevan como atributo. Tiene que seguir leyéndose sin él: un atributo que ya no
+     * significa nada no puede dejar un proyecto sin configuración.
+     */
     @Test
-    fun `el tamano maximo de imagen viaja con la configuracion del proyecto`() {
-        val config = TasklaneConfig.DEFAULT.copy(imageMaxSize = 900)
-        assertEquals(900, config.toState().toDomain()!!.imageMaxSize)
-    }
+    fun `un tasklane xml con el tope de escalado de antes se sigue leyendo`() {
+        val element = XmlSerializer.serialize(TasklaneConfig.DEFAULT.toState()).setAttribute("imageMaxSize", "400")
+        val xml = JDOMUtil.write(element)
+        assertTrue(xml, xml.contains("imageMaxSize=\"400\""))
 
-    @Test
-    fun `un tamano absurdo se recorta en vez de producir una imagen absurda`() {
-        assertEquals(
-            TasklaneConfig.MAX_IMAGE_MAX_SIZE,
-            TasklaneConfig.DEFAULT.copy(imageMaxSize = 100_000).normalized().imageMaxSize,
-        )
-        assertEquals(
-            TasklaneConfig.MIN_IMAGE_MAX_SIZE,
-            TasklaneConfig.DEFAULT.copy(imageMaxSize = 0).normalized().imageMaxSize,
-        )
+        val state = XmlSerializer.deserialize(JDOMUtil.load(xml), TasklaneConfigState::class.java)
+        assertEquals(TasklaneConfig.DEFAULT, state.toDomain())
     }
 }

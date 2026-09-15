@@ -42,6 +42,13 @@ sealed interface LoadAlert {
 
     /** No se pudo leer y no había copia utilizable: el repositorio empieza en blanco. */
     data class Lost(val quarantinedAt: Path?) : LoadAlert
+
+    /**
+     * Estaba dañado pero **se pudo leer entero**: nada se perdió. Sólo lo da la recuperación
+     * de la base de la Fase 6 —casi toda página rota es de un índice, y los índices se
+     * rehacen—; un `tasks.xml` roto no tenía de dónde sacar lo que faltaba.
+     */
+    data class Repaired(val tasks: Int, val quarantinedAt: Path?) : LoadAlert
 }
 
 /** El aviso que merece este resultado, o `null` si la lectura fue normal. */

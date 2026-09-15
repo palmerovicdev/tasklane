@@ -61,8 +61,11 @@ object AttachmentChore {
     /** La reconciliación del §4.3. `n` = cuántos blobs se adoptaron en la última pasada. */
     fun reconcile(repo: String): String = "blob.fsck:$repo"
 
-    /** El aviso de cuota del §4.5. `n` = los bytes por los que se avisó la última vez. */
-    const val QUOTA = "blob.quota"
+    /**
+     * El aviso de cuota del §4.5, **de un repositorio** desde la 2.3. `n` = los bytes por
+     * los que se avisó la última vez.
+     */
+    fun quota(repo: String): String = "blob.quota:$repo"
 
     /**
      * Cada cuánto se reconcilia, como mucho.

@@ -151,6 +151,17 @@ internal class TaskDb private constructor(
         listOf(e.message ?: e.javaClass.simpleName)
     }
 
+    /** Lo que pasó al abrir. Ver [openChecked]. */
+    sealed interface Opening {
+        data class Ready(val db: TaskDb) : Opening
+
+        /** Hay que recuperarla antes de usarla: ver `StoreRecovery`. Ya queda apuntado. */
+        data class Damaged(val reason: String) : Opening
+
+        /** No se pudo abrir por algo que no es daño —un permiso, un disco lleno—. */
+        data class Unavailable(val error: Throwable) : Opening
+    }
+
     companion object {
 
         const val FILE_NAME = com.tasklane.data.store.StorageLayout.DB_FILE
@@ -182,8 +193,44 @@ internal class TaskDb private constructor(
             null
         }
 
+        /**
+         * Abre la base **distinguiendo una base dañada** de una que no se puede abrir por otra
+         * razón. Es lo que usa el servicio desde la Fase 6: [open] devuelve `null` en los dos
+         * casos, y hasta la 2.3 un `tasklane.db` ilegible dejaba el proyecto sin almacén y en
+         * silencio —las tareas que se crearan no se guardaban en ningún sitio—.
+         *
+         * Una base con una recuperación pendiente ni se abre: abrirla es lo que la recuperación
+         * tiene que hacer en un fichero aparte.
+         */
+        fun openChecked(dir: Path): Opening {
+            if (StoreRecovery.pending(dir)) return Opening.Damaged("pending")
+            return try {
+                Files.createDirectories(dir)
+                Opening.Ready(create(dir.resolve(FILE_NAME)))
+            } catch (e: Exception) {
+                if (StoreRecovery.isCorruption(e)) {
+                    thisLogger().warn("Tasklane: la base de tareas en $dir está dañada", e)
+                    runCatching { StoreRecovery.markDamaged(dir, e.message ?: e.javaClass.simpleName) }
+                    Opening.Damaged(e.message ?: e.javaClass.simpleName)
+                } else {
+                    thisLogger().warn("Tasklane: no se pudo abrir la base de tareas en $dir", e)
+                    Opening.Unavailable(e)
+                }
+            }
+        }
+
         /** El diario de WAL de una base. Ver [dirty]. */
         fun walOf(file: Path): Path = file.resolveSibling("${file.fileName}-wal")
+
+        /**
+         * Crea —o abre— la base en un fichero concreto y no en el de siempre. Lo usa la
+         * recuperación del §6.2 para reconstruir a un fichero aparte y ponerlo en su sitio
+         * sólo cuando está entero.
+         */
+        fun createAt(file: Path): TaskDb {
+            Files.createDirectories(file.parent)
+            return create(file)
+        }
 
         private fun create(file: Path): TaskDb {
             // ANTES de abrir la primera conexión: abrirla es lo que recupera el diario.
@@ -191,29 +238,40 @@ internal class TaskDb private constructor(
             val dirty = runCatching { Files.exists(wal) && Files.size(wal) > 0 }.getOrDefault(false)
 
             val writer = Sql(file)
-            val version = writer.count("PRAGMA user_version")
-            val future = version > TaskSchema.VERSION
+            var reader: Sql? = null
+            val version: Int
+            val future: Boolean
+            try {
+                version = writer.count("PRAGMA user_version")
+                future = version > TaskSchema.VERSION
 
-            if (!future) {
-                for (pragma in TaskSchema.PRAGMAS) writer.execute(pragma)
-                writer.transaction {
-                    for (ddl in TaskSchema.DDL) writer.execute(ddl.trimIndent())
-                    // Después del DDL y no antes: si la creación falla a medias, la
-                    // base se queda en la versión 0 y el siguiente arranque la vuelve a
-                    // intentar en vez de darla por buena a medio hacer.
-                    if (version != TaskSchema.VERSION) {
-                        writer.execute("PRAGMA user_version = ${TaskSchema.VERSION}")
+                if (!future) {
+                    for (pragma in TaskSchema.PRAGMAS) writer.execute(pragma)
+                    writer.transaction {
+                        for (ddl in TaskSchema.DDL) writer.execute(ddl.trimIndent())
+                        // Después del DDL y no antes: si la creación falla a medias, la
+                        // base se queda en la versión 0 y el siguiente arranque la vuelve a
+                        // intentar en vez de darla por buena a medio hacer.
+                        if (version != TaskSchema.VERSION) {
+                            writer.execute("PRAGMA user_version = ${TaskSchema.VERSION}")
+                        }
                     }
                 }
-            }
 
-            val reader = Sql(file, readOnly = true)
-            for (pragma in TaskSchema.READ_PRAGMAS) reader.execute(pragma)
+                reader = Sql(file, readOnly = true)
+                for (pragma in TaskSchema.READ_PRAGMAS) reader.execute(pragma)
+            } catch (e: Exception) {
+                // Un fichero dañado falla aquí, y la recuperación lo tiene que poder mover:
+                // en Windows, con una conexión abierta, no se puede.
+                runCatching { reader?.close() }
+                runCatching { writer.close() }
+                throw e
+            }
 
             return TaskDb(
                 file,
                 writer,
-                reader,
+                reader!!,
                 version = maxOf(version, TaskSchema.VERSION),
                 readOnly = future,
                 dirty = dirty,

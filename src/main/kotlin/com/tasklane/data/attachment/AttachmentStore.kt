@@ -152,7 +152,13 @@ class AttachmentStore(private val layout: StorageLayout) {
         null
     }
 
-    /** El tamaño de un PNG leyendo su cabecera, sin descodificarlo. Lo pide la adopción. */
+    /**
+     * El tamaño de una imagen leyendo su cabecera, sin descodificarla. Lo pide la adopción.
+     *
+     * Primero como PNG —veinticuatro bytes, y es lo que son casi todos—; si no lo es,
+     * porque desde la 2.3 un fichero soltado se guarda con su formato, se le pregunta al
+     * lector de `ImageIO`, que también se queda en la cabecera.
+     */
     fun dimensionsOf(file: Path): ImageNormalizer.Size? = try {
         Files.newInputStream(file).use { input ->
             val header = ByteArray(ImageNormalizer.HEADER_BYTES)
@@ -163,7 +169,7 @@ class AttachmentStore(private val layout: StorageLayout) {
                 read += n
             }
             if (read < header.size) null else ImageNormalizer.dimensions(header)
-        }
+        } ?: Files.newInputStream(file).use(ImageNormalizer::sizeOf)
     } catch (e: Exception) {
         thisLogger().warn("Tasklane: no se pudo leer la cabecera de $file", e)
         null
@@ -199,6 +205,62 @@ class AttachmentStore(private val layout: StorageLayout) {
     fun delete(path: Path): Boolean = runCatching { Files.deleteIfExists(path) }
         .onFailure { thisLogger().warn("Tasklane: no se pudo borrar el adjunto $path", it) }
         .getOrDefault(false)
+
+    /** Lo que hizo [deleteAll]: cuántos ficheros y bytes se fueron, y si llegó al final. */
+    data class Wipe(val files: Long, val bytes: Long, val complete: Boolean)
+
+    /**
+     * Borra **todo** el directorio de adjuntos de un repositorio: originales, miniaturas,
+     * lo que quedara en plano y los temporales. Es la mitad de disco de «borrar todas las
+     * imágenes» de los ajustes; la otra mitad son las filas de `blob`.
+     *
+     * Con memoria constante, como el borrado de un repositorio entero
+     * (`TaskFileStore.delete`): `walkFileTree` entrega cada directorio **después** de sus
+     * hijos, y lo único que recuerda es la rama en la que está.
+     *
+     * [cancelled] se mira entre fichero y fichero. Parar a medias deja un directorio con
+     * menos imágenes y una tabla que todavía las cuenta: quien llama tiene que hacer que la
+     * reconciliación vuelva a pasar, que es justo lo que arregla esa deriva.
+     *
+     * [onFile] recibe cuántos van, para la barra.
+     */
+    fun deleteAll(repo: RepoKey, cancelled: () -> Boolean = { false }, onFile: (Long) -> Unit = {}): Wipe {
+        val dir = layout.attachmentsDir(repo)
+        if (!Files.isDirectory(dir)) return Wipe(0, 0, complete = true)
+        var files = 0L
+        var bytes = 0L
+        var stopped = false
+        Files.walkFileTree(
+            dir,
+            object : java.nio.file.SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): java.nio.file.FileVisitResult {
+                    if (cancelled()) {
+                        stopped = true
+                        return java.nio.file.FileVisitResult.TERMINATE
+                    }
+                    if (delete(file)) {
+                        files++
+                        bytes += attrs.size()
+                        onFile(files)
+                    }
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(file: Path, exc: java.io.IOException): java.nio.file.FileVisitResult {
+                    thisLogger().warn("Tasklane: no se pudo visitar $file", exc)
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(dir: Path, exc: java.io.IOException?): java.nio.file.FileVisitResult {
+                    // Un directorio que no se vació —un fichero que no se pudo borrar— se
+                    // queda, y no es un error: `deleteIfExists` sobre él falla y se anota.
+                    runCatching { Files.deleteIfExists(dir) }
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+            },
+        )
+        return Wipe(files, bytes, complete = !stopped)
+    }
 
     // ------------------------------------------------- traslado del plano al árbol
 

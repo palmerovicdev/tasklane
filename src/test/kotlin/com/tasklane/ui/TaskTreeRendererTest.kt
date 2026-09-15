@@ -143,22 +143,99 @@ class TaskTreeRendererTest {
         )
     }
 
+    /**
+     * El indicador sigue siendo la puerta a **todos** los enlaces: el enlace no está en el
+     * título, y sin él habría que entrar a editar para abrir uno que no se ve.
+     */
     @Test
-    fun `un enlace en el detalle solo se alcanza por el indicador`() {
-        // El caso que justifica la segunda línea: el enlace no está en el título, así
-        // que sin indicador habría que entrar a editar para abrirlo.
+    fun `un enlace en el detalle tambien se alcanza por el indicador`() {
         val tree = treeWith(task("Migrar el indice\nla guia esta en https://ejemplo.com/guia"))
         val bounds = painted(tree, 0)
 
-        // Dos líneas: la fila es más alta que una sola.
-        assertTrue("la segunda linea tiene que ocupar sitio", bounds.height > 0)
-
-        // Se barre la fila entera y no una altura concreta: dónde cae exactamente la
-        // línea de distintivos depende del relleno de la tarjeta, y lo que se afirma
-        // es que **existe** una zona clicable, no en qué píxel está.
-        val hit = scan(tree, bounds) { point -> linksAt(tree, point).takeIf { it.isNotEmpty() } }
+        // Fuera de las líneas de texto: ahí sólo está la línea de distintivos.
+        val hit = scan(tree, bounds) { point ->
+            linksAt(tree, point).takeIf { it.isNotEmpty() && renderer.caretAt(tree, point) == null }
+        }
 
         assertEquals(listOf("https://ejemplo.com/guia"), hit)
+    }
+
+    /**
+     * **Y donde está** (2.3.0). Con la tarjeta desplegada y la URL delante de los ojos,
+     * pulsarla no hacía nada: el cuerpo se pintaba como texto gris a secas. Se busca el
+     * enlace sobre la propia línea de texto —la que devuelve el cursor de texto—, plegada
+     * en la de resumen y desplegada en un párrafo que plegada ni se ve.
+     */
+    @Test
+    fun `un enlace del cuerpo se pulsa sobre su propia linea`() {
+        val task = task("Migrar el indice\nla guia esta en https://ejemplo.com/guia\nlos pasos en https://ejemplo.com/pasos")
+        val tree = treeWith(task)
+
+        fun linkOnLine(line: Int): List<String>? = scan(tree, painted(tree, 0)) { point ->
+            linksAt(tree, point).takeIf { it.isNotEmpty() && renderer.caretAt(tree, point)?.pos?.line == line }
+        }
+
+        assertEquals(listOf("https://ejemplo.com/guia"), linkOnLine(1))
+
+        expand(tree, task)
+
+        assertEquals(listOf("https://ejemplo.com/guia"), linkOnLine(1))
+        assertEquals(listOf("https://ejemplo.com/pasos"), linkOnLine(2))
+    }
+
+    /**
+     * Lo que pidió la 2.3.0 para la tool window estrecha: **el ancla no se cae nunca** de
+     * la línea de distintivos. Si no cabe `Fichero.kt:42` entero se queda el icono, y el
+     * icono lleva al mismo sitio. Lo mismo la prioridad, con su punto de color.
+     *
+     * Al ancho mínimo de la ventana, dentro de un grupo —la sangría es ancho que la
+     * tarjeta no tiene—, con enlaces, cuatro etiquetas, una prioridad de nombre largo y un
+     * fichero de nombre largo: todo lo que compite por esa línea.
+     */
+    @Test
+    fun `el ancla y la prioridad se pulsan aunque la tarjeta vaya al minimo`() {
+        renderer.config = TasklaneConfig.DEFAULT.let { base ->
+            base.copy(priorities = base.priorities.map { it.copy(name = "Muy importante de verdad") })
+        }
+        val anchor = CodeAnchor.of("src/main/kotlin/com/ejemplo/ServicioDeAutenticacionConNombreLargo.kt", 41)
+        val task = task(
+            "Arreglar https://ejemplo.com/a",
+            anchors = listOf(anchor),
+            tags = listOf("planificacion", "pendiente", "compras", "semana"),
+        )
+        val tree = treeWithGroup(task, width = MIN_WIDTH)
+        val bounds = painted(tree, 1)
+
+        assertEquals(anchor, scan(tree, bounds) { anchorAt(tree, it) })
+        assertEquals(
+            task.id,
+            scan(tree, bounds) { (renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Priority)?.task?.id },
+        )
+    }
+
+    /**
+     * Y que al ancho mínimo lo que queda **es el icono**, no el nombre cortado por la
+     * mitad: la zona del ancla mide lo que mide un icono. A lo ancho vuelve el nombre.
+     */
+    @Test
+    fun `sin sitio el ancla se queda en su icono y con sitio ensena el nombre`() {
+        val anchor = CodeAnchor.of("src/main/kotlin/com/ejemplo/ServicioDeAutenticacionConNombreLargo.kt", 41)
+        val task = task("Arreglar el login", anchors = listOf(anchor), tags = listOf("planificacion", "pendiente"))
+
+        fun anchorWidth(width: Int): Int {
+            val tree = treeWithGroup(task, width = width)
+            val bounds = painted(tree, 1)
+            val columns = (0 until bounds.width).filter { x ->
+                (0 until bounds.height step 2).any { y -> anchorAt(tree, Point(bounds.x + x, bounds.y + y)) != null }
+            }
+            return if (columns.isEmpty()) 0 else columns.last() - columns.first() + 1
+        }
+
+        val narrow = anchorWidth(MIN_WIDTH - 60)
+        val wide = anchorWidth(900)
+
+        assertTrue("al minimo tiene que quedar el icono, y midio $narrow", narrow in 1..ICON_ONLY)
+        assertTrue("a lo ancho tiene que verse el nombre, y midio $wide", wide > ICON_ONLY * 2)
     }
 
     @Test
@@ -827,6 +904,12 @@ class TaskTreeRendererTest {
          * empezaría bastante más de esto a la derecha.
          */
         const val ICON_SLACK = 4
+
+        /** `TasklanePanel.MIN_WIDTH`: lo más estrecha que se deja poner la ventana. */
+        const val MIN_WIDTH = 300
+
+        /** Lo que mide, como mucho, un distintivo que es sólo su icono y su relleno. */
+        const val ICON_ONLY = 24
 
         /** Un SHA-256 de mentira, con la longitud exacta que exige `ImageRefParser`. */
         const val SHA = "abc123def456abc123def456abc123def456abc123def456abc123def4561234"

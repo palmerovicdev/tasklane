@@ -43,7 +43,8 @@
             <li><b>Select card text with the mouse</b> and copy it with <code>⌘C</code> /
                 <code>Ctrl+C</code>. <code>Escape</code> clears the selection. Both keys stay
                 out of the way while nothing is selected.</li>
-            <li><b>Open links with a single click</b>, straight from the row. Plain URLs,
+            <li><b>Open links with a single click</b>, straight from the card — in the title
+                or anywhere in the body, even in its greyed-out lines. Plain URLs,
                 <code>www.</code> addresses and Markdown links are all recognised, shortened
                 for display and opened in full. Links inside code spans are examples, not
                 destinations, and stay untouched.</li>
@@ -56,8 +57,9 @@
             <li><b>Bookmark</b> a task from its own row to pin it to the top of its group,
                 whatever its priority: bookmarking is exactly saying "do not let me lose
                 this".</li>
-            <li><b>Group by</b> date, priority or tag — or not at all. Date sections run
-                <i>Today · Yesterday · This week · days · months · Undated</i> against
+            <li><b>Group by</b> date, priority or tag — or not at all. Grouping by date gives
+                <i>Today</i>, then <b>one section per day that has tasks</b>, each with its
+                date — <i>Sep 14</i>, <i>Sep 10, 2025</i> — and <i>No date</i> last, against
                 whichever date the state anchors on. Every header folds with a click or with
                 <code>←</code>/<code>→</code>, and both the grouping and what you folded are
                 remembered per state.</li>
@@ -80,6 +82,13 @@
                 before pasting. A date group comes out as the log of its day —
                 <code>## 2026-09-11</code> and a numbered list — so it can be pasted into a
                 journal or a weekly report as is.</li>
+            <li><b>Save a whole repository to a file</b> — CSV, Markdown or plain text —
+                from <i>Export ▸ Save Repository As</i>. CSV is one row per task, ready for a
+                spreadsheet. Everything runs in the background and the file is written in
+                full or not at all.</li>
+            <li><b>Delete all the tasks of a repository</b> in one go, from the same menu,
+                after a confirmation that says how many. It only ever touches the active
+                repository, which stays in the list, empty.</li>
         </ul>
 
         <h3>In the task dialog</h3>
@@ -119,7 +128,9 @@
                 the editor's context menu, opens the dialog with the file, the line and the
                 character already attached; anything selected comes in as the body. The card
                 then shows an <code>Auth.kt:42</code> badge that jumps back to that exact
-                character, with the full path in its tooltip.</li>
+                character, with the full path in its tooltip. On a narrow card the badge
+                shrinks to its icon instead of disappearing, and the icon still takes you
+                there.</li>
             <li><b>Anchors that survive edits.</b> The line is stored with its text, not just
                 its number, and is found again by that text when you follow it: an extra
                 import, a re-indent or a moved function break nothing. If the line is gone
@@ -166,9 +177,12 @@
             <li><b>States</b>, as a table: name, which one is the default, which ones mean
                 "done", how each groups its tasks, which date it groups by (created, updated
                 or completed) and its colour in light and dark themes. The order here is the
-                order of the tabs. Deleting a state asks where its tasks should go.</li>
+                order of the tabs: drag a row by its handle, or use the arrows. Deleting a
+                state asks where its tasks should go.</li>
             <li><b>Priorities</b>, the same way: name, default, colours, and the trigger you
-                type to select it. The order here is the priority order.</li>
+                type to select it. They are listed highest first, as in the tool window, and
+                dragging them is how you change the priority order. Click a colour to pick
+                another.</li>
             <li><b>Priority triggers</b> can be turned off altogether.</li>
             <li><b>Repository depth</b>: how deep to look for repositories under the project
                 root. It is a view filter, not a delete — a deeper repository that already
@@ -359,6 +373,24 @@
                 class="com.tasklane.ui.actions.ExportAndRemoveRepoAction"
                 icon="AllIcons.Actions.GC"/>
 
+        <!-- Todo el repositorio activo a un fichero, una accion por formato (2.3.0). -->
+        <action id="Tasklane.SaveRepoCsv"
+                class="com.tasklane.ui.actions.SaveRepoCsvAction"/>
+        <action id="Tasklane.SaveRepoMarkdown"
+                class="com.tasklane.ui.actions.SaveRepoMarkdownAction"/>
+        <action id="Tasklane.SaveRepoText"
+                class="com.tasklane.ui.actions.SaveRepoTextAction"/>
+        <group id="Tasklane.SaveRepo" popup="true" icon="AllIcons.Actions.MenuSaveall">
+            <reference ref="Tasklane.SaveRepoCsv"/>
+            <reference ref="Tasklane.SaveRepoMarkdown"/>
+            <reference ref="Tasklane.SaveRepoText"/>
+        </group>
+
+        <!-- Vaciar el repositorio activo. Sin atajo: es destructiva, y se busca por nombre. -->
+        <action id="Tasklane.ClearRepo"
+                class="com.tasklane.ui.actions.ClearRepoAction"
+                icon="AllIcons.Actions.ClearCash"/>
+
         <!-- Las cuatro agrupaciones. Tasklane.GroupByDate sigue declarada arriba
              porque es asignable en el keymap, aunque ya no este en la barra.
 
@@ -375,7 +407,10 @@
             <separator/>
             <reference ref="Tasklane.ExportMarkdown"/>
             <separator/>
+            <reference ref="Tasklane.SaveRepo"/>
             <reference ref="Tasklane.ExportXml"/>
+            <separator/>
+            <reference ref="Tasklane.ClearRepo"/>
             <reference ref="Tasklane.ExportAndRemoveRepo"/>
         </group>
 

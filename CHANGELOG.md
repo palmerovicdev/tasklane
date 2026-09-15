@@ -9,6 +9,85 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.3.0] — Un día por grupo, y un repositorio que se puede vaciar
+
+Una iteración pedida de una vez: siete cosas de uso diario, ninguna del plan de escala.
+Todo lo que actúa sobre tareas lo hace **sobre el repositorio activo**, como el resto del
+plugin.
+
+### Añadido
+- **Guardar un repositorio en un fichero**: *Export ▸ Save Repository As ▸ CSV… /
+  Markdown… / Plain Text…*. Todas las tareas del repositorio activo, estado a estado y en
+  el orden de la lista. El CSV es una fila por tarea —título, descripción, estado,
+  prioridad, etiquetas, vencimiento, marcada, anclas, enlaces, fechas e id—, con BOM para
+  que Excel no rompa los acentos. En segundo plano, cancelable y escrito entero o nada.
+- **Vaciar un repositorio**: *Export ▸ Delete All Tasks in "…"…*. Separado de guardar y
+  sin obligar a exportar antes; la pregunta dice cuántas son y recuerda que se pueden
+  guardar. El repositorio se queda en la lista, vacío, y las capturas que ya nadie nombra
+  las recoge el mantenimiento de siempre.
+- **Arrastrar filas en los ajustes**, por el asa de su izquierda, en las tablas de
+  prioridades y de estados. Las flechas siguen, con sus atajos.
+
+### Cambiado
+- **Agrupar por fecha es un grupo por día.** Sólo «Today» se queda sin fecha; debajo, una
+  cabecera por cada día que tenga alguna tarea —«Sep 14», «Sep 10, 2025»— en vez de
+  «Yesterday», «This week» y meses enteros para los años anteriores. Las cabeceras siguen
+  saliendo de saltos de índice: cuestan lo que los días distintos, no lo que las tareas.
+- **Las prioridades, de la más alta a la más baja en los ajustes**, que es como salen en
+  la ventana. La configuración guardada no cambia.
+- **Los enlaces del cuerpo de una tarjeta se pulsan** donde están, con el color de enlace
+  sobre el gris. El contador de enlaces sigue abriendo la lista de todos.
+- **El ancla de código y la prioridad no se caen de la tarjeta.** Si `Auth.kt:42` no cabe
+  entero se queda su icono, que sigue llevando al código; la prioridad se queda en su punto
+  de color, que sigue abriendo la lista. Lo garantiza el reparto de la línea hasta el
+  ancho mínimo de la ventana.
+- **Los iconos de desplegar, marcar y menú de la tarjeta, más juntos.**
+- **El resalte del ratón sobre una tarjeta lo pinta el árbol**, como el de la selección:
+  la tarjeta bajo el ratón deja de pintar su fondo encima. Antes se apagaba el del árbol, y
+  eso sólo se podía hacer con API interna.
+
+### Corregido
+- **Pulsar un ancla de código no llevaba al código** en los IDE recientes: lanzaba *Read
+  access is allowed from inside read-action only*.
+- **Cambiar el color de una prioridad en los ajustes no hacía nada.** El selector se abría
+  como editor de celda y la tabla daba la edición por terminada al perder el foco, antes
+  de que se eligiera ningún color.
+- **Lo que el verificador del Marketplace marcaba.** Se usaba API interna
+  (`RenderingUtil.setHoverPaintingDisabled`); un `KeymapUtil::getShortcutText` se compilaba
+  leyendo `KeymapUtil.INSTANCE`, que no existe en la 2026.1 y habría sido un
+  `NoSuchFieldError` al abrir la ventana; y constaban usos de API deprecada
+  —`ToolWindowFactory.isApplicable`, `isDoNotActivateOnStart` y `getCheckbox()`— que no
+  estaban en el código: los dos primeros los escribía Kotlin como puentes hacia los métodos
+  por defecto de la interfaz, y se compila ya sin ellos (`jvmDefault = NO_COMPATIBILITY`).
+
+### Imágenes
+- **Las imágenes se guardan a su tamaño.** Se retira el tope de 400 px de la 2.1: una
+  captura de código a 400 px no se lee. Una captura pegada se guarda como PNG sin pérdida y
+  un fichero soltado, elegido o copiado, **con sus bytes tal cual**. Medido sobre una
+  captura de 2880 px: pegar pasa de 8 ms a 129 ms de CPU —fuera del hilo de interfaz— y de
+  46 KB a 1,25 MB; soltar un fichero pasa de 47 ms a **1 ms**, porque ya no se descodifica.
+  Desaparece el ajuste *Scale pasted images down to*.
+- **Los ajustes dicen siempre cuánto pesan las imágenes del repositorio activo**, y traen
+  dos botones, también del repositorio activo: *Delete Unused Images* borra ya, sin las 24
+  horas de gracia, las que no nombra ninguna tarea —antes repasa el directorio, así que
+  también se lleva lo que hubiera en disco sin apuntar—; *Delete All Images…*, tras
+  confirmarlo, vacía el directorio y sus filas en la base sin tocar las tareas, que pintan
+  «Image not found».
+- **El aviso de cuota es por repositorio**: dice cuál pasa del umbral, y lleva a los
+  ajustes donde se ve y se limpia.
+- **El diálogo de una tarea no descodifica originales en el hilo de interfaz**: pinta sus
+  vistas previas desde una copia de 1280 px, y ampliar una imagen la carga en segundo
+  plano. Con capturas a su tamaño, un original son 33 MB descodificado.
+- *Tasklane: Diagnostics* deja de contar imágenes «por encima del tope», y el peso de
+  imágenes cuenta sólo lo que está en disco.
+
+### Compatibilidad
+- Sin cambio de formato: el esquema de la base sigue en la versión 1 y la 2.2.0 abre un
+  proyecto usado por la 2.3.0 como si nada. Las imágenes siguen en
+  `attachments/ab/cd/<sha>.png` —un fichero soltado conserva su formato dentro de ese
+  nombre, y todo lo que las lee lo reconoce por el contenido—, y el atributo
+  `imageMaxSize` de un `tasklane.xml` anterior se ignora al leerlo.
+
 ## [2.2.0] — Las operaciones grandes
 
 La **Fase 5** del plan de escala (`docs/plan-escala.md`): lo que es O(n) por definición.

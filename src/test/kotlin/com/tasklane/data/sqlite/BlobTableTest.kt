@@ -87,8 +87,8 @@ class BlobTableTest {
         store.recordBlob(other, blob('a'), now.toEpochMilli())
         store.recordBlob(other, blob('b'), now.toEpochMilli())
 
-        assertEquals(1, store.blobStatsOf(REPO, 400).count)
-        assertEquals(2, store.blobStatsOf(other, 400).count)
+        assertEquals(1, store.blobStatsOf(REPO).count)
+        assertEquals(2, store.blobStatsOf(other).count)
         assertEquals(3_000L, store.blobBytes())
     }
 
@@ -97,7 +97,7 @@ class BlobTableTest {
         store.recordBlob(REPO, blob('a'), now.toEpochMilli())
         store.forgetBlobs(REPO, listOf(sha('a')))
 
-        assertEquals(0, store.blobStatsOf(REPO, 400).count)
+        assertEquals(0, store.blobStatsOf(REPO).count)
     }
 
     // ------------------------------------------------------- reconciliación
@@ -147,7 +147,7 @@ class BlobTableTest {
         val missing = store.markMissingBlobs(REPO, now.toEpochMilli())
 
         assertEquals(1, missing)
-        val stats = store.blobStatsOf(REPO, 400)
+        val stats = store.blobStatsOf(REPO)
         assertEquals(2, stats.count)
         assertEquals(1, stats.missing)
         assertEquals(1, stats.present)
@@ -159,27 +159,43 @@ class BlobTableTest {
     fun `un blob que vuelve deja de faltar`() = withStore { store, _ ->
         store.recordBlob(REPO, blob('a'), old.toEpochMilli())
         store.markMissingBlobs(REPO, now.toEpochMilli())
-        assertEquals(1, store.blobStatsOf(REPO, 400).missing)
+        assertEquals(1, store.blobStatsOf(REPO).missing)
 
         store.seeBlobs(REPO, listOf(sha('a')), now.toEpochMilli())
-        assertEquals(0, store.blobStatsOf(REPO, 400).missing)
+        assertEquals(0, store.blobStatsOf(REPO).missing)
     }
 
     // -------------------------------------------------------- cuentas y tareas
 
-    /** Lo que ya estaba guardado a 1600 px: no se toca, pero se cuenta. */
+    /**
+     * **Lo que pesa es lo que está en disco.** Una fila cuyo fichero ya no está cuenta como
+     * ausente y no suma: es la cifra que los ajustes enseñan desde la 2.3, y «cuánto
+     * ocupan mis imágenes» es una pregunta sobre el disco.
+     */
     @Test
-    fun `se cuentan las imagenes por encima del tope de hoy`() = withStore { store, _ ->
-        store.recordBlob(REPO, blob('a', bytes = 33_000, size = 400), now.toEpochMilli())
-        store.recordBlob(REPO, blob('b', bytes = 407_000, size = 1600), now.toEpochMilli())
+    fun `lo ausente se cuenta pero no pesa`() = withStore { store, _ ->
+        store.recordBlob(REPO, blob('a', bytes = 33_000), old.toEpochMilli())
+        store.recordBlob(REPO, blob('b', bytes = 407_000), now.toEpochMilli())
+        store.markMissingBlobs(REPO, now.toEpochMilli())
 
-        val stats = store.blobStatsOf(REPO, 400)
+        val stats = store.blobStatsOf(REPO)
         assertEquals(2, stats.count)
-        assertEquals(440_000L, stats.bytes)
-        assertEquals(1, stats.oversized)
-        assertEquals(407_000L, stats.oversizedBytes)
-        // Con el tope viejo, ninguna sobraba.
-        assertEquals(0, store.blobStatsOf(REPO, 1600).oversized)
+        assertEquals(1, stats.missing)
+        assertEquals(407_000L, stats.bytes)
+    }
+
+    /** Vaciar la tabla de un repositorio va por tandas y no toca la de otro. */
+    @Test
+    fun `olvidar las filas de un repositorio no toca las de otro`() = withStore { store, _ ->
+        store.recordBlob(REPO, blob('a'), now.toEpochMilli())
+        store.recordBlob(REPO, blob('b'), now.toEpochMilli())
+        store.recordBlob(other, blob('c'), now.toEpochMilli())
+
+        assertEquals(1, store.forgetBlobRows(REPO, limit = 1))
+        assertEquals(1, store.forgetBlobRows(REPO, limit = 1))
+        assertEquals(0, store.forgetBlobRows(REPO, limit = 1))
+        assertEquals(0, store.blobStatsOf(REPO).count)
+        assertEquals(1, store.blobStatsOf(other).count)
     }
 
     @Test
@@ -215,7 +231,7 @@ class BlobTableTest {
         // Y están puestas: las pone el DDL al abrir, sin una línea de migración.
         store.recordBlob(REPO, blob('a'), now.toEpochMilli())
         store.saveChore("blob.fsck:root", now.toEpochMilli(), 0)
-        assertEquals(1, store.blobStatsOf(REPO, 400).count)
+        assertEquals(1, store.blobStatsOf(REPO).count)
         assertEquals(now.toEpochMilli(), store.chore("blob.fsck:root")?.at)
     }
 }

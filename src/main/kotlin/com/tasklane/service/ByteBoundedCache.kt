@@ -46,6 +46,18 @@ internal class ByteBoundedCache<K : Any, V : Any>(
     }
 
     /** Lo que ocupa ahora mismo lo cacheado. */
+    /** Quita todo lo que cumpla [predicate]. Para olvidar un repositorio entero de una vez. */
+    @Synchronized
+    fun removeIf(predicate: (K) -> Boolean) {
+        val iterator = map.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (!predicate(entry.key)) continue
+            bytes -= weigh(entry.value)
+            iterator.remove()
+        }
+    }
+
     @Synchronized
     fun weight(): Long = bytes
 

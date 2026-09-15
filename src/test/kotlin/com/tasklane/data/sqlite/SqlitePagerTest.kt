@@ -4,6 +4,7 @@ import com.tasklane.data.sqlite.StoreFixture.REPO
 import com.tasklane.data.sqlite.StoreFixture.task
 import com.tasklane.data.sqlite.StoreFixture.withStore
 import com.tasklane.domain.model.DateAnchor
+import com.tasklane.domain.model.DateGroup
 import com.tasklane.domain.model.GroupKey
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.StateId
@@ -23,7 +24,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -90,7 +90,6 @@ class SqlitePagerTest {
             now = now,
             zone = zone,
             today = today,
-            firstDayOfWeek = DayOfWeek.MONDAY,
         )
 
     private fun sqlite(sql: Sql, grouping: Grouping, filter: TaskFilter, anchor: DateAnchor) =
@@ -102,7 +101,6 @@ class SqlitePagerTest {
             now = now,
             zone = zone,
             today = today,
-            firstDayOfWeek = DayOfWeek.MONDAY,
         )
 
     /** La lista entera de un grupo, pedida a trozos como la pide la ventana. */
@@ -212,6 +210,31 @@ class SqlitePagerTest {
         for (group in expected.outline(todo).map { it.key }) {
             assertEquals("grupo $group", walk(expected, todo, group), walk(actual, todo, group))
         }
+    }
+
+    /**
+     * **Un día, una cabecera** (2.3.0), también en el paginador que no reparte tareas
+     * sino que salta de tramo en tramo del índice. El corpus tiene tareas de hoy, de ayer,
+     * de hace tres días, de hace cuarenta y de hace más de un año: hasta la 2.2 eso eran
+     * «hoy», «ayer», «esta semana», un día suelto y un mes.
+     */
+    @Test
+    fun `cada dia con tareas es su propia cabecera`() = withStore { store, db ->
+        val tasks = corpus()
+        store.importBatch(tasks, config(Grouping.BY_DATE))
+
+        val keys = sqlite(db.reader, Grouping.BY_DATE, TaskFilter.ALL, DateAnchor.UPDATED).outline(todo).map { it.key }
+
+        assertEquals(
+            listOf(
+                GroupKey.OfDate(DateGroup.Today),
+                GroupKey.OfDate(DateGroup.Day(today.minusDays(1))),
+                GroupKey.OfDate(DateGroup.Day(today.minusDays(3))),
+                GroupKey.OfDate(DateGroup.Day(today.minusDays(40))),
+                GroupKey.OfDate(DateGroup.Day(today.minusDays(400))),
+            ),
+            keys,
+        )
     }
 
     @Test

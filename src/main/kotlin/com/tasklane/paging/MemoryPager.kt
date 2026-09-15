@@ -12,12 +12,9 @@ import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.service.SearchResults
 import com.tasklane.ui.toolwindow.VisibleTasks
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.temporal.WeekFields
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -53,7 +50,6 @@ internal class MemoryPager(
     private val now: Instant,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val today: LocalDate = LocalDate.now(zone),
-    private val firstDayOfWeek: DayOfWeek = WeekFields.of(Locale.getDefault()).firstDayOfWeek,
 ) : TaskPager {
 
     /** Un bloque de la lista. [key] nulo == este estado no agrupa. */
@@ -164,7 +160,7 @@ internal class MemoryPager(
      * Agrupa por fecha y, con [keepToday], se asegura de que «hoy» exista.
      *
      * Es el único grupo que vale la pena vacío: que no haya nada hoy es justo lo que
-     * se viene a mirar. Los demás —ayer, esta semana— sólo importan cuando tienen
+     * se viene a mirar. Los demás —un día por cada fecha— sólo existen cuando tienen
      * algo. Y no se añade a una lista vacía del todo: ahí el árbol tiene su propio
      * «no hay tareas», que además dice cómo crear la primera.
      */
@@ -175,7 +171,7 @@ internal class MemoryPager(
         keepToday: Boolean,
     ): List<Section> {
         val sections = tasks
-            .groupBy { DateGrouper.groupOf(DateGrouper.anchorOf(it, state.anchor), today, zone, firstDayOfWeek) }
+            .groupBy { DateGrouper.groupOf(DateGrouper.anchorOf(it, state.anchor), today, zone) }
             .toSortedMap()
             .map { (group, inGroup) -> Section(GroupKey.OfDate(group), inGroup.sortedWith(order)) }
 

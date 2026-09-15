@@ -169,8 +169,11 @@ object TaskExporter {
      * resolver, y lo que se exporta se pega en un ticket o en un correo. Una línea
      * que sólo contenía la referencia desaparece con ella en vez de quedarse en
      * blanco; una que la llevaba junto a texto conserva el texto.
+     *
+     * Lo usa también [TaskCsvWriter] para su columna de descripción: el criterio de qué
+     * es «el detalle» de una tarea tiene que ser uno solo.
      */
-    private fun detailOf(task: Task): List<String> {
+    internal fun detailOf(task: Task): List<String> {
         val title = task.titleRange
         if (title.isEmpty()) return emptyList()
         val eol = task.body.indexOf('\n', title.last + 1)

@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.DumbAwareToggleAction
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.export.ExportFormat
+import com.tasklane.domain.export.FileFormat
 import com.tasklane.domain.export.ExportScope
 import com.tasklane.service.ExportService
 
@@ -45,6 +46,53 @@ internal class ExportXmlAction : PanelAction() {
         val project = e.project ?: return
         val repo = panelOf(e)?.activeRepository?.key ?: return
         ExportService.getInstance(project).exportXml(repo)
+    }
+}
+
+/**
+ * Guardar **todas** las tareas del repositorio activo en un fichero, en uno de tres
+ * formatos. Van en un submenú del de exportación, una acción por formato: cada una se
+ * puede buscar por su nombre y asignar a un atajo, que un diálogo con un desplegable no
+ * permitiría. Ver [ExportService.saveRepo].
+ */
+internal abstract class SaveRepoAction(private val format: FileFormat) : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = panelOf(e)?.activeRepository != null
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val ref = panelOf(e)?.activeRepository ?: return
+        ExportService.getInstance(project).saveRepo(ref, format)
+    }
+}
+
+internal class SaveRepoCsvAction : SaveRepoAction(FileFormat.CSV)
+internal class SaveRepoMarkdownAction : SaveRepoAction(FileFormat.MARKDOWN)
+internal class SaveRepoTextAction : SaveRepoAction(FileFormat.PLAIN)
+
+/**
+ * Vaciar el repositorio activo: borrar todas sus tareas. Separada de guardar, como pidió
+ * el usuario, y con el nombre del repositorio en el texto de la acción por lo mismo que
+ * «Exportar y quitar»: es destructiva y tiene que decir sobre qué actúa antes de pulsarla.
+ * Ver [ExportService.clearRepo].
+ */
+internal class ClearRepoAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        val panel = panelOf(e)
+        val ref = panel?.activeRepository
+        // Apagada en solo lectura —una base del futuro, o una exportación para quitar en
+        // curso—: ahí no se escribe, y borrar es escribir.
+        e.presentation.isEnabled = panel != null && ref != null && panel.isEditable()
+        ref?.let { e.presentation.text = TasklaneBundle.message("action.Tasklane.ClearRepo.named", it.displayName) }
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val ref = panelOf(e)?.activeRepository ?: return
+        ExportService.getInstance(project).clearRepo(ref)
     }
 }
 

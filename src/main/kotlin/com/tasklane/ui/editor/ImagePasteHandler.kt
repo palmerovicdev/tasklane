@@ -38,12 +38,11 @@ internal class ImagePasteHandler(
     }
 
     override fun actionPerformed(event: AnActionEvent) {
-        val image = ClipboardImage.read()
-        if (image == null) {
-            delegateToPlatform(event)
-            return
+        when (val clip = ClipboardImage.read()) {
+            null -> delegateToPlatform(event)
+            is ClipboardImage.Clip.Pixels -> inserter.attach(clip.image)
+            is ClipboardImage.Clip.ImageFile -> inserter.attachFile(clip.file)
         }
-        inserter.attach(image)
     }
 
     /**

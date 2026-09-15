@@ -29,7 +29,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -97,7 +96,6 @@ class ListSyncTest {
         now = now,
         zone = zone,
         today = today,
-        firstDayOfWeek = DayOfWeek.MONDAY,
     )
 
     private fun list(tasks: List<Task>, grouping: Grouping = Grouping.NONE, state: StateId = todo): ListSync {

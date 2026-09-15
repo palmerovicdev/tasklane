@@ -45,7 +45,7 @@ class AttachmentStoreTest {
             fillRect(0, 0, size, size / 2)
             dispose()
         }
-        return ImageNormalizer.normalize(image, MAX)
+        return ImageNormalizer.encode(image)
     }
 
     /** Todos los blobs del árbol, recorriéndolo como lo hace la reconciliación. */
@@ -323,16 +323,50 @@ class AttachmentStoreTest {
         assertFalse(store.exists(repo, id))
     }
 
+    /**
+     * «Borrar todas» vacía el directorio **entero** del repositorio —originales,
+     * miniaturas, lo que quedara en plano y los temporales— y dice cuánto se fue. El de
+     * otro repositorio ni se toca.
+     */
+    @Test
+    fun `borrar todo vacia el arbol del repositorio y solo ese`() {
+        val store = store()
+        val kept = store.put(other, png(size = 22))
+        val id = store.put(repo, png())
+        store.putThumbnail(repo, id, png(size = 10))
+        val flat = png(size = 30)
+        writeFlat(AttachmentId(ImageNormalizer.sha256(flat)), flat)
+        Files.writeString(store.path(repo, id).resolveSibling("${"d".repeat(64)}.png.tmp"), "a medias")
+
+        val wipe = store.deleteAll(repo)
+
+        assertTrue(wipe.complete)
+        assertEquals(4L, wipe.files)
+        assertTrue(wipe.bytes > 0)
+        assertFalse(Files.exists(layout().attachmentsDir(repo)))
+        assertTrue("el otro repositorio no se toca", store.exists(other, kept))
+        // Y se puede volver a guardar: el directorio se rehace al escribir.
+        assertTrue(store.exists(repo, store.put(repo, png())))
+    }
+
+    @Test
+    fun `borrar todo se puede parar a medias`() {
+        val store = store()
+        repeat(5) { store.put(repo, png(size = 20 + it * 2)) }
+
+        var seen = 0L
+        val wipe = store.deleteAll(repo, cancelled = { seen >= 2 }) { seen = it }
+
+        assertFalse(wipe.complete)
+        assertEquals(2L, wipe.files)
+        assertEquals(3, scanned(store, repo).size)
+    }
+
     private fun writeFlat(id: AttachmentId, bytes: ByteArray, thumbnail: Boolean = false): Path {
         val dir = layout().attachmentsDir(repo)
         Files.createDirectories(dir)
         val file = dir.resolve(BlobLayout.fileName(id, thumbnail))
         Files.write(file, bytes)
         return file
-    }
-
-    private companion object {
-        /** El tope viejo: aquí se guarda lo que se dibuja, sin reescalar. */
-        const val MAX = 1600
     }
 }

@@ -2,12 +2,16 @@ package com.tasklane.ui.settings
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.DataManager
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.options.BoundSearchableConfigurable
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.options.ex.Settings
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
+import com.intellij.openapi.ui.MessageDialogBuilder
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBIntSpinner
 import com.intellij.ui.SimpleListCellRenderer
@@ -21,15 +25,19 @@ import com.tasklane.TasklaneBundle
 import com.tasklane.code.AnchorMarkers
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneDefaultsService
+import com.tasklane.diagnostics.BlobStats
+import com.tasklane.diagnostics.TasklaneDiagnostics
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.model.AnchorMarkerStyle
 import com.tasklane.domain.model.ConfigProblem
 import com.tasklane.domain.model.ConfigValidator
 import com.tasklane.domain.model.PriorityId
+import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.service.AttachmentService
 import com.tasklane.service.TaskService
 import javax.swing.SwingConstants
 
@@ -54,7 +62,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     private val configService = TasklaneConfigService.getInstance(project)
 
     private val statesTable = StatesTable(::updateProblems, ::confirmStateRemoval)
-    private val prioritiesTable = PrioritiesTable(::updateProblems, ::confirmPriorityRemoval)
+    private val prioritiesTable = PrioritiesTable(project, ::updateProblems, ::confirmPriorityRemoval)
     private val triggersCheckBox = JBCheckBox(TasklaneBundle.message("settings.triggers.enabled"))
 
     /**
@@ -68,16 +76,17 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     )
 
     /**
-     * Lado mayor al que se reescala una imagen pegada. Es un ajuste del proyecto y no
-     * de la máquina porque lo que decide es **qué se escribe en disco**, y eso lo
-     * comparten todos los que abran el proyecto.
+     * Lo que pesan las imágenes **del repositorio activo**, siempre a la vista (2.3).
+     *
+     * Se calcula fuera del EDT al abrir la página y después de cada limpieza: sale de la
+     * tabla `blob`, que en un repositorio con millones de capturas no es un salto de
+     * índice, y los ajustes no pueden abrirse congelados por una cifra.
      */
-    private val imageSizeSpinner = JBIntSpinner(
-        TasklaneConfig.DEFAULT_IMAGE_MAX_SIZE,
-        TasklaneConfig.MIN_IMAGE_MAX_SIZE,
-        TasklaneConfig.MAX_IMAGE_MAX_SIZE,
-        IMAGE_SIZE_STEP,
-    )
+    private val imageWeightLabel = JBLabel()
+
+    /** La última cifra que se leyó, para que la confirmación de «borrar todas» diga cuántas son. */
+    @Volatile
+    private var imageStats: BlobStats? = null
 
     /**
      * A partir de cuántos megabytes de imágenes se avisa (§4.5). Cero apaga el aviso, y
@@ -142,8 +151,14 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.anchors.comment")) }
         }
 
+        // Todo lo de este grupo es del repositorio activo, como el resto de Tasklane: el
+        // peso que se enseña, los dos botones y el umbral del aviso.
         group(TasklaneBundle.message("settings.images.title")) {
-            row(TasklaneBundle.message("settings.images.maxSize")) { cell(imageSizeSpinner) }
+            row(TasklaneBundle.message("settings.images.weight")) { cell(imageWeightLabel) }
+            row {
+                button(TasklaneBundle.message("settings.images.purgeUnused")) { purgeUnusedImages() }
+                button(TasklaneBundle.message("settings.images.purgeAll")) { purgeAllImages() }
+            }
             row { comment(TasklaneBundle.message("settings.images.comment")) }
             row(TasklaneBundle.message("settings.images.quota")) { cell(imageQuotaSpinner) }
             row { comment(TasklaneBundle.message("settings.images.quota.comment")) }
@@ -166,7 +181,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         prioritiesTable.rows = priorities
         triggersCheckBox.isSelected = config.triggersEnabled
         depthSpinner.number = config.repoDepth
-        imageSizeSpinner.number = config.imageMaxSize
+        refreshImageWeight()
         imageQuotaSpinner.number = config.imageQuotaMegabytes
         stateReassign.clear()
         priorityReassign.clear()
@@ -214,7 +229,6 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             prioritiesTable.rows,
             triggersCheckBox.isSelected,
             depthSpinner.number,
-            imageSizeSpinner.number,
             imageQuotaSpinner.number,
         ).normalized()
 
@@ -371,6 +385,121 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         Messages.getQuestionIcon(),
     ) == Messages.YES
 
+    // ----------------------------------------------------- imágenes (2.3)
+
+    private fun activeRepoName(): Pair<RepoKey, String> {
+        val snapshot = TaskService.getInstance(project).snapshot.value
+        return snapshot.activeRepo to (snapshot.activeRepository?.displayName ?: snapshot.activeRepo.value)
+    }
+
+    private fun refreshImageWeight() {
+        val (repo, name) = activeRepoName()
+        imageWeightLabel.text = TasklaneBundle.message("settings.images.weight.loading", name)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val stats = TaskService.getInstance(project).blobStatsOf(repo)
+            imageStats = stats
+            ApplicationManager.getApplication().invokeLater(
+                { imageWeightLabel.text = describeWeight(name, stats) },
+                // Los ajustes son modales: sin esto la cifra esperaría a que se cerraran.
+                ModalityState.any(),
+            )
+        }
+    }
+
+    private fun describeWeight(name: String, stats: BlobStats): String {
+        val weight = TasklaneDiagnostics.humanBytes(stats.bytes)
+        return if (stats.missing > 0) {
+            TasklaneBundle.message("settings.images.weight.missing", name, weight, stats.present, stats.missing)
+        } else {
+            TasklaneBundle.message("settings.images.weight.value", name, weight, stats.present)
+        }
+    }
+
+    /** Borra ya las imágenes que no usa ninguna tarea del repositorio activo. Ver `AttachmentService.purgeUnused`. */
+    private fun purgeUnusedImages() {
+        val (repo, name) = activeRepoName()
+        runCleanup(TasklaneBundle.message("settings.images.purgeUnused.progress", name), name) { indicator ->
+            AttachmentService.getInstance(project).purgeUnused(repo) { indicator.isCanceled }
+        }
+    }
+
+    /**
+     * Borra todas las imágenes del repositorio activo, **tras confirmarlo** con cuántas son
+     * y qué les pasa a las tareas que las usan. Ver `AttachmentService.purgeAll`.
+     */
+    private fun purgeAllImages() {
+        val (repo, name) = activeRepoName()
+        val stats = imageStats
+        val question = if (stats != null) {
+            TasklaneBundle.message(
+                "settings.images.purgeAll.question",
+                name,
+                stats.present,
+                TasklaneDiagnostics.humanBytes(stats.bytes),
+            )
+        } else {
+            TasklaneBundle.message("settings.images.purgeAll.questionUncounted", name)
+        }
+        val confirmed = MessageDialogBuilder.yesNo(TasklaneBundle.message("settings.images.purgeAll.title", name), question)
+            .yesText(TasklaneBundle.message("settings.images.purgeAll.confirm"))
+            .noText(Messages.getCancelButton())
+            .asWarning()
+            .ask(imageWeightLabel)
+        if (!confirmed) return
+
+        runCleanup(TasklaneBundle.message("settings.images.purgeAll.progress", name), name) { indicator ->
+            indicator.isIndeterminate = true
+            AttachmentService.getInstance(project).purgeAll(repo, { indicator.isCanceled }) { files ->
+                indicator.text2 = TasklaneBundle.message("settings.images.purgeAll.files", files)
+            }
+        }
+    }
+
+    /**
+     * Una limpieza con barra modal y cancelable, y lo que salió dicho al terminar. Modal
+     * y no en segundo plano porque se lanza desde un diálogo que ya es modal: el usuario
+     * está mirando justo esto y la cifra de arriba tiene que cambiar delante de él.
+     */
+    private fun runCleanup(
+        title: String,
+        name: String,
+        block: (com.intellij.openapi.progress.ProgressIndicator) -> AttachmentService.Cleanup,
+    ) {
+        var result: AttachmentService.Cleanup? = null
+        ProgressManager.getInstance().run(
+            object : com.intellij.openapi.progress.Task.Modal(project, title, true) {
+                override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
+                    result = block(indicator)
+                }
+
+                override fun onFinished() {
+                    refreshImageWeight()
+                    val message = when (val done = result) {
+                        null -> return
+                        AttachmentService.Cleanup.Refused -> TasklaneBundle.message("settings.images.refused", name)
+                        is AttachmentService.Cleanup.Done -> when {
+                            !done.complete -> TasklaneBundle.message(
+                                "settings.images.purged.cancelled",
+                                name,
+                                done.images,
+                                TasklaneDiagnostics.humanBytes(done.bytes),
+                            )
+                            done.images == 0 && done.bytes == 0L ->
+                                TasklaneBundle.message("settings.images.purged.none", name)
+                            else -> TasklaneBundle.message(
+                                "settings.images.purged",
+                                name,
+                                done.images,
+                                TasklaneDiagnostics.humanBytes(done.bytes),
+                            )
+                        }
+                    }
+                    Messages.showInfoMessage(imageWeightLabel, message, TasklaneBundle.message("settings.images.title"))
+                }
+            },
+        )
+    }
+
     // --------------------------------------------------------------- extras
 
     private fun saveAsTemplate() {
@@ -405,9 +534,6 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         const val ID = "com.tasklane.settings"
         private const val HELP_TOPIC = "com.tasklane.settings"
         private const val KEYMAP_ID = "preferences.keymap"
-
-        /** Saltos de 100 px: el ajuste es un orden de magnitud, no una medida fina. */
-        private const val IMAGE_SIZE_STEP = 100
 
         /** Un giga por paso: la cuota se piensa en gigas, no en megas. */
         private const val IMAGE_QUOTA_STEP = 1024

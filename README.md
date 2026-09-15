@@ -35,6 +35,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas y un selector para cambiar |
 | **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
 | **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo o sólo la selección |
+| **Guardar y vaciar un repositorio** | Todas sus tareas a un CSV, un Markdown o un texto plano; y, por separado, borrarlas todas |
 
 - **Repositorio:** [palmerovicdev/tasklane](https://github.com/palmerovicdev/tasklane)
 - **Arquitectura y decisiones:** [`docs/architecture.html`](docs/architecture.html)
@@ -321,7 +322,7 @@ cualquier otra edición.
 | | |
 |---|---|
 | Qué se pega | Una imagen del portapapeles —una captura de pantalla— o un fichero de imagen copiado del explorador |
-| Qué se guarda | Un PNG por imagen, reescalado al máximo de los ajustes (400 px por defecto), en `.idea/tasklane/repos/<repo>/attachments/ab/cd/` |
+| Qué se guarda | La imagen **a su tamaño**, en `.idea/tasklane/repos/<repo>/attachments/ab/cd/`: una captura como PNG sin pérdida, un fichero soltado o copiado con sus bytes tal cual |
 | Qué se ve en el texto | `[image]`; la referencia larga queda plegada detrás |
 | Ampliar | Un clic sobre la vista previa la abre a tamaño de pantalla |
 | Quitar | Se selecciona el `[image]` y `Supr`. Al irse la referencia se va la imagen |
@@ -337,20 +338,31 @@ imagen a medio camino. Qué hay guardado lo lleva la base, no un recorrido del d
 y no se recolecta un repositorio mientras su `tasks.xml` se está importando: ahí «no veo
 referencias» significa «todavía no lo sé», no «no hay ninguna».
 
+**En *Settings → Tools → Tasklane → Images* se ve siempre cuánto pesan las imágenes del
+repositorio activo**, y hay dos botones, también del repositorio activo y de ningún otro:
+
+| Botón | Qué hace |
+|---|---|
+| *Delete Unused Images* | Borra **ya**, sin las 24 horas de gracia, las imágenes que no nombra ninguna tarea: fichero, miniatura y fila en la base. Antes repasa el directorio, así que también se lleva lo que hubiera en disco sin apuntar |
+| *Delete All Images…* | Tras confirmarlo, vacía el directorio de imágenes del repositorio y sus filas. **Las tareas no se tocan**: las que usaban una imagen pintan «Image not found» |
+
+**Desde la 2.3 no se reescala nada.** Hasta la 2.2 toda captura se guardaba a 400 px, y
+una captura de código a 400 px no se lee. Lo que ocupan se gestiona mirando su peso y
+limpiando, no degradándolas al entrar. El precio, medido sobre una captura de 2880 px:
+pegarla cuesta 129 ms de CPU en vez de 8 —fuera del EDT— y ocupa 1,25 MB en vez de 46 KB.
+Soltar un fichero, en cambio, pasa de 47 ms a 1 ms: ya no se descodifica.
+
 **El directorio está fragmentado** por los cuatro primeros dígitos del SHA —`ab/cd/`—
 porque un único directorio con millones de ficheros no es lento, es intratable. Lo que
 quedara de versiones anteriores se traslada solo, en segundo plano, y se sigue viendo
 mientras tanto.
 
-**La lista nunca descodifica una captura grande**: de las guardadas a 1600 px pinta una
-miniatura de 256 px —`<sha>.thumb.png`, creada sola la primera vez que se ve—, y de las
-nuevas el propio fichero, que ya es pequeño. El clic sobre la vista previa sí abre el
-original entero. Es lo que permite que las capturas antiguas **no se toquen**: reescalarlas
-cambiaría su SHA, que es su nombre, y con él todas las referencias de los cuerpos.
-*Tasklane: Diagnostics* dice cuántas son y cuánto ocupan.
+**La lista nunca descodifica una captura grande**: pinta una miniatura de 256 px
+—`<sha>.thumb.png`, escrita al pegar o creada sola la primera vez que se ve—. El clic
+sobre la vista previa sí abre el original entero.
 
-**Se avisa cuando las imágenes pasan de 5 GB** —configurable, o apagable—. Es un aviso,
-no un tope: nada se rechaza y nada se borra por cruzarlo.
+**Se avisa cuando las imágenes de un repositorio pasan de 5 GB** —configurable, o
+apagable—. Es un aviso, no un tope: nada se rechaza y nada se borra por cruzarlo.
 
 Un adjunto que falta no borra su referencia: el editor pinta un marcador en su sitio.
 Y las referencias no salen al exportar — fuera del IDE, un SHA de 64 caracteres no es
@@ -371,7 +383,7 @@ portapapeles. Con una búsqueda activa se exporta el resultado de la búsqueda: 
 El formato se alterna en el mismo menú y se recuerda por proyecto:
 
 ```markdown
-## Done · Esta semana
+## Done · High
 
 - [x] Arreglar el login
 - [x] Revisar el PR de facturación
@@ -393,9 +405,10 @@ lista numerada, que es lo que se pega en un diario de trabajo o en un informe se
 ```
 
 Una cabecera que dijera «Done · Hoy» sería falsa mañana, y la casilla `- [x]` sobra
-cuando el grupo entero ya significa «esto se hizo ese día». Sólo con los grupos que son
-**un día concreto** —hoy, ayer, un día suelto—: «esta semana», un mes y «sin fecha» no
-tienen fecha que poner, así que conservan la cabecera de la pestaña y su casilla.
+cuando el grupo entero ya significa «esto se hizo ese día». Desde la `2.3.0` agrupar por
+fecha es **un grupo por día** —«Today» y, debajo, uno por cada día con alguna tarea—, así
+que todos salen como parte del día menos «sin fecha», que no tiene fecha que poner y
+conserva la cabecera de la pestaña y su casilla.
 
 **Hasta 10.000 tareas al portapapeles.** Por encima se ofrece guardarlas en un fichero
 —`.md` o `.txt`, según el formato—: un portapapeles de varios gigas no es una exportación,
@@ -414,6 +427,24 @@ su cuenta.
 **Exportar el repositorio a XML** devuelve sus tareas al `tasks.xml` de siempre, el
 formato que cualquier versión del plugin sabe leer. Se escribe entero o no se escribe:
 a un temporal que sólo sustituye al fichero cuando está completo.
+
+**Guardar el repositorio en un fichero** (*Export ▸ Save Repository As*): todas las tareas
+del repositorio activo, estado a estado y en el orden de la lista, en uno de tres formatos.
+
+| Formato | Qué sale |
+|---|---|
+| CSV… | Una fila por tarea: título, descripción, estado, prioridad, etiquetas, vencimiento, marcada, anclas, enlaces, creada, modificada, completada e id. Con BOM, para que Excel lea los acentos |
+| Markdown… | Un apartado por estado y `- [ ] título` debajo, como la copia al portapapeles |
+| Plain Text… | Lo mismo con guiones |
+
+Sin tope de portapapeles —va siempre a fichero—, en segundo plano, cancelable y sobre una
+foto de la base.
+
+**Vaciar el repositorio** (*Export ▸ Delete All Tasks in "…"…*) borra todas sus tareas de
+la base, en todos los estados, después de una pregunta que dice cuántas son. Va separado
+de guardar a propósito —vaciar no obliga a exportar—, y como todo en Tasklane sólo toca el
+**repositorio activo**, que se queda en la lista, vacío. Las capturas que ya no nombra
+ninguna tarea las recoge el mantenimiento de siempre.
 
 ## Requisitos
 
@@ -574,6 +605,13 @@ sustituto: una copia diaria con `VACUUM INTO` y una comprobación de la base tra
 cierre inesperado. De paso aparecieron cinco fallos de la Fase 3 en los caminos que esta
 recorría —el más serio, que un repositorio renombrado desaparecía del selector con sus
 tareas dentro— y están corregidos.
+
+La `2.3.0` no es del plan: es una iteración pedida de una vez sobre el uso diario.
+Agrupar por fecha pasa a ser **un grupo por día**; un repositorio se puede **guardar
+entero** en CSV, Markdown o texto y, por separado, **vaciar**; los enlaces del cuerpo de
+una tarjeta se pulsan donde están; el ancla de código y la prioridad se quedan en su icono
+en vez de caerse de una tarjeta estrecha; y en los ajustes las prioridades van de la más
+alta a la más baja, las filas se arrastran y cambiar un color por fin cambia el color.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está

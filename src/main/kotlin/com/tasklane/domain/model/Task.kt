@@ -128,12 +128,14 @@ data class Task(
                     val eol = body.indexOf('\n', index).takeIf { it >= 0 } ?: body.length
                     val raw = body.substring(index, eol)
                     val isTitleLine = title.first >= index && title.last < eol
+                    val refs = ImageRefParser.parse(raw)
                     if (!isTitleLine) {
-                        val line = ImageRefParser.strip(raw).trim()
-                        if (line.isNotBlank()) add(DetailBlock.Text(line))
+                        val stripped = if (refs.isEmpty()) raw else ImageRefParser.strip(raw)
+                        val line = stripped.trim()
+                        if (line.isNotBlank()) add(DetailBlock.Text(line, linksOfLine(index, eol, refs, stripped, line)))
                     }
                     // Detrás del texto de su línea, como el inlay del diálogo.
-                    for (ref in ImageRefParser.parse(raw)) add(DetailBlock.Image(ref.id))
+                    for (ref in refs) add(DetailBlock.Image(ref.id))
                     index = eol + 1
                 }
             }
@@ -148,7 +150,39 @@ data class Task(
      * resumen de una línea, y desplegar es justamente pedir lo que ese resumen esconde.
      */
     val detailLines: List<String> by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        detailBlocks.filterIsInstance<DetailBlock.Text>().map { it.text }
+        detailTexts.map { it.text }
+    }
+
+    /** Lo mismo que [detailLines] con los enlaces de cada una. Es lo que pinta la tarjeta. */
+    val detailTexts: List<DetailBlock.Text> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        detailBlocks.filterIsInstance<DetailBlock.Text>()
+    }
+
+    /**
+     * Los enlaces de la línea `body[start, eol)`, con el rango trasladado a [line]: la
+     * misma línea sin las referencias a imágenes —[stripped]— y sin los espacios de los
+     * extremos.
+     *
+     * Existe desde la 2.3.0, cuando los enlaces del cuerpo pasaron a poderse pulsar desde
+     * la tarjeta y no sólo desde el contador. Se trasladan los que ya extrajo
+     * `LinkExtractor` al escribir, en vez de volver a buscarlos en cada línea: pintar una
+     * fila nunca debe ejecutar una regex, y así además valen las mismas reglas —un enlace
+     * dentro de un tramo de código no es un enlace—.
+     */
+    private fun linksOfLine(start: Int, eol: Int, refs: List<AttachmentRef>, stripped: String, line: String): List<TaskLink> {
+        if (links.isEmpty()) return emptyList()
+        val lead = stripped.indexOfFirst { !it.isWhitespace() }.coerceAtLeast(0)
+        return links.mapNotNull { link ->
+            if (link.range.first < start || link.range.last >= eol) return@mapNotNull null
+            val from = link.range.first - start
+            val to = link.range.last - start
+            // Un enlace no se solapa con una referencia a imagen, pero si alguna vez lo
+            // hiciera no habría dónde colocarlo: la referencia ya no está en la línea.
+            if (refs.any { from <= it.range.last && to >= it.range.first }) return@mapNotNull null
+            val removed = refs.filter { it.range.last < from }.sumOf { it.range.last - it.range.first + 1 }
+            val range = (from - removed - lead)..(to - removed - lead)
+            link.copy(range = range).takeIf { range.first >= 0 && range.last < line.length }
+        }
     }
 
     /**
@@ -161,8 +195,7 @@ data class Task(
 
     /**
      * Los enlaces que caen dentro del título, con el rango ya trasladado a
-     * coordenadas del título. Es lo que la fila puede pintar como enlace; los que
-     * viven en el detalle sólo llegan al indicador.
+     * coordenadas del título. Los del detalle van con su línea: ver [detailTexts].
      */
     val titleLinks: List<TaskLink> by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val title = titleRange
@@ -184,8 +217,11 @@ data class Task(
  * imagen. Ver [Task.detailBlocks].
  */
 sealed interface DetailBlock {
-    /** Ya sin las referencias a imágenes y sin los espacios de los extremos. */
-    class Text(val text: String) : DetailBlock
+    /**
+     * Ya sin las referencias a imágenes y sin los espacios de los extremos. [links] son
+     * los enlaces de la línea con el rango en coordenadas de [text].
+     */
+    class Text(val text: String, val links: List<TaskLink> = emptyList()) : DetailBlock
 
     class Image(val id: AttachmentId) : DetailBlock
 }

@@ -1,4 +1,5 @@
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import kotlin.text.isNotBlank
 
@@ -20,6 +21,16 @@ kotlin {
         // 21 y no 25: es lo que ejecuta la plataforma 2025.2, nuestro minimo.
         // Bytecode 21 corre sin problema sobre el JBR 25 de un IDE 2026.x.
         jvmTarget = JvmTarget.JVM_21
+        // Sin puentes hacia los metodos por defecto de las interfaces de la plataforma.
+        // En el modo por defecto Kotlin escribe en cada clase que implementa una
+        // interfaz —TasklaneToolWindowFactory, por ejemplo— un override de CADA metodo
+        // por defecto que llama al de la interfaz, y el Plugin Verifier del Marketplace
+        // cuenta esas llamadas como usos: «uses deprecated API» por
+        // ToolWindowFactory.isApplicable e isDoNotActivateOnStart, que nunca se
+        // escribieron aqui (2.3.0). Sin compatibilidad, la clase no declara lo que no
+        // sobrescribe. Nadie de fuera implementa interfaces de este plugin, que es lo
+        // unico que ese modo protegia.
+        jvmDefault = JvmDefaultMode.NO_COMPATIBILITY
     }
 }
 
@@ -105,6 +116,53 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.3.0 &mdash; a day per section, and a repository you can empty</h3>
+            <ul>
+              <li><b>Date sections are days.</b> <i>Today</i>, then one section per day that
+                  has tasks, each with its date &mdash; no more <i>Yesterday</i>, <i>This
+                  week</i> or whole months of earlier years.</li>
+              <li><b>Save a repository to a file</b> as CSV, Markdown or plain text, from
+                  <i>Export &rsaquo; Save Repository As</i>. CSV is one row per task, ready
+                  for a spreadsheet.</li>
+              <li><b>Delete all tasks in a repository</b>, separately and after a
+                  confirmation that says how many. The repository stays, empty.</li>
+              <li><b>Links in a card's body open with a click</b>, not only from the link
+                  counter.</li>
+              <li><b>The code anchor badge never falls off a narrow card</b>: when
+                  <code>Auth.kt:42</code> does not fit, its icon stays and still jumps to
+                  the code. The priority badge does the same with its colour dot.</li>
+              <li><b>Settings:</b> priorities are listed highest first, as in the tool
+                  window; rows of both tables can be dragged by their handle; and clicking a
+                  colour swatch opens the colour picker and actually changes the colour.</li>
+              <li>The expand, bookmark and menu icons of a card sit closer together.</li>
+            </ul>
+            <p><b>Fixed:</b> clicking a code anchor badge threw a read-access error on
+               recent IDEs instead of opening the file; picking a priority colour in
+               Settings did nothing; and the Plugin Verifier findings are gone &mdash; no
+               internal API, no <code>KeymapUtil.INSTANCE</code> reference that broke
+               2026.1, and no calls to deprecated <code>ToolWindowFactory</code> or
+               checkbox renderer methods.</p>
+            <p><b>Images are stored at their original size.</b> The 400&nbsp;px cap is gone:
+               a screenshot of code at 400&nbsp;px cannot be read.</p>
+            <ul>
+              <li>A pasted screenshot is saved as a lossless PNG; a dropped, chosen or copied
+                  file is saved <b>byte for byte</b>. Measured on a 2880&nbsp;px screenshot:
+                  pasting takes 129&nbsp;ms of background CPU instead of 8 and 1.25&nbsp;MB
+                  instead of 46&nbsp;KB; dropping a file went from 47&nbsp;ms to 1&nbsp;ms.</li>
+              <li><b>Settings always shows how much the active repository&rsquo;s images
+                  weigh</b>, with two buttons for that repository only: <i>Delete Unused
+                  Images</i> removes right away every image no task points at, and
+                  <i>Delete All Images&hellip;</i>, after a confirmation, removes all of them
+                  &mdash; tasks are left untouched and show the missing image.</li>
+              <li>The image size warning is per repository and names it.</li>
+              <li>The task dialog paints its previews from a bounded copy and opening an image
+                  full size loads it in the background, so large originals never decode on the
+                  UI thread.</li>
+            </ul>
+            <p><b>Compatibility:</b> no database format change; the schema stays at
+               version 1. Images keep their place and name, and the old
+               <code>imageMaxSize</code> setting is simply ignored.</p>
+
             <h3>2.2.0 &mdash; the big operations</h3>
             <p><b>Exporting a million tasks is still reading a million tasks.</b> What
                changes is everything around it: it no longer holds what it reads, no longer
@@ -429,6 +487,11 @@ tasks {
         // millon de tareas son 10 GB de base y un millon de capturas son 33 GB de PNG,
         // asi que pedirlos a la vez es una noche de disco y ninguna puerta lo necesita.
         providers.gradleProperty("benchBlobs").orNull?.let { systemProperty("tasklane.bench.blobs", it) }
+
+        // Las pruebas de caida de la Fase 6 (CrashTest): cuantas veces se mata cada escenario
+        // y con que semilla. El build normal hace dos vueltas; -PcrashRounds=50 es la de verdad.
+        providers.gradleProperty("crashRounds").orNull?.let { systemProperty("tasklane.crash.rounds", it) }
+        providers.gradleProperty("crashSeed").orNull?.let { systemProperty("tasklane.crash.seed", it) }
 
         // Sin esto una @Ignore que se desactiva a mano no imprime nada util.
         testLogging {

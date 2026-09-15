@@ -1116,31 +1116,26 @@ internal class TaskStore(private val db: TaskDb) {
     /**
      * El peso de los adjuntos de un repositorio, en agregados y sin tocar el disco.
      *
-     * [maxSize] es el tope de escalado vigente, y sirve para la única cifra del informe
-     * que no se puede sacar de otra parte: **cuántas capturas quedan guardadas por
-     * encima del tope de hoy**. La Fase 4 baja ese tope de 1600 a 400 px y decide no
-     * tocar lo ya guardado —reescalar cambiaría su SHA, y con él todas las referencias
-     * de los cuerpos—, así que lo que se debe es decir cuántas son y cuánto ocupan.
+     * Es la cifra que los ajustes enseñan siempre desde la 2.3. Los bytes son **los de lo
+     * que está en disco**: una fila cuyo fichero ya no está —la marca la reconciliación—
+     * cuenta como ausente y no pesa, porque «cuánto ocupan mis imágenes» es una pregunta
+     * sobre el disco.
+     *
+     * Recorre las filas del repositorio, sin índice que lo cubra: lo piden los ajustes al
+     * abrirse y el informe, fuera del EDT, y un contador mantenido en cada escritura
+     * costaría en todas ellas para ahorrar en algo que pasa a mano.
      */
-    fun blobStatsOf(repo: RepoKey, maxSize: Int): BlobStats = db.reader.first(
+    fun blobStatsOf(repo: RepoKey): BlobStats = db.reader.first(
         """
-        SELECT count(*), coalesce(sum(bytes), 0), coalesce(sum(missing), 0),
-               coalesce(sum(CASE WHEN width > ? OR height > ? THEN 1 ELSE 0 END), 0),
-               coalesce(sum(CASE WHEN width > ? OR height > ? THEN bytes ELSE 0 END), 0)
+        SELECT count(*), coalesce(sum(CASE WHEN missing = 0 THEN bytes ELSE 0 END), 0), coalesce(sum(missing), 0)
           FROM blob WHERE repo = ?
         """.trimIndent(),
-        maxSize,
-        maxSize,
-        maxSize,
-        maxSize,
         repo.value,
     ) {
         BlobStats(
             count = it.getInt(0),
             bytes = it.getLong(1),
             missing = it.getInt(2),
-            oversized = it.getInt(3),
-            oversizedBytes = it.getLong(4),
         )
     } ?: BlobStats()
 

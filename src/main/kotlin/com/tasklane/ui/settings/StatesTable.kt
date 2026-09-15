@@ -15,10 +15,11 @@ import javax.swing.JTable
  * Tabla de estados: nombre, cuál es el destino por defecto, cuál cierra la tarea y
  * cómo agrupa.
  *
- * Añadir, quitar, subir y bajar los pone [ToolbarDecorator] sobre el `EditableModel`
- * que `ListTableModel` ya implementa; sólo se sustituyen alta y baja, porque ambas
- * necesitan decisiones que la tabla no puede tomar sola (un nombre, y qué hacer con
- * las tareas que se quedarían sin estado).
+ * Añadir y quitar los pone [ToolbarDecorator] sobre el `EditableModel` que
+ * `ListTableModel` ya implementa, sustituidos porque ambos necesitan decisiones que la
+ * tabla no puede tomar sola (un nombre, y qué hacer con las tareas que se quedarían sin
+ * estado). Subir, bajar y arrastrar son de [RowReorder]: el orden de aquí es el de las
+ * pestañas, y se ordena igual que las prioridades.
  */
 internal class StatesTable(
     private val onChanged: () -> Unit,
@@ -27,6 +28,7 @@ internal class StatesTable(
 ) {
 
     private val model = ListTableModel<StateRow>(
+        HandleColumn<StateRow>(),
         NameColumn(),
         DefaultColumn(),
         TerminalColumn(),
@@ -43,20 +45,24 @@ internal class StatesTable(
         tableHeader.reorderingAllowed = false
     }
 
+    private val reorder = RowReorder(table, model)
+
     /** Filas con un problema de validación; se pintan marcadas. */
     private var problemRows: Set<Int> = emptySet()
     private val problemRenderer = problemAwareRenderer { problemRows }
 
-    val component: JComponent = ToolbarDecorator.createDecorator(table)
-        .setAddAction { addRow() }
-        .setRemoveAction { removeRow() }
-        .setPreferredSize(JBUI.size(PREFERRED_WIDTH, PREFERRED_HEIGHT))
-        .createPanel()
+    val component: JComponent = reorder.decorate(
+        ToolbarDecorator.createDecorator(table)
+            .setAddAction { addRow() }
+            .setRemoveAction { removeRow() }
+            .setPreferredSize(JBUI.size(PREFERRED_WIDTH, PREFERRED_HEIGHT)),
+    ).createPanel()
 
     init {
         // Un único punto de notificación: ediciones, altas, bajas y reordenaciones
         // pasan todas por el modelo.
         model.addTableModelListener { onChanged() }
+        reorder.install()
     }
 
     var rows: List<StateRow>
@@ -75,7 +81,7 @@ internal class StatesTable(
         model.addRow(row)
         val index = model.rowCount - 1
         table.selectionModel.setSelectionInterval(index, index)
-        table.editCellAt(index, 0)
+        table.editCellAt(index, NAME)
         table.editorComponent?.requestFocusInWindow()
     }
 
@@ -161,6 +167,8 @@ internal class StatesTable(
     }
 
     private companion object {
+        /** La columna del nombre, detrás del asa. */
+        const val NAME = 1
         const val CHECK_WIDTH = 70
         const val PREFERRED_WIDTH = 480
         const val PREFERRED_HEIGHT = 160

@@ -18,7 +18,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -80,7 +79,6 @@ class MemoryPagerTest {
         now = now,
         zone = zone,
         today = today,
-        firstDayOfWeek = DayOfWeek.MONDAY,
     )
 
     /** Tareas numeradas, con el orden natural ya decidido: la 0 arriba, la última abajo. */

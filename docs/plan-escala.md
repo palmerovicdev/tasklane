@@ -1441,6 +1441,28 @@ El §4.5 dejaba abierto **qué hacer con lo que ya esté guardado a 1600 px**. S
 El tope de escalado de las capturas **nuevas** sí baja: `DEFAULT_IMAGE_MAX_SIZE` pasa de
 1600 a **400 px**, la decisión del §4.5 con la medida del §0-bis.5 delante.
 
+> **Revisado en la 2.3.0 (2026-09-15): el tope de escalado se retira.** Lo decidió el
+> usuario con la versión en la mano: una captura de código a 400 px no se lee. Desde la
+> 2.3 nada se reescala —los píxeles del portapapeles van a PNG sin pérdida a su tamaño y
+> un fichero soltado se guarda con sus bytes—, y el disco se gestiona **a la vista**: los
+> ajustes enseñan siempre lo que pesan las imágenes del repositorio activo y ofrecen
+> borrar las no usadas (sin gracia) o todas. Medido en `ScaleBenchmark` sobre una captura
+> de 2880 px:
+>
+> | | 2.2 (400 px) | 2.3 (su tamaño) |
+> |---|---:|---:|
+> | Pegar píxeles (CPU, fuera del EDT) | 7,8 ms | 129 ms |
+> | En disco | 46 KB | 1.250 KB (27×) |
+> | Soltar un fichero | 47 ms | **1,0 ms** |
+> | Su miniatura, aplazada a la lista | — | 45 ms, una vez |
+>
+> Lo que eso cambia de esta sección: la aritmética del §0-bis.5 vuelve a ser la de
+> 1600 px o peor —diez millones de capturas son terabytes—, y **las miniaturas pasan de
+> excepción a norma**, que es justo para lo que estaban. La política del §4.5 sigue
+> siendo cuota con aviso, ahora por repositorio, con dos salidas concretas en los
+> ajustes. Lo que no cambia: el nombre por SHA, el árbol `ab/cd` y que la lista no
+> descodifique nunca un original.
+
 ### 4-bis.5 Qué cambia para quien lo usa
 
 - **Las capturas nuevas se guardan a 400 px** en vez de 1600: doce veces y media menos

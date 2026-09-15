@@ -5,6 +5,7 @@ import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.text.LinkExtractor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -44,6 +45,27 @@ class TaskDerivedTest {
             listOf("t:Falla al refrescar", "i:$SHA", "t:Y en Safari tampoco"),
             task.detailBlocks.map(::describe),
         )
+    }
+
+    /**
+     * Cada párrafo lleva **sus** enlaces, con el rango en coordenadas del párrafo ya
+     * limpio: sin la captura que tenía delante y sin la sangría. Es lo que deja pulsar un
+     * enlace del cuerpo sobre la tarjeta (2.3.0) sin volver a buscarlo al pintar.
+     */
+    @Test
+    fun `los enlaces del cuerpo van con su parrafo y en sus coordenadas`() {
+        val body = "Migrar\n   ![](tasklane:$SHA) la guia: https://ejemplo.com/guia\nsin nada\ny [los pasos](https://ejemplo.com/pasos)"
+        val task = task(body).copy(links = LinkExtractor.extract(body))
+
+        val texts = task.detailTexts
+        assertEquals(listOf("la guia: https://ejemplo.com/guia", "sin nada", "y [los pasos](https://ejemplo.com/pasos)"), texts.map { it.text })
+
+        val guia = texts[0].links.single()
+        assertEquals("https://ejemplo.com/guia", texts[0].text.substring(guia.range.first, guia.range.last + 1))
+        assertTrue(texts[1].links.isEmpty())
+        val pasos = texts[2].links.single()
+        assertEquals("https://ejemplo.com/pasos", pasos.url)
+        assertEquals("[los pasos](https://ejemplo.com/pasos)", texts[2].text.substring(pasos.range.first, pasos.range.last + 1))
     }
 
     /**
