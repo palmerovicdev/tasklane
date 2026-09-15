@@ -26,6 +26,7 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.editor.event.VisibleAreaListener
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.JBColor
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.text.DateFormatUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneWorkspaceService
@@ -33,7 +34,11 @@ import com.tasklane.domain.model.AnchorMarkerStyle
 import com.tasklane.domain.model.AnchorResolver
 import com.tasklane.domain.model.AnchoredTask
 import com.tasklane.domain.model.AnchoredTasks
+import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.service.AttachmentService
 import com.tasklane.service.TaskService
 import com.tasklane.ui.toolwindow.TaskReveal
 import kotlinx.coroutines.CoroutineScope
@@ -95,7 +100,13 @@ internal class AnchorMarkers(
             _style.value = value
         }
 
-    /** Lo último que llegó del modelo. Lo lee [install] cuando se abre un editor nuevo. */
+    /**
+     * Lo último que llegó del modelo. Lo lee [install] cuando se abre un editor nuevo.
+     *
+     * `@Volatile` porque el tooltip de la pastilla se compone en un hilo de fondo —hay
+     * que leer las capturas— y sin esto podría estar mirando un modelo viejo.
+     */
+    @Volatile
     private var model = Model(_style.value, TasklaneConfig.DEFAULT, emptyMap())
 
     /** Lo que hay puesto en cada editor, para poder quitarlo exactamente. */
@@ -271,7 +282,9 @@ internal class AnchorMarkers(
             hover.hide()
             return
         }
-        hover.show(editor, inlay, event.mouseEvent.point) { tooltipOf(entries) }
+        // El texto se compone fuera del EDT: ver [AnchorHover]. Es lo que permite que
+        // aquí se vaya al disco a por las capturas.
+        hover.show(editor, inlay, event.mouseEvent.point) { tooltipOf(entries, previewsOf(entries)) }
     }
 
     private fun entriesAt(editor: Editor, event: EditorMouseEvent): List<AnchoredTask>? {
@@ -306,13 +319,77 @@ internal class AnchorMarkers(
 
     private fun iconOf(entries: List<AnchoredTask>) = AnchorIcon(colorOf(entries), entries.size > 1)
 
-    private fun tooltipOf(entries: List<AnchoredTask>): String = AnchorTooltip.html(
+    private fun tooltipOf(
+        entries: List<AnchoredTask>,
+        previews: Map<TaskId, List<AnchorTooltip.Preview>> = emptyMap(),
+    ): String = AnchorTooltip.html(
         entries = entries,
         config = model.config,
         formatDate = { DateFormatUtil.formatPrettyDate(it.toEpochMilli()) },
         hint = TasklaneBundle.message("editor.anchor.hint"),
         more = { TasklaneBundle.message("editor.anchor.more", it) },
+        previews = { previews[it.task.id].orEmpty() },
     )
+
+    /**
+     * Las capturas que enseña el tooltip de la pastilla, leídas y medidas.
+     *
+     * **Bloqueante**: sólo desde el hilo de fondo de [AnchorHover]. El del margen no
+     * pasa por aquí a propósito — su texto se calcula al instalar las marcas, en el EDT
+     * y para todas las anclas del fichero de una vez, y eso no puede ir al disco.
+     *
+     * El presupuesto de [MAX_PREVIEWS] es del tooltip entero y no de cada tarea: cuatro
+     * bloques con dos capturas cada uno no es un tooltip, es una galería que tapa el
+     * código del que habla. Se gastan en orden, así que las de la tarea que manda —la de
+     * más prioridad, ver [AnchoredTasks.order]— son las que se ven seguro.
+     */
+    private fun previewsOf(entries: List<AnchoredTask>): Map<TaskId, List<AnchorTooltip.Preview>> {
+        val service = AttachmentService.getInstance(project)
+        val previews = HashMap<TaskId, List<AnchorTooltip.Preview>>()
+        var budget = MAX_PREVIEWS
+        for (entry in entries.take(AnchorTooltip.MAX)) {
+            if (budget <= 0) break
+            val task = entry.task
+            if (previews.containsKey(task.id)) continue
+            val shots = task.attachments
+                .map { it.id }
+                .distinct()
+                .take(budget)
+                .mapNotNull { id -> previewOf(service, task.repo, id) }
+            if (shots.isEmpty()) continue
+            previews[task.id] = shots
+            budget -= shots.size
+        }
+        return previews
+    }
+
+    /**
+     * Una captura como la quiere el HTML: la ruta del blob y el tamaño al que cabe.
+     *
+     * El tamaño se calcula aquí y no se deja a Swing porque el `JLabel` mide el bloque
+     * antes de que la imagen termine de cargar; sin `width` y `height` el globo se
+     * dimensiona sin contar con ella y la vista previa sale cortada. Nunca se amplía,
+     * por lo mismo que en `AttachmentService.preview`: una captura pequeña estirada sólo
+     * se ve peor.
+     *
+     * Un blob que no está no deja hueco: aquí no hay sitio para el marcador de posición
+     * que sí pintan la tarjeta y el diálogo, y un recuadro roto en un tooltip se lee
+     * como un fallo del plugin.
+     */
+    private fun previewOf(service: AttachmentService, repo: RepoKey, id: AttachmentId): AnchorTooltip.Preview? {
+        val file = service.file(repo, id) ?: return null
+        val image = service.image(repo, id) ?: return null
+        val factor = minOf(
+            1.0,
+            JBUIScale.scale(PREVIEW_WIDTH).toDouble() / image.width,
+            JBUIScale.scale(PREVIEW_HEIGHT).toDouble() / image.height,
+        )
+        return AnchorTooltip.Preview(
+            src = file.toUri().toString(),
+            width = (image.width * factor).toInt().coerceAtLeast(1),
+            height = (image.height * factor).toInt().coerceAtLeast(1),
+        )
+    }
 
     override fun dispose() {
         hover.hide()
@@ -342,6 +419,17 @@ internal class AnchorMarkers(
          * grita más que el propio código.
          */
         private const val CHIP_ALPHA = 0.18
+
+        /** Cuántas capturas caben en un tooltip antes de que deje de serlo. */
+        private const val MAX_PREVIEWS = 2
+
+        /**
+         * El hueco de una captura dentro del tooltip. Más ancho que esto y el globo tapa
+         * la línea de la que habla; más alto y hay que mover el ratón para leerlo
+         * entero, que es justo cuando el globo se esconde.
+         */
+        private const val PREVIEW_WIDTH = 280
+        private const val PREVIEW_HEIGHT = 180
 
         fun getInstance(project: Project): AnchorMarkers = project.service()
     }

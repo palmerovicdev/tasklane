@@ -103,6 +103,27 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>1.4.1 &mdash; the mark reads, and what you copy carries its date</h3>
+            <ul>
+              <li><b>The inline chip's tooltip shows the task's screenshots.</b> Half a task
+                  is a pasted image &mdash; the error you saw, the design to copy &mdash; and
+                  the tooltip used to give you the title and the state in exactly the case
+                  where looking at the picture <i>was</i> the answer. Up to two per tooltip,
+                  scaled, highest priority first.</li>
+              <li><b>A date group is copied as the log of its day.</b> In Markdown the
+                  heading is the date in ISO form and the tasks are a numbered list, ready to
+                  paste into a journal or a weekly report. &ldquo;Done &middot; Today&rdquo;
+                  stopped being true the next day, and the <code>- [x]</code> box is noise
+                  once the whole group means &ldquo;this got done that day&rdquo;. Only for
+                  groups that are one actual day: this week, a month and undated keep the tab
+                  heading and their boxes rather than invent a date. Plain text is
+                  unchanged.</li>
+              <li>Fixed: the inline chip sat flush against the code on both sides, so
+                  <code>websi</code>&middot;<code>TODO</code>&middot;<code>te</code> read as a
+                  single word. It keeps a little air now &mdash; the space belongs to the
+                  mark, not to your file.</li>
+            </ul>
+
             <h3>1.4.0 &mdash; the whole card, where you can reach it</h3>
             <ul>
               <li><b>Every card shows its priority badge now</b>, the default priority

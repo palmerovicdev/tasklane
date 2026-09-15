@@ -9,6 +9,55 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [1.4.1] — La marca se lee, y lo copiado lleva fecha
+
+Tres cosas de las que se usan a diario y estorbaban en silencio: una marca inline pegada
+al código, un tooltip que contaba la tarea menos la mitad que importa, y una exportación
+por fechas con la fecha puesta en un texto que caduca.
+
+### Añadido
+- **El tooltip de la pastilla enseña las capturas de la tarea.** Media tarea es una
+  imagen pegada —el error que se vio, el diseño que hay que copiar—, y hasta ahora el
+  tooltip decía el título, el estado y la prioridad justo en el caso en el que mirar la
+  captura **ya era la respuesta**: había que abrir la ventana para ver lo único que hacía
+  falta. Salen escaladas, hasta dos por tooltip, gastadas por orden de prioridad para que
+  las de la tarea que manda se vean seguro.
+
+  Sólo en la pastilla inline, y no es un olvido: su tooltip se construye al pasar el
+  ratón y en un hilo de fondo, así que puede ir al disco. El del margen lo calcula la
+  plataforma para **todas** las anclas del fichero de una vez y en el EDT, donde leer
+  imágenes congelaría el editor.
+- **Un grupo de fecha se copia como el parte de su día.** En Markdown, la cabecera es la
+  fecha en ISO y las tareas van numeradas:
+
+  ```markdown
+  ## 2026-09-11
+
+  1. Arreglar el login
+  2. Revisar el PR de facturación
+     hay que avisar a soporte
+  ```
+
+  Es lo que se pega en un diario de trabajo o en un informe semanal. «Done · Hoy» dejaba
+  de ser verdad al día siguiente —y lo exportado se guarda—, y la casilla `- [x]` sobra
+  cuando el grupo entero ya significa «esto se hizo ese día». Sólo con los grupos que son
+  **un día concreto**: «esta semana», los meses y «sin fecha» no tienen fecha que poner,
+  así que conservan la cabecera de la pestaña y su casilla en vez de inventarse una. En
+  texto plano no cambia nada: ahí el destino es un correo, no un documento.
+
+### Corregido
+- **La pastilla inline deja aire a los dos lados.** Iba pegada al carácter de antes y al
+  de después, así que `websi`·`TODO`·`te` se leía como una sola palabra y el código
+  parecía entrar y salir de la marca. El hueco es **del inlay**, no del fichero: se
+  reserva al medir y se salta al pintar, que es justo lo que un inlay existe para poder
+  hacer sin tocar el documento.
+
+### Interno
+- El HTML del tooltip de la pastilla se compone **fuera del EDT** y se vuelve a él sólo a
+  enseñar el globo, repitiendo las comprobaciones de que el ratón sigue encima y el
+  editor sigue abierto. Sin eso, leer y medir los blobs congelaría el editor mientras se
+  mueve el ratón por él.
+
 ## [1.4.0] — La tarjeta, entera y en su sitio
 
 Lo que salió de usar la `1.3.0` con la tool window estrecha: distintivos que no se veían,

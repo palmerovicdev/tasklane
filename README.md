@@ -48,7 +48,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-1.4.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-1.4.1.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -203,8 +203,15 @@ hace nada se lee como un fallo del plugin.
 
 Y el código, a su vez, enseña sus tareas. Una línea con tarea va marcada con el logo de
 Tasklane **en el color de su prioridad**; el ratón encima abre un tooltip con el título,
-el estado, la prioridad, el vencimiento y las etiquetas, y un clic lleva a la tool
-window con esa tarea seleccionada — cambiando de repositorio si la tarea es de otro.
+el estado, la prioridad, el vencimiento, las etiquetas y **las capturas de la tarea**, y
+un clic lleva a la tool window con esa tarea seleccionada — cambiando de repositorio si
+la tarea es de otro.
+
+Las capturas salen sólo en la pastilla inline, y por una razón concreta: su tooltip se
+construye al pasar el ratón y en un hilo de fondo, así que puede ir al disco. El del
+margen lo calcula la plataforma para todas las anclas del fichero a la vez y en el EDT,
+donde leer imágenes congelaría el editor. Media tarea es una imagen pegada, y mirarla ya
+suele ser la respuesta: obligar a abrir la ventana justo ahí era el peor momento.
 
 | | |
 |---|---|
@@ -220,7 +227,9 @@ Hay dos formas, y ninguna es buena para todo el mundo:
   hablaba la nota — `cache.get(key) ?: load(key)` son dos cosas en el mismo sitio—, a
   cambio de empujar el código a la derecha. La palabra es **el nombre del estado en
   mayúsculas**, como un marcador de código de toda la vida: con la configuración de
-  fábrica sale `TODO`, y una tarea en *Doing* dice `DOING` en vez de mentir.
+  fábrica sale `TODO`, y una tarea en *Doing* dice `DOING` en vez de mentir. Deja aire a
+  los dos lados para que el código no entre y salga de ella; ese hueco es del inlay, no
+  del fichero, que es justo lo que un inlay existe para no tocar.
 
 La línea se vuelve a buscar por su texto al abrir el fichero, igual que al pulsar el
 distintivo de la tarjeta; a partir de ahí la marca sigue al código mientras se edita. Y
@@ -339,7 +348,7 @@ portapapeles. Con una búsqueda activa se exporta el resultado de la búsqueda: 
 El formato se alterna en el mismo menú y se recuerda por proyecto:
 
 ```markdown
-## Done · Today
+## Done · Esta semana
 
 - [x] Arreglar el login
 - [x] Revisar el PR de facturación
@@ -348,6 +357,22 @@ El formato se alterna en el mismo menú y se recuerda por proyecto:
 
 Sin Markdown quedan guiones pelados, que es lo que se pega en un correo o en un chat.
 El detalle de la tarea va sangrado bajo su línea y las etiquetas detrás del título.
+
+**Un grupo de fecha en Markdown sale como el parte de su día**: la fecha en ISO y una
+lista numerada, que es lo que se pega en un diario de trabajo o en un informe semanal.
+
+```markdown
+## 2026-09-11
+
+1. Arreglar el login
+2. Revisar el PR de facturación
+   hay que avisar a soporte
+```
+
+Una cabecera que dijera «Done · Hoy» sería falsa mañana, y la casilla `- [x]` sobra
+cuando el grupo entero ya significa «esto se hizo ese día». Sólo con los grupos que son
+**un día concreto** —hoy, ayer, un día suelto—: «esta semana», un mes y «sin fecha» no
+tienen fecha que poner, así que conservan la cabecera de la pestaña y su casilla.
 
 **Exportar y quitar.** Un repositorio marcado como ausente —su carpeta ya no está en
 disco— es el único que se puede quitar de la lista, y sólo por esta vía: primero sus
@@ -395,7 +420,7 @@ cualquier uso accidental de una API posterior.
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-1.4.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-1.4.1.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -455,7 +480,11 @@ para leerla entera —con sus **capturas** dentro—, y la **prioridad se cambia
 distintivo. La `1.4.0` la deja **entera y en su sitio** con la ventana estrecha: el
 distintivo de prioridad en todas las tarjetas, la fila midiendo exactamente lo que se ve
 —ni los distintivos se caen por abajo ni los botones dejan de caer donde se ven— y un
-suelo de 300 px de ancho para la ventana.
+suelo de 300 px de ancho para la ventana. La `1.4.1` vuelve sobre la marca del editor y
+sobre lo que sale de ella: el tooltip de la pastilla enseña las **capturas** de la tarea,
+la pastilla deja **aire** a los lados para que el código no entre y salga de ella, y un
+grupo de fecha se copia como el **parte de su día** —la fecha en ISO y una lista
+numerada—.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -494,7 +523,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v1.4.0 && git push origin v1.4.0
+git tag v1.4.1 && git push origin v1.4.1
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no
@@ -505,7 +534,7 @@ tocan el repositorio:
 | `CERTIFICATE_CHAIN`, `PRIVATE_KEY`, `PRIVATE_KEY_PASSWORD` | Firma del plugin. Se generan una vez siguiendo [*Plugin Signing*](https://plugins.jetbrains.com/docs/intellij/plugin-signing.html) |
 | `PUBLISH_TOKEN` | Token del perfil del Marketplace |
 
-**Una versión con sufijo va a su propio canal:** `1.4.0-beta.1` se publica en `beta`,
+**Una versión con sufijo va a su propio canal:** `1.4.1-beta.1` se publica en `beta`,
 no en el estable, y sólo la ve quien haya añadido ese canal en el IDE. El canal sale
 del propio número de versión, así que no hay un segundo sitio que pueda discrepar.
 

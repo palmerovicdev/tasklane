@@ -1,6 +1,8 @@
 package com.tasklane.code
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.Inlay
 import com.intellij.openapi.ui.popup.Balloon
@@ -36,6 +38,12 @@ import javax.swing.ToolTipManager
  * que los demás, pero **con tope**: ese ajuste viene de fábrica en algo más de un segundo,
  * y aquí el ratón ya está parado sobre una marca diminuta que el usuario ha ido a buscar a
  * propósito. Esperar más de medio segundo a eso se lee como que no hay nada que enseñar.
+ *
+ * **El texto se construye en segundo plano.** Desde que el tooltip enseña las capturas de
+ * la tarea, componerlo significa leer y medir los blobs del disco, y eso en el EDT congela
+ * el editor justo mientras se mueve el ratón por él. Se compone fuera, se vuelve al EDT
+ * sólo a enseñar el globo, y al volver se repiten las comprobaciones: durante esa ida y
+ * vuelta el ratón ha podido irse de la pastilla o el editor cerrarse.
  */
 internal class AnchorHover(parent: Disposable) {
 
@@ -70,7 +78,21 @@ internal class AnchorHover(parent: Disposable) {
         // El ratón pudo irse mientras corría el retardo, y el editor cerrarse.
         if (target !== inlay || editor.isDisposed || !editor.contentComponent.isShowing) return
 
-        val label = JLabel(html()).apply {
+        val application = ApplicationManager.getApplication()
+        application.executeOnPooledThread {
+            val text = html()
+            // `any()` por lo mismo que en las vistas previas de la lista: sin ella el
+            // globo se quedaría en la cola detrás de cualquier modal abierto.
+            application.invokeLater({ show(editor, inlay, point, text) }, ModalityState.any())
+        }
+    }
+
+    private fun show(editor: Editor, inlay: Inlay<*>, point: Point, html: String) {
+        // Otra vez, y no por repetirse: entre la comprobación de [reveal] y esta línea
+        // se ha ido al disco a leer las capturas.
+        if (target !== inlay || editor.isDisposed || !editor.contentComponent.isShowing) return
+
+        val label = JLabel(html).apply {
             foreground = UIUtil.getToolTipForeground()
             border = JBUI.Borders.empty(4, 6)
         }

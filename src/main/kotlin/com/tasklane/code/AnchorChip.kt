@@ -37,7 +37,10 @@ import javax.swing.Icon
  * a que se reajuste la línea y no se mete con la selección ni con el cursor.
  *
  * El fondo redondeado no es adorno: separa la marca de lo que tiene a los lados y dice
- * que eso no es texto del fichero.
+ * que eso no es texto del fichero. Y por fuera de él queda un [MARGIN] de aire a cada
+ * lado: sin ese hueco la pastilla se pega al carácter anterior y al siguiente, y el
+ * código parece entrar y salir de ella. El aire es **del inlay**, no del documento —el
+ * fichero no cambia—: se reserva en [calcWidthInPixels] y se salta al pintar.
  */
 internal class AnchorChip(
     private val icon: Icon,
@@ -46,7 +49,11 @@ internal class AnchorChip(
     private val background: Color,
 ) : EditorCustomElementRenderer {
 
-    override fun calcWidthInPixels(inlay: Inlay<*>): Int {
+    override fun calcWidthInPixels(inlay: Inlay<*>): Int =
+        JBUIScale.scale(MARGIN) * 2 + pillWidth(inlay)
+
+    /** Lo que mide la pastilla pintada, sin el aire de los lados. */
+    private fun pillWidth(inlay: Inlay<*>): Int {
         val metrics = metrics(inlay.editor)
         return JBUIScale.scale(PAD) * 2 + icon.iconWidth + JBUIScale.scale(GAP) + metrics.stringWidth(label)
     }
@@ -58,29 +65,31 @@ internal class AnchorChip(
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
             val pad = JBUIScale.scale(PAD)
             val gap = JBUIScale.scale(GAP)
+            // El origen de la pastilla, ya dentro del aire que reserva el inlay.
+            val x = region.x + JBUIScale.scale(MARGIN)
             val font = font(inlay.editor)
             val metrics = inlay.editor.contentComponent.getFontMetrics(font)
 
             // La pastilla se ajusta al mayor de los dos, icono o texto: con una fuente
             // de editor grande el texto pasa del icono, y al revés con una pequeña.
             val height = maxOf(icon.iconHeight, metrics.height) + pad
-            val width = calcWidthInPixels(inlay)
+            val width = pillWidth(inlay)
             // Centrada en la línea: el inlay recibe el alto de la línea entera, que con
             // interlineado es más que lo que se pinta.
             val y = region.y + (region.height - height) / 2f
 
             g2.color = background
             val arc = JBUIScale.scale(ARC).toFloat()
-            g2.fill(RoundRectangle2D.Float(region.x.toFloat(), y, width.toFloat(), height.toFloat(), arc, arc))
+            g2.fill(RoundRectangle2D.Float(x.toFloat(), y, width.toFloat(), height.toFloat(), arc, arc))
 
-            icon.paintIcon(null, g2, region.x + pad, (y + (height - icon.iconHeight) / 2f).toInt())
+            icon.paintIcon(null, g2, x + pad, (y + (height - icon.iconHeight) / 2f).toInt())
 
             g2.font = font
             g2.color = color
             // Por la línea base y no por la caja: dos textos centrados por su caja se
             // ven descuadrados cuando uno tiene descendentes y el otro no.
             val baseline = y + (height + metrics.ascent - metrics.descent) / 2f
-            g2.drawString(label, (region.x + pad + icon.iconWidth + gap).toFloat(), baseline)
+            g2.drawString(label, (x + pad + icon.iconWidth + gap).toFloat(), baseline)
         } finally {
             g2.dispose()
         }
@@ -105,6 +114,17 @@ internal class AnchorChip(
         private const val PAD = 3
         private const val GAP = 3
         private const val ARC = 5
+
+        /**
+         * El aire a cada lado de la pastilla, por fuera del fondo redondeado.
+         *
+         * Es lo que la separa del código que la rodea. Sin él la marca queda pegada al
+         * carácter de antes y al de después —`websi`**`TODO`**`te`— y los tres se leen
+         * como una misma palabra. Un espacio de verdad en el documento haría lo mismo a
+         * la vista y además cambiaría el fichero, que es exactamente lo que un inlay
+         * existe para no hacer.
+         */
+        private const val MARGIN = 3
 
         private const val FONT_SCALE = 0.82f
         private const val MIN_FONT = 9f

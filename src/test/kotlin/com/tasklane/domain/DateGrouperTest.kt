@@ -3,6 +3,7 @@ package com.tasklane.domain
 import com.tasklane.domain.model.DateGroup
 import com.tasklane.domain.model.DateGrouper
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.DayOfWeek
 import java.time.Instant
@@ -76,6 +77,25 @@ class DateGrouperTest {
                 DayOfWeek.SUNDAY,
             ),
         )
+    }
+
+    /**
+     * La exportacion en Markdown encabeza cada grupo con su dia, y «hoy» y «ayer» solo
+     * son un dia concreto contra un calendario: por eso [DateGroup.dayOn] lo recibe.
+     */
+    @Test
+    fun `hoy y ayer se resuelven contra el calendario que se les pasa`() {
+        assertEquals(today, DateGroup.Today.dayOn(today))
+        assertEquals(LocalDate.of(2026, 9, 9), DateGroup.Yesterday.dayOn(today))
+        assertEquals(LocalDate.of(2026, 1, 2), DateGroup.Day(LocalDate.of(2026, 1, 2)).dayOn(today))
+    }
+
+    /** Un dia inventado —el lunes, el dia 1— acabaria escrito en una exportacion. */
+    @Test
+    fun `una semana, un mes y lo que no tiene fecha no son un dia`() {
+        assertNull(DateGroup.ThisWeek.dayOn(today))
+        assertNull(DateGroup.Month(YearMonth.of(2025, 9)).dayOn(today))
+        assertNull(DateGroup.Undated.dayOn(today))
     }
 
     @Test

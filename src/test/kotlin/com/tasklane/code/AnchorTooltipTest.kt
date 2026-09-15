@@ -43,12 +43,16 @@ class AnchorTooltipTest {
         CodeAnchor.of("src/Auth.kt", 41),
     )
 
-    private fun html(vararg entries: AnchoredTask) = AnchorTooltip.html(
+    private fun html(
+        vararg entries: AnchoredTask,
+        previews: (AnchoredTask) -> List<AnchorTooltip.Preview> = { emptyList() },
+    ) = AnchorTooltip.html(
         entries = entries.toList(),
         config = config,
         formatDate = { "manana" },
         hint = "Click to open it in Tasklane",
         more = { "$it more here" },
+        previews = previews,
     )
 
     @Test
@@ -91,5 +95,46 @@ class AnchorTooltipTest {
     @Test
     fun `sin anclas no hay tooltip`() {
         assertEquals("", html())
+    }
+
+    // ------------------------------------------------------------- capturas
+
+    /**
+     * Media tarea es una captura pegada, y un tooltip que solo dice el titulo obliga a
+     * abrir la ventana justo cuando mirar la imagen ya era la respuesta.
+     */
+    @Test
+    fun `la captura sale con el bloque de su tarea`() {
+        val shot = AnchorTooltip.Preview("file:///tmp/a.png", 280, 140)
+
+        val text = html(entry("Error al entrar")) { listOf(shot) }
+
+        assertTrue(text, text.contains("<img src=\"file:///tmp/a.png\" width=\"280\" height=\"140\">"))
+    }
+
+    /**
+     * Sin `width` y `height` Swing mide el bloque antes de que la imagen cargue, y el
+     * globo se queda dimensionado sin contar con ella.
+     */
+    @Test
+    fun `la captura siempre lleva su tamano`() {
+        val text = html(entry("Error")) { listOf(AnchorTooltip.Preview("file:///tmp/a.png", 100, 50)) }
+
+        assertTrue(text, text.contains("width=\"100\""))
+        assertTrue(text, text.contains("height=\"50\""))
+    }
+
+    /** Un fichero se puede llamar `a&b.png`, y sin escapar eso rompe el atributo. */
+    @Test
+    fun `la ruta se escapa`() {
+        val text = html(entry("Error")) { listOf(AnchorTooltip.Preview("file:///tmp/a&b.png", 10, 10)) }
+
+        assertTrue(text, text.contains("a&amp;b.png"))
+    }
+
+    /** Sin capturas el tooltip es exactamente el de antes: ni una etiqueta de mas. */
+    @Test
+    fun `sin capturas no hay imagenes`() {
+        assertFalse(html(entry("Error")), html(entry("Error")).contains("<img"))
     }
 }

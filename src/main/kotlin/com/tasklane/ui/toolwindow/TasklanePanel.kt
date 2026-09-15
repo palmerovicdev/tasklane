@@ -857,26 +857,38 @@ internal class TasklanePanel(
      * Qué se lleva el portapapeles para cada alcance. Las cabeceras salen de aquí y
      * no del exportador porque son lo que el usuario ve escrito en la pestaña: el
      * nombre del estado y, si agrupa, el del grupo de fecha.
+     *
+     * Con los grupos de fecha va además **el día**, que no es lo que se ve escrito —la
+     * pestaña dice «Hoy»— sino lo que ese texto significa. En Markdown el exportador lo
+     * prefiere a la cabecera: «Hoy» deja de ser verdad mañana, y lo exportado se guarda.
+     * Ver [TaskExporter.Section].
      */
     fun exportSections(scope: ExportScope): List<TaskExporter.Section> {
         val state = snapshot.config.state(stateId)?.name.orEmpty()
         fun heading(key: GroupKey?): String =
             if (key == null) state else "$state · ${GroupLabels.of(key, snapshot.config)}"
 
+        // El mismo «hoy» con el que se agrupó el árbol, y no uno por sección: pasada la
+        // medianoche con la ventana abierta, media exportación diría un día y media otro.
+        val today = LocalDate.now(ZoneId.systemDefault())
+        fun day(key: GroupKey?): LocalDate? = (key as? GroupKey.OfDate)?.group?.dayOn(today)
+
+        fun section(key: GroupKey?, tasks: List<Task>) = TaskExporter.Section(heading(key), tasks, day(key))
+
         // Los grupos vacíos —«hoy», cuando se enseña sin tareas— no se copian: una
         // cabecera con nada debajo no es lo que se quería pegar.
         val sections = sections.filter { it.tasks.isNotEmpty() }
         return when (scope) {
-            ExportScope.STATE -> sections.map { TaskExporter.Section(heading(it.key), it.tasks) }
+            ExportScope.STATE -> sections.map { section(it.key, it.tasks) }
 
             ExportScope.GROUP -> selectedGroup()
                 ?.let { key -> sections.filter { it.key == key } }
                 .orEmpty()
-                .map { TaskExporter.Section(heading(it.key), it.tasks) }
+                .map { section(it.key, it.tasks) }
 
             // La selección puede cruzar grupos —y repositorios, buscando en todos—,
             // así que sale como un bloque único bajo el nombre del estado.
-            ExportScope.SELECTION -> listOf(TaskExporter.Section(heading(null), selectedTasks()))
+            ExportScope.SELECTION -> listOf(section(null, selectedTasks()))
         }
     }
 

@@ -26,35 +26,52 @@ sealed interface DateGroup : Comparable<DateGroup> {
     /** Desempate dentro de la banda. Menor = más reciente. */
     val within: Long
 
+    /**
+     * El día del que habla el grupo, o `null` si no habla de uno solo.
+     *
+     * «Hoy» y «ayer» son días concretos, pero cuáles depende de cuándo se pregunte: por
+     * eso entra [today] en vez de leerse el reloj aquí, igual que en [DateGrouper]. Una
+     * semana, un mes y «sin fecha» no tienen día, y devolver uno inventado —el lunes, el
+     * día 1— sería escribir en una exportación una fecha que nadie eligió.
+     *
+     * Lo usa la exportación en Markdown, que encabeza cada grupo con su fecha en ISO.
+     */
+    fun dayOn(today: LocalDate): LocalDate?
+
     override fun compareTo(other: DateGroup): Int =
         compareValuesBy(this, other, { it.band }, { it.within })
 
     data object Today : DateGroup {
         override val band = 0
         override val within = 0L
+        override fun dayOn(today: LocalDate): LocalDate = today
     }
 
     data object Yesterday : DateGroup {
         override val band = 1
         override val within = 0L
+        override fun dayOn(today: LocalDate): LocalDate = today.minusDays(1)
     }
 
     /** Desde el primer día de la semana hasta anteayer. Puede quedar vacío a principio de semana. */
     data object ThisWeek : DateGroup {
         override val band = 2
         override val within = 0L
+        override fun dayOn(today: LocalDate): LocalDate? = null
     }
 
     /** Un día suelto del año en curso: «Sep 10». */
     data class Day(val date: LocalDate) : DateGroup {
         override val band = 3
         override val within get() = -date.toEpochDay()
+        override fun dayOn(today: LocalDate): LocalDate = date
     }
 
     /** Un mes de un año anterior: «Sep 2025». */
     data class Month(val month: YearMonth) : DateGroup {
         override val band = 4
         override val within get() = -(month.year * 12L + month.monthValue)
+        override fun dayOn(today: LocalDate): LocalDate? = null
     }
 
     /**
@@ -65,6 +82,7 @@ sealed interface DateGroup : Comparable<DateGroup> {
     data object Undated : DateGroup {
         override val band = 5
         override val within = 0L
+        override fun dayOn(today: LocalDate): LocalDate? = null
     }
 }
 
