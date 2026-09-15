@@ -15,6 +15,7 @@ import com.tasklane.data.store.LoadAlert
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
 import com.tasklane.data.store.alert
+import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.RepoKey
@@ -57,6 +58,13 @@ class TaskService(
     private val configService = TasklaneConfigService.getInstance(project)
     private val registry = RepositoryRegistry.getInstance(project)
     private val workspace = TasklaneWorkspaceService.getInstance(project)
+
+    /**
+     * El cronómetro de *Tasklane: Diagnostics*. Se guarda como campo y no se pide en
+     * cada comando porque `apply` es el camino caliente: una búsqueda de servicio por
+     * pulsación de tecla sería medir con un instrumento que pesa.
+     */
+    private val metrics = TasklaneMetrics.getInstance(project)
 
     private val _snapshot = MutableStateFlow(
         TasklaneSnapshot.EMPTY.copy(config = configService.config.value),
@@ -119,7 +127,9 @@ class TaskService(
 
     // ------------------------------------------------------------------ API
 
-    fun apply(command: TaskCommand) {
+    fun apply(command: TaskCommand) = metrics.time(TasklaneMetrics.Op.COMMAND) { applyNow(command) }
+
+    private fun applyNow(command: TaskCommand) {
         var before: TasklaneSnapshot
         var after: TasklaneSnapshot
         // Bucle de compare-and-set: hay dos productores reales —el EDT y la carga en
@@ -252,7 +262,7 @@ class TaskService(
             return
         }
 
-        val result = store.read(repo)
+        val result = metrics.time(TasklaneMetrics.Op.LOAD) { store.read(repo) }
         val alert = result.alert()
         if (alert?.readOnly == true) readOnly += repo
         alert?.let(::report)
@@ -328,7 +338,7 @@ class TaskService(
         val current = _snapshot.value
         for (repo in pending) {
             if (repo in readOnly) continue
-            runCatching { store.write(repo, current.tasksOf(repo)) }
+            runCatching { metrics.time(TasklaneMetrics.Op.SAVE) { store.write(repo, current.tasksOf(repo)) } }
                 .onFailure { e ->
                     thisLogger().error("Tasklane: fallo al guardar $repo", e)
                     notify(

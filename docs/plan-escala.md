@@ -389,6 +389,179 @@ el que se cierran las puertas de las otras seis fases.
 
 ---
 
+## 0-bis. Resultados de la Fase 0 · CERRADA
+
+Lo que sigue **no** son estimaciones. Todo está medido con `ScaleBenchmark` sobre el
+corpus de `SyntheticCorpus`, en un MacBook con JBR 25, y se reproduce con:
+
+```
+./gradlew test --tests '*ScaleBenchmark' -PbenchN=<tareas> -PtestHeap=<heap>
+```
+
+### 0-bis.1 La decisión del §2.3 cambia: **no hace falta `sqlite-jdbc`**
+
+El spike (§0.5) encontró algo que el plan no contemplaba: **la plataforma ya trae
+SQLite**, con su nativa para las seis combinaciones de sistema y arquitectura.
+
+```
+lib/intellij.platform.sqlite.jar     org.jetbrains.sqlite, visibility="public"
+lib/native/<os>-<arch>/libsqliteij.* mac/win/linux × x86_64/aarch64
+```
+
+Y está en el classpath de **IDEA CORE**, que es el classloader padre de todo plugin:
+se usa sin declarar nada y sin empaquetar un byte. `SqliteSpikeTest` fija lo que la
+Fase 3 necesita y que no era evidente desde fuera:
+
+| Comprobado | Resultado |
+|---|---|
+| La nativa carga y ejecuta SQL | Sí |
+| `PRAGMA journal_mode = WAL` | Sí |
+| **FTS5 compilado** (`SQLITE_ENABLE_FTS5`) | **Sí** |
+| `unicode61 remove_diacritics 2` (sustituye a `TextNormalizer`) | Sí |
+| `bm25()` pondera el título sobre el cuerpo | Sí |
+| Paginación por keyset sin repetir ni perder filas | Sí |
+| La consulta de la lista se resuelve por índice, sin `TEMP B-TREE` | Sí |
+
+**Consecuencia:** el riesgo nº1 del §4 —«la nativa de SQLite en un plugin de
+JetBrains»— **desaparece**, y con él los 12 MB empaquetados, el problema de firma y el
+riesgo de classloader que ya hizo descartar `kotlinx-serialization`. El plan B (H2
+MVStore, +3 semanas) queda archivado.
+
+Dos trampas del módulo, anotadas para la Fase 3: **nada de `ObjectBinderFactory.createN()`
+ni de `AutoCloseable.use`** — son `inline` y vienen compiladas a JVM 25, que no cabe en
+nuestro bytecode 21. Se usa `ObjectBinder(paramCount)` y `try/finally`.
+
+### 0-bis.2 La tabla del §1.7, medida
+
+Todos los tiempos son **p50**, en milisegundos. «Render» ocurre en el **EDT**.
+
+| Tareas | Carga fría | Comando | Volcado | Repintado | **Render (EDT)** | Tecla | Memoria |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5.000 | 166 | 0,27 | 57 | 3,0 | **170** | 5,6 | 62 MB |
+| 10.000 | 333 | 0,36 | 104 | 4,5 | **263** | 9,9 | 123 MB |
+| 20.000 | 701 | 0,79 | 215 | 12,6 | **442** | 22,9 | 246 MB |
+| 50.000 | 1.703 | 1,29 | 554 | 26,3 | **1.002** | 52,7 | 616 MB |
+| 100.000 | 3.399 | 4,14 | 1.253 | 48,6 | **2.125** | 99,3 | 1.231 MB |
+| 150.000 · 2 GB | 5.149 | — | — | — | — | — | — |
+| 200.000 · 2 GB | 6.914 | — | — | — | — | — | — |
+| 300.000 · 2 GB | **OOM** | — | — | — | — | — | — |
+
+Todo escala **lineal en N**, que es lo que el §0 daba por sentado y ahora está
+comprobado. Las estimaciones del §1 aciertan en tres sitios y fallan en dos, y los dos
+fallos cambian decisiones.
+
+### 0-bis.3 Donde el plan acertó
+
+- **2,9 KB por tarea en XML** (§1.1). Medido: **2.998 B**. Dentro del 3 %.
+- **~400 KB por captura a 1600 px** (§1.6). Medido: **407 KB**.
+- **«~100 ms por tecla a 100.000»** (§1.7). Medido: **99,3 ms** (p99 122 ms).
+- **`OutOfMemoryError` al abrir con el heap de fábrica** (§1.2). Confirmado, y **al N
+  que predecía**: 200.000 abre, 300.000 no. Lo que falló fue el motivo, no la cifra —
+  ver más abajo.
+
+### 0-bis.4 Donde el plan se quedó corto — y qué cambia
+
+**a) La memoria es 1,7× peor de lo estimado, y se paga en dos plazos.** El §1.2
+calcula 5–6 KB por `Task` más 2 KB de `SearchDocument`. Medido, y **plano por tarea
+entre 5.000 y 100.000**:
+
+| | Estimado §1.2 | Medido | Cuándo se paga |
+|---|---:|---:|---|
+| `Task` recién cargada | — | **6.482 B** | al abrir el proyecto |
+| Los siete `lazy` (`title`, `detailBlocks`, …) | — | **3.433 B** | **al pintar la lista por primera vez** |
+| `Task` viva completa | 5–6 KB | **9.915 B** | |
+| `SearchDocument` | 2 KB | **3.014 B** | al escribir en el buscador |
+| **Total por tarea** | ~7,5 KB | **12.929 B** | |
+
+A 1.000.000 son **12,9 GB**, no los 7,5 GB del §1.2. No cambia la conclusión —las dos
+cifras son inalcanzables— pero sí el objetivo del §2.6: bajar a «< 150 MB y plano en N»
+es un factor de 86, no de 50.
+
+**b) El techo de hoy no lo pone el DOM, y hay dos techos, no uno.**
+
+El §1.2 razona que el `OutOfMemoryError` lo provoca el árbol de JDOM. Los dos números
+de arriba cuentan otra historia, y además **explican exactamente** el OOM observado:
+
+| Con el heap de fábrica de IntelliJ (2 GB) | Coste | Techo |
+|---|---:|---:|
+| **Abrir** el proyecto y no mirar la lista | 6.482 B/tarea | **~308.000** |
+| **Usar** el plugin: pintar la lista y buscar | 12.929 B/tarea | **~155.000** |
+
+Y así se comporta, medido: 150.000 y 200.000 abren en frío sin problema —5,1 s y 6,9 s—
+y **300.000 muere con `OutOfMemoryError`**, que es justo donde el primer techo lo
+predice. El fallo no ocurrió parseando el XML: ocurrió construyendo las `Task`.
+
+De aquí salen dos cosas que la Fase 3 no puede olvidar:
+
+1. **Parsear en streaming (§3.3) es necesario pero no suficiente.** Lo que no cabe en
+   2 GB son las `Task`, no el árbol XML. El snapshot tiene que dejar de contener el
+   corpus —§2.1— o el parser nuevo sólo mueve el problema unos miles de tareas.
+2. **Un proyecto puede abrir y morirse al mirarlo.** Entre 155.000 y 308.000 tareas, el
+   plugin arranca bien y revienta en cuanto la ventana pinta la primera lista, porque
+   ahí es donde se materializan los siete `lazy`. Es el peor modo de fallo posible: el
+   usuario ya ha abierto el proyecto y cree que todo va bien.
+
+**c) El EDT se rompe en el punto de diseño, no cerca de los 50.000.**
+
+El §1.7 dice «~5.000: todo bien» y «~50.000: la lista tarda en repintarse». Medido, el
+repintado del árbol —que ocurre **en cada cambio del snapshot**, o sea en cada tecla
+del buscador y en cada comando— cuesta:
+
+| Tareas | Filas en el árbol | Render en EDT | Veces el presupuesto de 16 ms |
+|---:|---:|---:|---:|
+| 5.000 | ~1.670 | 170 ms | **11×** |
+| 10.000 | ~3.330 | 263 ms | **16×** |
+| 50.000 | ~16.700 | 1.002 ms | **63×** |
+| 100.000 | ~33.300 | 2.125 ms | **133×** |
+
+La constante que importa es **~0,064 ms por fila**, que es lo que cuesta que
+`VariableHeightLayoutCache` mida una tarjeta invocando al renderer. De ahí sale el
+número que la Fase 2 tiene que respetar:
+
+> **El presupuesto de 16 ms se agota en ~250 filas.**
+
+Y eso obliga a matizar el §2.5: el tope de «~2.000 nodos» **no basta por sí solo**
+—2.000 filas medidas de cero son ~128 ms—. Lo que hace que la Fase 2 funcione es la
+**otra** regla, la del `render()` por diff: los nodos que siguen conservan su altura ya
+medida y no vuelven a pasar por el renderer. El diff no es una mejora opcional de la
+Fase 2, es la pieza que sostiene la puerta.
+
+### 0-bis.5 El tope de 400 px divide el problema del disco por doce
+
+La política de imágenes elegida para la Fase 4 escala toda captura a 400 px de lado
+mayor en vez de 1600. Medido sobre PNG sintéticos calibrados contra una captura real:
+
+| Lado mayor | Por captura | 10M blobs | Con dedup 10:1 |
+|---|---:|---:|---:|
+| 1600 px (hoy) | 407 KB | 3,9 TB | 390 GB |
+| **400 px (Fase 4)** | **33 KB** | **315 GB** | **31 GB** |
+
+Sigue sin caber en un `.idea/` sin la cuota con aviso del §4.5, pero deja de ser una
+cifra de otro orden de magnitud. Y de paso arregla lo que el §1.6 señala como problema
+de **hoy**: un PNG de 400 px descodificado a `INT_ARGB` ocupa 640 KB, no 10,2 MB, así
+que las dieciséis entradas de la caché de `AttachmentService` pasan de 164 MB a 10 MB
+antes incluso de acotarlas por bytes en la Fase 1.
+
+### 0-bis.6 Lo que quedó construido
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `SyntheticCorpus` | `test/…/bench/` | Corpus determinista con la especificación exacta del §1.1, en streaming para que 1M no tenga que caber en memoria |
+| `SyntheticBlobs` | `test/…/bench/` | PNG con el peso de una captura real, con perilla de deduplicación |
+| `Bench` | `test/…/bench/` | p50/p99/máx, tiempo de EDT y heap tras GC forzado |
+| `ScaleBenchmark` | `test/…/bench/` | Los seis escenarios del §0.3, bajo `-PbenchN` |
+| `SqliteSpikeTest` | `test/…/bench/` | El spike del §0.5, y el centinela de que FTS5 sigue estando |
+| `TasklaneMetrics` | `main/…/diagnostics/` | Histograma de latencias de la última hora, sin bloqueos |
+| `TasklaneDiagnostics` + `DiagnosticsReport` | `main/…/diagnostics/` | El informe del §0.4, puro y copiable |
+| *Tasklane: Diagnostics* | `plugin.xml` | La acción, en segundo plano y con progreso |
+| CI: `test` en tres sistemas | `.github/workflows/build.yml` | Los tests pasan a ejecutarse en CI —no lo hacían en ningún sitio— y el spike se comprueba contra la plataforma **mínima** y en Windows y Linux |
+
+Las métricas están enchufadas a los seis caminos reales (`LOAD`, `COMMAND`, `SAVE`,
+`SEARCH`, `SECTIONS`, `RENDER`), y el informe **avisa explícitamente** cuando el p99 de
+`RENDER` se pasa de 16 ms, que es lo único del informe con un techo duro.
+
+---
+
 ### Fase 1 — Quitar los O(n) por comando *(~1 semana)*
 
 Sin tocar el almacén ni la UI. Es el mejor retorno del plan: sube el techo de ~20.000 a

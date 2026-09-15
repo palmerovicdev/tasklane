@@ -335,6 +335,14 @@
                 class="com.tasklane.ui.actions.TasklaneSettingsAction"
                 icon="AllIcons.General.Settings"/>
 
+        <!-- Cuantas tareas hay, cuanto ocupan y como van las latencias. Es lo que
+             permite a un usuario decir «va lento» con datos en vez de con una
+             impresion. Ver docs/plan-escala.md §0.4. Sin atajo: se busca por nombre
+             en Search Everywhere, que es donde se busca una vez al ano. -->
+        <action id="Tasklane.Diagnostics"
+                class="com.tasklane.diagnostics.DiagnosticsAction"
+                icon="AllIcons.General.ShowInfos"/>
+
         <!-- Exportacion. El grupo es popup: en la barra sale como un boton con
              desplegable, y en el menu contextual como un submenu. -->
         <action id="Tasklane.ExportState"

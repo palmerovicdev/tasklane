@@ -11,6 +11,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Los tests, en los tres sistemas y contra la plataforma MINIMA.
+  #
+  # Es la otra mitad del spike de la Fase 0 (docs/plan-escala.md §0.5): el almacen de
+  # la Fase 3 se apoya en `org.jetbrains.sqlite`, que la plataforma trae con su nativa
+  # para las seis combinaciones de os/arquitectura. Que este en el IDE 2026.2 de un
+  # portatil no prueba que este en el 2025.2 que declara sinceBuild, ni que la nativa
+  # cargue en Windows. SqliteSpikeTest falla ruidosamente si alguna de las dos cosas
+  # deja de ser cierta, y aqui es donde se entera.
+  #
+  # De paso, los 170 tests del proyecto pasan a ejecutarse en CI, que hasta ahora no
+  # los ejecutaba en ningun sitio.
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # -PlocalIdePath= vacio -> ignora el IDE local y descarga platformVersion.
+      - name: Test
+        run: ./gradlew test -PlocalIdePath=
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ matrix.os }}
+          path: build/reports/tests/test
+
   build:
     name: Build & verify
     runs-on: ubuntu-latest

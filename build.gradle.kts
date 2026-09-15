@@ -55,6 +55,8 @@ dependencies {
         // esos modulos de la plataforma no entran solos en el classpath.
         bundledModule("intellij.platform.vcs.dvcs")
         bundledModule("intellij.platform.vcs.dvcs.impl")
+        // SPIKE Fase 0: SQLite de la plataforma.
+        bundledModule("intellij.platform.sqlite")
 
         if (localIde != null) {
             // Descarga cero: se compila contra el IDE ya instalado.
@@ -242,5 +244,24 @@ intellijPlatform {
 tasks {
     wrapper {
         gradleVersion = providers.gradleProperty("gradleVersion").get()
+    }
+
+    test {
+        // El banco de la Fase 0 materializa corpus grandes a proposito: medir lo que
+        // el modelo retiene ES la puerta del §2.6. Con el heap por defecto de Gradle
+        // un corpus de 100k muere antes de llegar a la primera medida, y un OOM no
+        // es un dato: es la ausencia de dato.
+        //
+        // Se sube por propiedad para que el job nocturno del §6.3 pueda pedir mas sin
+        // tocar el fichero, y para que un `./gradlew test` normal no reserve 4 GB.
+        maxHeapSize = providers.gradleProperty("testHeap").getOrElse("2g")
+
+        // El tamano del corpus del banco. Los tests normales lo ignoran.
+        providers.gradleProperty("benchN").orNull?.let { systemProperty("tasklane.bench.n", it) }
+
+        // Sin esto una @Ignore que se desactiva a mano no imprime nada util.
+        testLogging {
+            showStandardStreams = providers.gradleProperty("benchN").isPresent
+        }
     }
 }

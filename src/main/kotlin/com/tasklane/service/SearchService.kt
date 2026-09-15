@@ -6,6 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.psi.codeStyle.MinusculeMatcher
 import com.intellij.psi.codeStyle.NameUtil
 import com.tasklane.data.config.TasklaneWorkspaceService
+import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneSnapshot
 import com.tasklane.domain.query.QueryParser
@@ -79,6 +80,7 @@ class SearchService(
     private val index: TaskSearchIndex = LinearScanIndex()
     private val workspace = TasklaneWorkspaceService.getInstance(project)
     private val tasks = TaskService.getInstance(project)
+    private val metrics = TasklaneMetrics.getInstance(project)
 
     private val _rawQuery = MutableStateFlow("")
     val rawQuery: StateFlow<String> = _rawQuery.asStateFlow()
@@ -95,8 +97,14 @@ class SearchService(
                 // El corpus se refresca aquí dentro, en el mismo hilo que va a
                 // buscar. Hacerlo en una corrutina aparte abriría una ventana en la
                 // que los resultados hablan de un snapshot y el árbol pinta otro.
-                index.setCorpus(input.snapshot)
-                compute(input)
+                // Los dos dentro del mismo cronometro: `setCorpus` recorre el corpus
+                // entero en CADA snapshot (§1.5), asi que separarlos escondería la
+                // mitad del coste de una tecla justo en el informe que existe para
+                // enseñarlo.
+                metrics.time(TasklaneMetrics.Op.SEARCH) {
+                    index.setCorpus(input.snapshot)
+                    compute(input)
+                }
             }
             .flowOn(Dispatchers.Default)
             .stateIn(scope, SharingStarted.Eagerly, SearchResults.NONE)

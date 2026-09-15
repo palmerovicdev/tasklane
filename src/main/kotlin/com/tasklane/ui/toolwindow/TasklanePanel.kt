@@ -30,6 +30,7 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.tree.TreeUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneConfigService
+import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.export.ExportScope
 import com.tasklane.domain.export.TaskExporter
@@ -108,6 +109,7 @@ internal class TasklanePanel(
     private val service = TaskService.getInstance(project)
     private val search = SearchService.getInstance(project)
     private val view = ViewService.getInstance(project)
+    private val metrics = TasklaneMetrics.getInstance(project)
     private val renderer = TaskTreeRenderer()
     private val root = CheckedTreeNode("tasklane")
 
@@ -294,10 +296,17 @@ internal class TasklanePanel(
                 // crece con el número de tareas. Un solo «ahora» para los dos, o el
                 // contador y la lista podrían discrepar en lo que está vencido.
                 val now = Instant.now()
-                val sections = buildSections(snap, found, filter, now)
-                val counts = VisibleTasks.countsByState(snap, found, filter, now)
+                val (sections, counts) = metrics.time(TasklaneMetrics.Op.SECTIONS) {
+                    buildSections(snap, found, filter, now) to
+                        VisibleTasks.countsByState(snap, found, filter, now)
+                }
                 withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
-                    render(snap, found, filter, sections, counts)
+                    // RENDER va aparte de SECTIONS porque es lo unico de los dos que
+                    // ocurre en el EDT, y por tanto lo unico que tiene un techo duro
+                    // de 16 ms. Mezclarlos daria una cifra que no se puede juzgar.
+                    metrics.time(TasklaneMetrics.Op.RENDER) {
+                        render(snap, found, filter, sections, counts)
+                    }
                 }
             }
         }

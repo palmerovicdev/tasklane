@@ -11,4 +11,8 @@ out/
 # que es donde el plugin guarda datos en los proyectos del usuario).
 .idea/
 
+# Volcados de heap. El banco de escala (docs/plan-escala.md §0) los provoca a
+# proposito al medir donde revienta la carga, y pesan gigas.
+*.hprof
+
 .DS_Store
