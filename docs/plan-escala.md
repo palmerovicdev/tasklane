@@ -1291,6 +1291,215 @@ mantiene 60 fps con el heap plano.
 
 ---
 
+## 4-bis. Resultados de la Fase 4 · CERRADA
+
+> Cerrada en la **2.1.0**. Los adjuntos dejan de vivir en un directorio plano que había
+> que listar entero para saber qué había: se fragmentan en `ab/cd/`, se contabilizan en la
+> base, y las grandes se pintan por miniatura. El GC deja de recorrer el disco, la lista
+> deja de descodificar capturas de diez megas, y lo que ocupa todo junto se puede mirar —y
+> se avisa cuando se pasa—.
+
+### 4-bis.1 La puerta, medida
+
+Medido con `-PbenchN=2000 -PbenchBlobs=100000`, que es el eje que importa aquí: la Fase 4
+no escala con el número de tareas, escala con el número de **blobs**. Un millón de
+capturas a 400 px son 33 GB de PNG y horas de generarlos; cien mil dan la pendiente y
+son 3,3 GB, que es lo que el §0-bis ya hacía con las tareas.
+
+| | Antes (2.0) | Ahora (2.1) |
+|---|---:|---:|
+| Saber qué adjuntos hay, al abrir | **329 ms** de recorrido, y crece con cada captura | **0,49 ms** por tanda de mil, y no crece |
+| Recoger 100.000 sin referencias | el mismo recorrido, y uno por repositorio | **9,8 s**, 0,098 ms cada una |
+| Reconciliar disco y tabla | no existía | **2,2 s** la pasada semanal (17,8 s la primera) |
+| Diez imágenes de 1600 px en una tarjeta | **176 ms** y 134 MB de heap | **8,7 ms** y 36 MB |
+
+Tres cosas que leer en esa tabla, porque no todas dicen lo mismo:
+
+**La primera fila es la que cierra la fase.** 329 ms son lo que cuesta *hoy* listar cien
+mil ficheros; a un millón son segundos y a diez millones es la operación que el §1.6 dice
+que no termina. Los 0,49 ms de al lado son por **tanda de mil candidatos** y no dependen
+de cuántos blobs haya guardados: es un salto por `blob_by_age` y se para en la tanda. Esa
+es la diferencia entre una cifra que crece y una que no.
+
+**La segunda no es una puerta que se cumpla o se incumpla, es aritmética de disco.** El
+plan pedía «GC completo en menos de 30 s con 1M de blobs»; medido, recoger un millón
+serían ~98 s. Pero de esos 0,098 ms por blob, lo que decide el plugin —la consulta, la
+política, la fila— es **0,0005 ms**; el resto es el `unlink`, y borrar un millón de
+ficheros cuesta lo que cuesta borrar un millón de ficheros en cualquier programa. La
+puerta se cumple en lo que la fase controla: el trabajo es acotado, va por tandas, se
+cancela y ocurre en segundo plano sin tocar la ventana.
+
+**Y la última es la de memoria, que es la que se nota a diario.** No hace falta un millón de
+nada: una sola tarjeta desplegada con diez capturas de las de antes retenía 134 MB. Es el
+§1.6 medido desde el otro lado.
+
+### 4-bis.2 Dónde el plan acertó
+
+**La fragmentación era el problema y la tabla era la solución.** El §4.1 y el §4.2 no se
+tocaron: cuatro dígitos hexadecimales, 65.536 hojas, y un `SELECT ... NOT EXISTS ... LIMIT
+1000` en lugar del `Files.list`. Las dos piezas cayeron donde el plan decía y con el
+tamaño que el plan decía.
+
+**Mantener `AttachmentGc` puro fue lo que permitió cambiarle la fuente sin miedo.** La
+función que decide qué se borra no cambió ni una línea de lógica: cambió de qué tipo son
+sus candidatos. Sus seis casos siguen ahí, uno más, y son los que dicen que mover la
+contabilidad a SQLite no movió la política.
+
+**Las miniaturas valen más de lo que el plan les concedía.** El §4.4 las justifica por
+memoria de la lista; resultan ser además lo que hace **aceptable no tocar las capturas de
+1600 px que ya están guardadas** (§4-bis.4). Sin miniatura, «no las reescalamos» habría
+significado «la lista sigue descodificando 10 MB por imagen para siempre».
+
+### 4-bis.3 Dónde el plan se quedó corto — y qué cambió
+
+**1. El §4.3 no decía cómo detectar lo ausente sin recordar lo presente.** «Filas cuyo
+fichero ya no está» es fácil de escribir y difícil de implementar con memoria constante:
+la forma obvia —juntar los ids del disco y restarlos de la tabla— es exactamente el
+conjunto de diez millones de entradas que esta fase vino a no tener en memoria. La
+solución es una columna, `seen_at`: el recorrido **sella** lo que ve, y al final lo que
+quedó con el sello viejo es, por definición, lo que no estaba. Una pasada por la tabla y
+ni un id retenido.
+
+**2. La reconciliación necesita un recorrido completo o ninguna conclusión.** No estaba
+escrito y es la mitad de su corrección: si el recorrido se cancela —el usuario cierra el
+IDE, un directorio no se puede leer— **no se marca nada como ausente**. «No lo he visto»
+sólo significa «no está» si se ha mirado todo.
+
+**3. Adoptar con la fecha de ahora habría desactivado el recolector.** El §4.3 dice
+«se adoptan con la fecha del fichero» en una subordinada; es la frase entera. Si adoptar
+—o re-apuntar en cada escaneo— pusiera `created_at` al día, el periodo de gracia de 24 h
+pasaría a ser «24 h desde el último escaneo» y no se recogería nada jamás. Hay un test que
+lo fija (`BlobTableTest`), y el `ON CONFLICT DO UPDATE` de `recordBlob` deja `created_at`
+fuera a propósito.
+
+**4. La salvaguarda del GC cambia de forma, no de fondo.** Hasta la 2.0, recolectar
+esperaba a que el corpus estuviera cargado, porque las referencias salían de él. Ya no hay
+corpus, así que la espera no significaba nada — pero la ventana de peligro sigue
+existiendo, y es otra: **mientras un `tasks.xml` se está importando, `blob_ref` está
+legítimamente incompleta**. `TaskService.referencesComplete` es esa comprobación, por
+repositorio: no está en solo lectura, no se está importando, y su XML ya se importó o
+nunca existió. Sin ella, recolectar durante la migración de la Fase 3 borraría **todas**
+las imágenes del usuario.
+
+**5. La pareja blob-miniatura hay que borrarla y moverla junta.** No estaba en el plan
+porque en el plan la miniatura no tenía ciclo de vida. Lo tiene: nadie la referencia, así
+que si se queda atrás es basura que ni el GC —que va por `blob_ref`— ni la reconciliación
+—que las ignora a propósito— sabrían nombrar. `AttachmentStore.delete` y `relocate` tratan
+las dos como una.
+
+**6. La miniatura no va «junto a cada blob», sino junto a los que la pagan.** El §4.4
+dice `<sha>.thumb.png` para todos. Escribirla siempre es **un fichero más por blob** —el
+doble de entradas en el árbol— y un 45 % de disco sobre una captura de 400 px, a cambio de
+un factor 2,4 en memoria. Con el tope nuevo, el original ya *es* casi su miniatura. Así
+que la miniatura se escribe sólo por encima del **doble** del tope de la miniatura
+(512 px), que es donde la cuenta cambia de signo: ahí está el factor cuarenta de las
+capturas de 1600 px, que son exactamente las que hay que dejar de descodificar. Por debajo
+no hay fichero, y quien lee cae al original — que pesa lo que pesaría su miniatura.
+
+**7. El traslado se da por terminado, y puede dejar de serlo.** La marca en `chore` dice
+«este directorio plano está vacío», y con ella el recolector se ahorra dos `unlink` por
+blob que no pueden encontrar nada —un 40 % del coste de recoger, medido—. Pero hay una
+forma de que la marca deje de ser cierta: **abrir el mismo proyecto con una versión
+anterior del plugin y pegar una captura**. La reconciliación es justo la pieza que detecta
+deriva desde fuera, así que cuenta lo que encuentra en la raíz y, si encuentra algo, borra
+la marca; la apertura siguiente lo traslada. Sin eso, esos ficheros serían basura que nadie
+sabría volver a nombrar.
+
+**8. Las tablas nuevas no suben la versión del esquema.** La reacción automática al
+añadir `blob` y `chore` fue poner `user_version` a 2. El efecto de hacerlo es concreto y
+malo: una versión anterior del plugin abriendo ese fichero lo vería «del futuro» y dejaría
+**el proyecto entero en solo lectura** —es la promesa de la Fase 3, y es la correcta— para
+proteger dos tablas cuyo contenido es **derivado**: `blob` la reconstruye entera la
+reconciliación a partir del disco, y `chore` son tres fechas de mantenimiento. Se acaba
+bloqueando lo irreemplazable para proteger lo recomputable. La regla que queda escrita en
+`TaskSchema.VERSION`: se sube cuando una versión anterior escribiendo **perdería datos que
+no se pueden reconstruir**, no por contabilidad que se puede volver a calcular.
+
+**9. El aviso de cuota tenía que poder callarse.** El §4.5 dice «se avisa una vez» sin
+decir una vez *por qué*. Una vez por apertura es un aviso que se aprende a cerrar sin
+leer. La política acabó siendo: se avisa al cruzar, y no se vuelve a avisar hasta que el
+peso crece **vez y media** desde el aviso anterior; bajar del umbral rearma. Vive en
+`AttachmentQuota`, es pura y tiene sus casos.
+
+### 4-bis.4 Lo que quedaba por decidir, decidido
+
+El §4.5 dejaba abierto **qué hacer con lo que ya esté guardado a 1600 px**. Se decidió
+**no tocarlo**, y contarlo:
+
+- **Reescalar cambiaría el SHA**, que es el nombre del fichero y lo que el cuerpo de cada
+  tarea nombra. No es un bucle sobre un directorio: es reescribir los cuerpos del usuario,
+  invalidar cualquier exportación anterior y perder la propiedad de que un blob es
+  inmutable. Por un ahorro de disco que el usuario puede conseguir él mismo borrando lo
+  que no quiera.
+- **Las miniaturas quitan el coste que de verdad dolía.** Lo caro de una captura de
+  1600 px no era su sitio en disco —407 KB— sino sus 10,2 MB descodificada en una lista.
+  Eso se acabó igual, sin tocar el fichero.
+- **Y se dice cuánto es.** *Tasklane: Diagnostics* cuenta las imágenes guardadas por
+  encima del tope vigente y lo que ocupan, para que la decisión de borrarlas sea del
+  usuario y esté informada.
+
+El tope de escalado de las capturas **nuevas** sí baja: `DEFAULT_IMAGE_MAX_SIZE` pasa de
+1600 a **400 px**, la decisión del §4.5 con la medida del §0-bis.5 delante.
+
+### 4-bis.5 Qué cambia para quien lo usa
+
+- **Las capturas nuevas se guardan a 400 px** en vez de 1600: doce veces y media menos
+  disco por captura. El ajuste sigue estando y sigue llegando a 4000 para quien lo quiera.
+- **Las que ya estaban no se tocan.** Se siguen viendo igual, y ampliarlas sigue enseñando
+  el original completo.
+- **La lista no descodifica nunca una captura grande.** De las de 1600 px que hubiera
+  guardadas pinta una miniatura de 256; de las nuevas —que ya son de 400— el propio
+  fichero, que pesa lo mismo que pesaría su miniatura. Para mirar de cerca está el clic,
+  que sigue abriendo el original a tamaño de pantalla.
+- **Las imágenes se guardan en subdirectorios** (`attachments/ab/cd/…`). El traslado de lo
+  que hubiera es automático, en segundo plano y no hay que esperarlo. **Una versión
+  anterior del plugin no las encontrará**: es la única regresión hacia atrás de esta
+  versión, y no se pierde nada —los ficheros están ahí—.
+- **Se avisa cuando las imágenes pasan de 5 GB**, con el peso, con qué hacer y sin borrar
+  nada. El umbral se cambia o se apaga en los ajustes.
+- **Una imagen que se borró por fuera del plugin se dice.** La tarjeta ya pintaba el
+  hueco; ahora además la reconciliación semanal lo sabe y el informe lo cuenta.
+- Lo que **no** cambia: dónde se pega, cómo se borra, `has:image`, la deduplicación por
+  contenido, el periodo de gracia de 24 horas y que lo único que se borra es lo que no
+  nombra ninguna tarea.
+
+### 4-bis.6 Lo que quedó construido
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| `BlobLayout` | `main/…/data/attachment/` | `ab/cd/<sha>.png`, la miniatura y el temporal. Puro: la política de nombres se fija con texto |
+| `AttachmentStore` | `main/…/data/attachment/` | Fragmentado, con caída a la ruta plana, traslado por tandas y recorrido con memoria constante |
+| `BlobRecord` · `Chore` · `AttachmentChore` | `main/…/data/attachment/` | Lo que la tabla sabe de un blob, y las tres marcas que dan cadencia al mantenimiento |
+| `AttachmentGc` | `main/…/data/attachment/` | La misma decisión de siempre, sobre filas en vez de sobre ficheros |
+| `AttachmentQuota` | `main/…/data/attachment/` | Cuándo avisar y cuándo callarse. Puro |
+| `ImageNormalizer` | `main/…/data/attachment/` | Más: miniaturas a 256 px y el tamaño leído de la cabecera del PNG, sin descodificar |
+| `blob` · `chore` | `main/…/data/sqlite/TaskSchema` | La contabilidad y la cadencia, en el esquema. Aditivas y **sin subir `user_version`**: ver la nota 8 |
+| `TaskStore` (adjuntos) | `main/…/data/sqlite/` | Apuntar, candidatos por tandas, adoptar, sellar, marcar ausente y agregar |
+| `AttachmentService` | `main/…/service/` | Guardar, servir miniaturas, recoger, trasladar, reconciliar y avisar |
+| `AttachmentMaintenanceActivity` | `main/…/startup/` | Las cuatro tareas de fondo, en orden, con progreso y cancelables |
+| `BlobStats` + informe | `main/…/diagnostics/` | Las imágenes, contadas por la base: ni recorrido ni cifra truncada |
+| `BlobLayoutTest` · `AttachmentStoreTest` | `test/…/data/` | El árbol, la caída a lo plano, el traslado, la pareja y el recorrido cancelable |
+| `AttachmentQuotaTest` · `AttachmentGcTest` | `test/…/data/` | Las dos políticas puras: qué se borra y cuándo se avisa |
+| `BlobTableTest` | `test/…/data/sqlite/` | La contabilidad: que lo referenciado nunca sale, que la gracia no se reinicia y que lo no visto queda ausente |
+| `ScaleBenchmark` (4 escenarios) | `test/…/bench/` | Las puertas de esta fase, con el camino viejo medido al lado |
+
+### 4-bis.7 Qué sigue siendo el techo
+
+| | Coste a 100.000 blobs | Dónde se arregla |
+|---|---:|---|
+| Exportar un estado entero | O(n) a propósito | Fase 5, en *streaming* |
+| Reconciliar el árbol | 2,2 s, una vez por semana y en segundo plano | Acotado por ficheros, no por tareas |
+| El disco que ocupan las capturas | ~33 KB cada una | No tiene arreglo técnico: es la cuota con aviso |
+| EDT | nada | — |
+
+**Lo que esta fase no puede hacer es inventar disco**, y conviene repetirlo: diez millones
+de blobs a 400 px son 315 GB, o 31 GB con deduplicación 10:1. El plugin va igual de rápido
+con ellos —búsqueda por índice, recolección por tabla, arranque constante— pero caben
+donde caben. Por eso la política del §4.5 no es una optimización pendiente: es la
+respuesta.
+
+---
+
 ### Fase 5 — Las operaciones grandes *(~2 semanas)*
 
 Lo que sigue siendo O(n) **por definición** — exportar un millón de tareas es leer un

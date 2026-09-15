@@ -2,11 +2,16 @@ package com.tasklane.bench
 
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.ui.CheckedTreeNode
+import com.tasklane.data.attachment.AttachmentGc
+import com.tasklane.data.attachment.AttachmentStore
+import com.tasklane.data.attachment.BlobRecord
+import com.tasklane.data.attachment.ImageNormalizer
 import com.tasklane.data.sqlite.SqlitePager
 import com.tasklane.data.sqlite.Fts5Index
 import com.tasklane.data.sqlite.TaskDb
 import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.data.sqlite.TasksXmlReader
+import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TasksCodec
 import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.TaskCommand
@@ -22,6 +27,7 @@ import com.tasklane.paging.GroupOutline
 import com.tasklane.paging.PageQuery
 import com.tasklane.paging.TaskPager
 import com.tasklane.search.SearchCorpus
+import com.tasklane.service.AttachmentService
 import com.tasklane.search.SearchScope
 import com.tasklane.ui.toolwindow.GroupNode
 import com.tasklane.ui.toolwindow.ListSync
@@ -39,6 +45,7 @@ import org.junit.Test
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.time.Instant
 import javax.swing.JTree
 import javax.swing.tree.DefaultTreeModel
@@ -409,7 +416,12 @@ class ScaleBenchmark {
         val state = TasklaneConfig.TODO
         val pager = boardPager(db, state)
         val outline = pager.outline(state)
-        val victim = pager.page(PageQuery(state, outline.first().key)).items.first()
+        // El PRIMER grupo con algo dentro, no el primero a secas: agrupando por fecha,
+        // «Hoy» se pinta aunque esté vacío —es deliberado, ver `SqlitePager.dateOutline`—
+        // y un corpus cuyas fechas caen todas en el pasado empieza justo por él.
+        val victim = outline.firstNotNullOfOrNull { group ->
+            pager.page(PageQuery(state, group.key)).items.firstOrNull()
+        } ?: error("el corpus no tiene ninguna tarea en $state")
 
         val tree = Bench.edt { newTree() }
         val sync = list(tree, pager, state, outline)
@@ -486,28 +498,235 @@ class ScaleBenchmark {
         record(result)
     }
 
+    // ======================================================== las puertas de la Fase 4
+
     /**
-     * **§1.6 — los adjuntos.** Un `Files.list` de un directorio plano con millones de
-     * entradas es la operación que no termina. Sigue aquí porque es la puerta de la
-     * Fase 4, no de ésta.
+     * **§1.6 / §4.1 — el arranque, antes y ahora.**
+     *
+     * Hasta la 2.0, saber qué adjuntos había era listar el directorio: un `Files.list`
+     * más un `readAttributes` por entrada, en cada apertura de proyecto, sobre un
+     * directorio plano. Es la operación que el §1.6 dice que no termina con diez
+     * millones de ficheros, y aquí está medida sobre el número que se le pase.
+     *
+     * Desde la Fase 4 el arranque **no mira el directorio**: los candidatos salen de la
+     * tabla `blob` por índice y a tandas. Las dos cifras se miden aquí para que la
+     * comparación no sea una afirmación.
+     *
+     *     ./gradlew test --tests '*ScaleBenchmark' -PbenchN=10000 -PbenchBlobs=100000
      */
     @Test
-    fun `listar el directorio de adjuntos`() {
-        val blobs = System.getProperty("tasklane.bench.blobs")?.toIntOrNull() ?: 2_000
-        val dir = Files.createTempDirectory("tasklane-blobs")
+    fun `adjuntos · el arranque, antes y ahora`() {
+        val root = Files.createTempDirectory("tasklane-blobs")
         try {
+            val layout = StorageLayout(root)
+            val dir = layout.attachmentsDir(repo)
             val bytes = SyntheticBlobs.writeAll(dir, blobs)
-            println("Escritos $blobs blobs, ${bytes / (1024 * 1024)} MB (%.0f KB de media)".format(bytes / 1024.0 / blobs))
+            println(
+                "Escritos $blobs blobs planos, ${bytes / (1024 * 1024)} MB " +
+                    "(%.0f KB de media)".format(bytes / 1024.0 / blobs),
+            )
 
-            val result = Bench.measure("adjuntos: Files.list + readAttributes de $blobs", runs = 5, warmup = 1) {
-                Files.list(dir).use { paths ->
-                    paths.toList().map { path ->
-                        Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes::class.java)
+            record(
+                Bench.measure("adjuntos · listar el directorio plano de $blobs (hasta la 2.0)", runs = 3, warmup = 1) {
+                    Files.list(dir).use { paths ->
+                        paths.toList().map { Files.readAttributes(it, BasicFileAttributes::class.java) }
+                    }
+                },
+            )
+
+            withBlobTable(blobs) { store ->
+                record(
+                    Bench.measure("adjuntos · una tanda de candidatos de $blobs (2.1)", runs = 10, warmup = 3) {
+                        store.collectibleBlobs(repo, Instant.now().toEpochMilli(), AttachmentService.GC_BATCH)
+                    },
+                )
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * **§4.2 — la puerta: recoger la basura de un millón de blobs en menos de 30 s, en
+     * segundo plano.**
+     *
+     * Lo que se mide es el bucle de `AttachmentService.collectGarbage` con sus piezas de
+     * producción: la consulta por tandas, la política pura de [AttachmentGc] y el borrado
+     * del fichero y su miniatura. Ninguna tarea referencia nada, así que **se recoge
+     * todo**: es el peor caso posible y el más caro, porque cada blob cuesta además un
+     * borrado de disco.
+     */
+    @Test
+    fun `adjuntos · recoger la basura`() {
+        val root = Files.createTempDirectory("tasklane-gc")
+        try {
+            val layout = StorageLayout(root)
+            val store = AttachmentStore(layout)
+            val written = SyntheticBlobs.writeAll(layout.attachmentsDir(repo), blobs, sharded = true)
+            println("Escritos $blobs blobs en el árbol, ${written / (1024 * 1024)} MB")
+
+            withBlobTable(blobs) { tasks ->
+                var deleted = 0
+                val result = Bench.measure("adjuntos · recoger $blobs sin referencias", runs = 1, warmup = 0) {
+                    val now = Instant.now()
+                    val cutoff = now.minus(AttachmentGc.DEFAULT_GRACE).toEpochMilli()
+                    while (true) {
+                        val batch = tasks.collectibleBlobs(repo, cutoff, AttachmentService.GC_BATCH)
+                        if (batch.isEmpty()) break
+                        val collectible = AttachmentGc.collectible(batch, emptySet(), now)
+                        // `flatToo = false`: el árbol ya está fragmentado, que es lo que
+                        // decide el servicio mirando la marca del traslado. Con `true`
+                        // esto mediría dos `unlink` de más por blob que no pueden
+                        // encontrar nada, o sea el doble de llamadas al sistema.
+                        for (blob in collectible) if (store.delete(repo, blob.id, flatToo = false)) deleted++
+                        tasks.write { tasks.forgetBlobs(repo, collectible.map { it.id }) }
                     }
                 }
+                assertEquals("tiene que recogerlos todos", blobs, deleted)
+                record(result)
+                println("  %.3f ms por blob".format(result.p50Millis / blobs))
             }
-            record(result)
         } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * **§4.3 — reconciliar el árbol.**
+     *
+     * El recorrido completo, que es lo que ocurre como mucho una vez por semana: mirar
+     * todos los ficheros, preguntar por tandas cuáles ya se conocen, adoptar los que no
+     * —leyendo su tamaño de la cabecera del PNG, no descodificándolo— y marcar ausente
+     * lo que no se vio.
+     *
+     * Se mide sobre una tabla **vacía**, que es el caso más caro: todo es nuevo y todo
+     * hay que adoptarlo. La pasada semanal normal no adopta nada y sólo sella.
+     */
+    @Test
+    fun `adjuntos · reconciliar el arbol`() {
+        val root = Files.createTempDirectory("tasklane-fsck")
+        try {
+            val layout = StorageLayout(root)
+            val store = AttachmentStore(layout)
+            SyntheticBlobs.writeAll(layout.attachmentsDir(repo), blobs, sharded = true)
+
+            withBlobTable(0) { tasks ->
+                var adopted = 0
+                val result = Bench.measure("adjuntos · reconciliar $blobs desde cero", runs = 1, warmup = 0) {
+                    val stamp = Instant.now().toEpochMilli()
+                    store.scan(repo) { batch ->
+                        val ids = batch.blobs.map { it.id }
+                        val known = tasks.knownBlobs(repo, ids)
+                        val fresh = batch.blobs.filter { it.id.value !in known }.map { blob ->
+                            val size = store.dimensionsOf(blob.path)
+                            BlobRecord(blob.id, blob.size, size?.width ?: 0, size?.height ?: 0, blob.modified)
+                        }
+                        tasks.write {
+                            tasks.seeBlobs(repo, ids, stamp)
+                            tasks.adoptBlobs(repo, fresh, stamp)
+                        }
+                        adopted += fresh.size
+                    }
+                    tasks.write { tasks.markMissingBlobs(repo, stamp) }
+                }
+                assertEquals("tiene que adoptarlos todos", blobs, adopted)
+                assertEquals(blobs, tasks.blobStatsOf(repo, SyntheticBlobs.DEFAULT_SIZE).count)
+                record(result)
+
+                // Y la pasada de verdad: la semanal, en la que no hay nada nuevo. No se
+                // abre un solo fichero para leer su cabecera, así que lo que queda es el
+                // recorrido del árbol y sellar lo visto. Es el número que se paga cada
+                // semana; el de arriba se paga una vez.
+                record(
+                    Bench.measure("adjuntos · reconciliar $blobs sin novedades", runs = 1, warmup = 0) {
+                        val stamp = Instant.now().toEpochMilli()
+                        store.scan(repo) { batch ->
+                            val ids = batch.blobs.map { it.id }
+                            val known = tasks.knownBlobs(repo, ids)
+                            val fresh = batch.blobs.filter { it.id.value !in known }
+                            assertTrue("en la segunda pasada no puede haber nada nuevo", fresh.isEmpty())
+                            tasks.write { tasks.seeBlobs(repo, ids, stamp) }
+                        }
+                        assertEquals(0, tasks.write { tasks.markMissingBlobs(repo, stamp) })
+                    },
+                )
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * **§4.4 — lo que una tarjeta desplegada pone en memoria.**
+     *
+     * Diez imágenes en una tarjeta, que es lo que dice la especificación del §1.1. Con
+     * los originales de 1600 px que puede haber guardados de antes son diez
+     * `BufferedImage` de 10,2 MB; con sus miniaturas de 256, de 260 KB. Es la cifra que
+     * justifica que la lista **nunca** descodifique el original.
+     */
+    @Test
+    fun `adjuntos · lo que descodifica una tarjeta`() {
+        val root = Files.createTempDirectory("tasklane-thumbs")
+        try {
+            val layout = StorageLayout(root)
+            val store = AttachmentStore(layout)
+            val ids = (0 until CARD_IMAGES).map { n ->
+                val id = store.put(repo, SyntheticBlobs.png(n, SyntheticBlobs.LEGACY_SIZE))
+                ImageNormalizer.thumbnail(store.load(repo, id)!!)?.let { store.putThumbnail(repo, id, it) }
+                id
+            }
+
+            val originals = Bench.measure("adjuntos · $CARD_IMAGES originales de 1600 px", runs = 3, warmup = 1) {
+                held = ids.map { store.load(repo, it)!! }
+            }
+            record(originals)
+            val thumbs = Bench.measure("adjuntos · $CARD_IMAGES miniaturas de 256 px", runs = 3, warmup = 1) {
+                held = ids.map { store.load(repo, it, thumbnail = true)!! }
+            }
+            record(thumbs)
+            held = emptyList()
+
+            println(
+                "  heap retenido: %.1f MB con originales, %.1f MB con miniaturas"
+                    .format(originals.heapMegabytes, thumbs.heapMegabytes),
+            )
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * Una base con [count] blobs apuntados y ninguna tarea que los referencie.
+     *
+     * Se puebla con [TaskStore.adoptBlobs] —un lote y una sentencia preparada— porque
+     * apuntarlos de uno en uno costaría más que todo lo que se mide después.
+     */
+    private fun <T> withBlobTable(count: Int, block: (TaskStore) -> T): T {
+        val dir = Files.createTempDirectory("tasklane-blobdb")
+        val db = TaskDb.open(dir)!!
+        return try {
+            val store = TaskStore(db)
+            if (count > 0) {
+                val born = Instant.now().minus(AttachmentGc.DEFAULT_GRACE).minusSeconds(60)
+                store.write {
+                    store.adoptBlobs(
+                        repo,
+                        (0 until count).map {
+                            BlobRecord(
+                                SyntheticBlobs.id(it),
+                                SyntheticBlobs.DEFAULT_SIZE.toLong() * 80,
+                                SyntheticBlobs.DEFAULT_SIZE,
+                                SyntheticBlobs.DEFAULT_SIZE,
+                                born,
+                            )
+                        },
+                        born.toEpochMilli(),
+                    )
+                }
+            }
+            block(store)
+        } finally {
+            db.close()
             dir.toFile().deleteRecursively()
         }
     }
@@ -602,6 +821,25 @@ class ScaleBenchmark {
     companion object {
         /** El tamaño del corpus. `-PbenchN=100000`. */
         val n: Int = System.getProperty("tasklane.bench.n")?.toIntOrNull() ?: 10_000
+
+        /**
+         * Cuántos blobs para las puertas de la Fase 4. `-PbenchBlobs=1000000`.
+         *
+         * Aparte de [n] porque son dos ejes distintos y cuestan cosas distintas: un
+         * millón de tareas son 10 GB de base, y un millón de blobs a 400 px son 33 GB de
+         * PNG. Medir los dos a la vez es una noche de disco, y ninguna de las dos puertas
+         * necesita a la otra.
+         */
+        val blobs: Int = System.getProperty("tasklane.bench.blobs")?.toIntOrNull() ?: 2_000
+
+        /** Las imágenes de una tarjeta desplegada, según la especificación del §1.1. */
+        const val CARD_IMAGES = 10
+
+        /**
+         * Lo descodificado, retenido a propósito: sin esto el GC se lleva las imágenes
+         * antes de que [Bench] pueda pesar el heap, y lo que se mediría sería cero.
+         */
+        private var held: List<java.awt.image.BufferedImage> = emptyList()
 
         private val results = mutableListOf<Bench.Result>()
 

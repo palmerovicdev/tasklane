@@ -1,9 +1,13 @@
 package com.tasklane.data.sqlite
 
+import com.tasklane.data.attachment.BlobRecord
+import com.tasklane.data.attachment.Chore
+import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TaskStats
 import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.AnchoredTask
+import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.DateAnchor
 import com.tasklane.domain.model.PriorityId
@@ -854,10 +858,225 @@ internal class TaskStore(private val db: TaskDb) {
     fun openCountOf(state: StateId): Int =
         db.reader.count("SELECT coalesce(sum(n_open), 0) FROM counter WHERE state = ?", state.value)
 
-    /** Los ids de blob que alguna tarea sigue nombrando. Es lo que el recolector respeta. */
-    fun referencedBlobs(repo: RepoKey): Set<String> = db.reader
-        .rows("SELECT DISTINCT blob_id FROM blob_ref WHERE repo = ?", repo.value) { it.getString(0).orEmpty() }
-        .toSet()
+    /**
+     * Cuáles **de éstos** sigue nombrando alguna tarea.
+     *
+     * Por tandas y no «todos los del repositorio», que es como lo preguntaba la Fase 3:
+     * con diez millones de blobs referenciados, el conjunto entero son cientos de
+     * megabytes de cadenas en memoria — exactamente el O(n) que esta fase vino a quitar,
+     * reintroducido en el sitio más delicado de todos. Lo que el recolector necesita
+     * saber es si **estos mil candidatos** están libres, y eso es un salto por
+     * `blob_ref_by_repo`.
+     */
+    fun referencedAmong(repo: RepoKey, ids: List<AttachmentId>): Set<String> {
+        val out = HashSet<String>()
+        for (chunk in ids.chunked(Sql.MAX_VARIABLES)) {
+            db.reader.rows(
+                "SELECT DISTINCT blob_id FROM blob_ref WHERE repo = ? AND blob_id IN " +
+                    "(${Sql.placeholders(chunk.size)})",
+                repo.value,
+                *chunk.map { it.value as Any }.toTypedArray(),
+            ) { out += it.getString(0).orEmpty() }
+        }
+        return out
+    }
+
+    // ------------------------------------------------------- adjuntos (Fase 4, §4.2)
+
+    /**
+     * Apunta un blob recién escrito, o vuelve a dar por presente uno que ya estaba.
+     *
+     * **`created_at` no se toca al reescribir**, y es lo único delicado de esta
+     * sentencia: es la fecha que abre el periodo de gracia del recolector, y ponerla al
+     * día en cada paso del reconciliador convertiría la gracia de 24 horas en «24 horas
+     * desde el último escaneo», o sea en nunca. Lo que sí se pone al día es `seen_at`
+     * —acabamos de verlo— y `missing`, porque un blob que vuelve deja de faltar.
+     */
+    fun recordBlob(repo: RepoKey, blob: BlobRecord, at: Long) = sql.update(
+        "INSERT INTO blob (repo, id, bytes, width, height, created_at, seen_at, missing) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0) " +
+            "ON CONFLICT(repo, id) DO UPDATE SET bytes = excluded.bytes, width = excluded.width, " +
+            "height = excluded.height, seen_at = excluded.seen_at, missing = 0",
+        repo.value,
+        blob.id.value,
+        blob.bytes,
+        blob.width,
+        blob.height,
+        blob.createdAt.toEpochMilli(),
+        at,
+    )
+
+    /**
+     * Los candidatos a recoger: los que nadie nombra y llevan más de la gracia escritos.
+     *
+     * Es la consulta del §4.2 del plan, y la diferencia con lo que había no es de
+     * velocidad sino de **orden de complejidad**: antes el recolector pedía «todo lo que
+     * hay en el directorio» —un `Files.list` que con diez millones de entradas no
+     * termina— y descartaba en memoria. Esto entra por `blob_by_age`, se planta en
+     * [limit] filas y deja el resto para la tanda siguiente.
+     *
+     * Lo que falta (`missing = 1`) **sí sale**: su fichero ya no está, pero su fila
+     * ocupa sitio y miente sobre lo que hay guardado. Borrarla es exactamente lo que
+     * hace falta, y borrar un fichero que no existe no le pasa nada a nadie.
+     */
+    fun collectibleBlobs(repo: RepoKey, before: Long, limit: Int): List<BlobRecord> = db.reader.rows(
+        """
+        SELECT id, bytes, width, height, created_at, missing
+          FROM blob
+         WHERE repo = ? AND created_at < ?
+           AND NOT EXISTS (SELECT 1 FROM blob_ref r WHERE r.repo = blob.repo AND r.blob_id = blob.id)
+         ORDER BY created_at
+         LIMIT ?
+        """.trimIndent(),
+        repo.value,
+        before,
+        limit,
+        read = ::blobRow,
+    )
+
+    /** Quita las filas de lo que el recolector ya borró del disco. */
+    fun forgetBlobs(repo: RepoKey, ids: List<AttachmentId>) {
+        for (chunk in ids.chunked(Sql.MAX_VARIABLES)) {
+            sql.update(
+                "DELETE FROM blob WHERE repo = ? AND id IN (${Sql.placeholders(chunk.size)})",
+                repo.value,
+                *chunk.map { it.value as Any }.toTypedArray(),
+            )
+        }
+    }
+
+    // --------------------------------------------------- reconciliación (§4.3)
+
+    /** Cuáles de estos ids ya conoce la tabla. Lo pregunta el reconciliador por tandas. */
+    fun knownBlobs(repo: RepoKey, ids: List<AttachmentId>): Set<String> {
+        val out = HashSet<String>(ids.size)
+        for (chunk in ids.chunked(Sql.MAX_VARIABLES)) {
+            db.reader.rows(
+                "SELECT id FROM blob WHERE repo = ? AND id IN (${Sql.placeholders(chunk.size)})",
+                repo.value,
+                *chunk.map { it.value as Any }.toTypedArray(),
+            ) { out += it.getString(0).orEmpty() }
+        }
+        return out
+    }
+
+    /**
+     * Sella como vistos los blobs que el recorrido acaba de encontrar.
+     *
+     * Una sentencia preparada y un lote, que es donde [Sql.batch] gana de verdad: un
+     * recorrido de diez millones son diez mil tandas, y preparar una sentencia por
+     * fichero multiplicaría por cien lo que cuesta la reconciliación.
+     */
+    fun seeBlobs(repo: RepoKey, ids: List<AttachmentId>, at: Long) = sql.batch(
+        "UPDATE blob SET seen_at = ?, missing = 0 WHERE repo = ? AND id = ?",
+        3,
+        ids.asSequence().map { arrayOf<Any>(at, repo.value, it.value) },
+    )
+
+    /**
+     * Adopta los blobs que están en disco y la tabla no conocía.
+     *
+     * **Con la fecha del fichero y no con la de ahora**, que es lo que dice el §4.3: un
+     * blob adoptado entra en el periodo de gracia como si siempre hubiera estado
+     * apuntado, en vez de ganar 24 horas de indulto por haber sido descubierto. Si su
+     * fichero es de hace un año y no lo nombra nadie, la recolección siguiente se lo
+     * lleva — que es justo lo que se quiere de lo que quedó suelto.
+     */
+    fun adoptBlobs(repo: RepoKey, blobs: List<BlobRecord>, at: Long) = sql.batch(
+        "INSERT INTO blob (repo, id, bytes, width, height, created_at, seen_at, missing) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(repo, id) DO NOTHING",
+        7,
+        blobs.asSequence().map {
+            arrayOf<Any>(repo.value, it.id.value, it.bytes, it.width, it.height, it.createdAt.toEpochMilli(), at)
+        },
+    )
+
+    /**
+     * Marca como ausentes las filas que el recorrido **no** volvió a ver.
+     *
+     * Es la otra dirección de la deriva: el fichero se borró por fuera del plugin —un
+     * `rm`, un `.idea` restaurado a medias, un disco que se llenó— y la tarjeta tiene
+     * que poder decirlo. `missing` es exactamente lo que la lista ya sabe pintar.
+     *
+     * Recorre las filas del repositorio, sin índice por `seen_at`: es una pasada por la
+     * tabla al final de un recorrido que ya visitó **el árbol entero de ficheros**, y un
+     * índice más costaría disco en cada escritura para ahorrar en algo que pasa una vez
+     * por semana y en segundo plano.
+     */
+    fun markMissingBlobs(repo: RepoKey, before: Long): Int {
+        val n = db.reader.count(
+            "SELECT count(*) FROM blob WHERE repo = ? AND seen_at < ? AND missing = 0",
+            repo.value,
+            before,
+        )
+        if (n > 0) {
+            sql.update("UPDATE blob SET missing = 1 WHERE repo = ? AND seen_at < ? AND missing = 0", repo.value, before)
+        }
+        return n
+    }
+
+    // -------------------------------------------------------- cuentas y tareas de fondo
+
+    /**
+     * El peso de los adjuntos de un repositorio, en agregados y sin tocar el disco.
+     *
+     * [maxSize] es el tope de escalado vigente, y sirve para la única cifra del informe
+     * que no se puede sacar de otra parte: **cuántas capturas quedan guardadas por
+     * encima del tope de hoy**. La Fase 4 baja ese tope de 1600 a 400 px y decide no
+     * tocar lo ya guardado —reescalar cambiaría su SHA, y con él todas las referencias
+     * de los cuerpos—, así que lo que se debe es decir cuántas son y cuánto ocupan.
+     */
+    fun blobStatsOf(repo: RepoKey, maxSize: Int): BlobStats = db.reader.first(
+        """
+        SELECT count(*), coalesce(sum(bytes), 0), coalesce(sum(missing), 0),
+               coalesce(sum(CASE WHEN width > ? OR height > ? THEN 1 ELSE 0 END), 0),
+               coalesce(sum(CASE WHEN width > ? OR height > ? THEN bytes ELSE 0 END), 0)
+          FROM blob WHERE repo = ?
+        """.trimIndent(),
+        maxSize,
+        maxSize,
+        maxSize,
+        maxSize,
+        repo.value,
+    ) {
+        BlobStats(
+            count = it.getInt(0),
+            bytes = it.getLong(1),
+            missing = it.getInt(2),
+            oversized = it.getInt(3),
+            oversizedBytes = it.getLong(4),
+        )
+    } ?: BlobStats()
+
+    /** Lo que ocupan los adjuntos del **proyecto entero**: la cifra que vigila la cuota. */
+    fun blobBytes(): Long =
+        db.reader.first("SELECT coalesce(sum(bytes), 0) FROM blob WHERE missing = 0") { it.getLong(0) } ?: 0L
+
+    /** Cuándo se hizo por última vez una tarea de mantenimiento, y con qué número. Ver `chore`. */
+    fun chore(name: String): Chore? = db.reader.first(
+        "SELECT at, n FROM chore WHERE name = ?",
+        name,
+    ) { Chore(it.getLong(0), it.getLong(1)) }
+
+    /** Olvida una marca de mantenimiento: la tarea vuelve a estar pendiente. */
+    fun forgetChore(name: String) = sql.update("DELETE FROM chore WHERE name = ?", name)
+
+    fun saveChore(name: String, at: Long, n: Long) = sql.update(
+        "INSERT INTO chore (name, at, n) VALUES (?, ?, ?) " +
+            "ON CONFLICT(name) DO UPDATE SET at = excluded.at, n = excluded.n",
+        name,
+        at,
+        n,
+    )
+
+    private fun blobRow(row: org.jetbrains.sqlite.SqliteResultSet) = BlobRecord(
+        id = AttachmentId(row.getString(0).orEmpty()),
+        bytes = row.getLong(1),
+        width = row.getInt(2),
+        height = row.getInt(3),
+        createdAt = Instant.ofEpochMilli(row.getLong(4)),
+        missing = row.getInt(5) != 0,
+    )
 
     // --------------------------------------------------------------------- internos
 

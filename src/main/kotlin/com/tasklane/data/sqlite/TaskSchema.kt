@@ -63,9 +63,31 @@ internal object TaskSchema {
      * escrita por una versión **posterior** del plugin se abre en solo lectura y se
      * avisa, en vez de degradarla escribiéndola con un esquema viejo.
      *
-     * Las migraciones sólo pueden ser **aditivas** —columnas con `DEFAULT`, tablas
-     * nuevas, índices nuevos—: renombrar o borrar una columna que una versión anterior
-     * lea rompería esa promesa en el sentido contrario.
+     * Renombrar o borrar una columna que una versión anterior lea rompería esa promesa en
+     * el sentido contrario, así que no se hace.
+     *
+     * **La Fase 4 NO la sube, y merece la pena decir por qué.** Añade dos tablas —`blob`
+     * y `chore`— y la primera reacción fue ponerla a 2. El efecto de hacerlo es concreto:
+     * una versión anterior del plugin abriendo ese fichero lo vería «del futuro» y
+     * **dejaría el proyecto entero en solo lectura**. Es decir, se bloquearía editar
+     * tareas para proteger dos tablas cuyo contenido es *derivado*: `blob` lo reconstruye
+     * entero la reconciliación del §4.3 a partir del disco, y `chore` son tres fechas de
+     * mantenimiento. Proteger lo recomputable a costa de lo irreemplazable es el reparto
+     * al revés.
+     *
+     * La regla, entonces, es ésta: **se sube la versión cuando una versión anterior
+     * escribiendo perdería datos del usuario que no se pueden reconstruir** —una columna
+     * nueva de la tarea que el códec viejo no escribiría, una tabla que él no mantiene y
+     * que nadie sabría rehacer—. No se sube por contabilidad que se puede volver a
+     * calcular. Lo que puede pasar si alguien vuelve a la 2.0 y sigue trabajando es que la
+     * tabla `blob` se quede corta; la reconciliación siguiente la pone al día, que es
+     * exactamente para lo que existe.
+     *
+     * Las migraciones, suban versión o no, sólo pueden ser **aditivas**: el
+     * `CREATE TABLE IF NOT EXISTS` de [DDL] pone las tablas nuevas al abrir, sin una línea
+     * de migración. El día que haga falta **una columna nueva en una tabla que ya
+     * existe**, esto se acaba: `IF NOT EXISTS` no la añade, y habrá que escribir el
+     * `ALTER TABLE ... DEFAULT` correspondiente aquí al lado.
      */
     const val VERSION = 1
 
@@ -245,9 +267,9 @@ internal object TaskSchema {
         // Lo que hace que abrir un fichero no cueste lo mismo que abrir el proyecto:
         // `AnchorMarkers` pregunta por ruta en vez de recorrer el modelo (§3.6).
         "CREATE INDEX IF NOT EXISTS anchor_by_path ON anchor(path, task_id)",
-        // Las referencias a imágenes, para que el recolector de adjuntos deje de
-        // necesitar el corpus en memoria. La contabilidad de blobs es de la Fase 4;
-        // esto es sólo la parte sin la que el GC no podría funcionar sin snapshot.
+        // Las referencias a imágenes: quién nombra a quién. La mitad del recolector que
+        // la Fase 3 necesitaba para dejar de mirar el corpus en memoria; la otra mitad
+        // —qué hay en disco— es la tabla `blob` de aquí abajo.
         """
         CREATE TABLE IF NOT EXISTS blob_ref (
           task_id TEXT NOT NULL REFERENCES task(id) ON DELETE CASCADE,
@@ -257,6 +279,54 @@ internal object TaskSchema {
         )
         """,
         "CREATE INDEX IF NOT EXISTS blob_ref_by_repo ON blob_ref(repo, blob_id)",
+        // La contabilidad de blobs de la Fase 4 (§4.2). Lo que el recolector sacaba de
+        // `Files.list` sobre el directorio de adjuntos —la operación que con diez
+        // millones de ficheros no termina, §1.6— sale ahora de aquí: qué hay, cuánto
+        // pesa, de qué tamaño es y desde cuándo.
+        //
+        // La clave es `(repo, id)` y no `id` porque **cada repositorio tiene su propio
+        // directorio de adjuntos**: la misma captura pegada en dos repositorios son dos
+        // ficheros, y contar uno solo dejaría el otro sin dueño ni peso.
+        //
+        // `seen_at` es de la reconciliación (§4.3) y no un adorno: es lo que permite
+        // detectar las filas cuyo fichero ya no está **sin tener que acordarse en
+        // memoria de los diez millones que sí estaban**. El recorrido sella lo que ve,
+        // y al final lo que quedó con el sello viejo es exactamente lo que falta.
+        """
+        CREATE TABLE IF NOT EXISTS blob (
+          repo       TEXT    NOT NULL,
+          id         TEXT    NOT NULL,
+          bytes      INTEGER NOT NULL,
+          width      INTEGER NOT NULL,
+          height     INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          seen_at    INTEGER NOT NULL,
+          missing    INTEGER NOT NULL,
+          PRIMARY KEY (repo, id)
+        )
+        """,
+        // El índice del recolector: los candidatos son los más viejos que el periodo de
+        // gracia, así que la consulta entra por `(repo, created_at)` y sale en cuanto
+        // tiene su tanda. Sin él, recoger costaría una pasada por todos los blobs del
+        // repositorio en vez de por los que de verdad pueden irse.
+        "CREATE INDEX IF NOT EXISTS blob_by_age ON blob(repo, created_at)",
+        // Lo que no se puede hacer en cada apertura: la reconciliación del árbol (§4.3,
+        // como mucho una vez por semana), el traslado de lo que quedara en plano (§4.1)
+        // y el último aviso de cuota (§4.5).
+        //
+        // `at` es cuándo se hizo por última vez; `n`, un número cuyo significado lo pone
+        // cada tarea —los bytes por los que se avisó, los blobs que se adoptaron— y está
+        // escrito en `AttachmentChore`. Una tabla y no un `PropertiesComponent` porque
+        // esto es estado **del repositorio de datos**, no de la instalación del IDE:
+        // copiar el proyecto a otra máquina tiene que llevarse consigo que la
+        // reconciliación ya se hizo.
+        """
+        CREATE TABLE IF NOT EXISTS chore (
+          name TEXT    NOT NULL PRIMARY KEY,
+          at   INTEGER NOT NULL,
+          n    INTEGER NOT NULL
+        )
+        """,
         // Los contadores de las pestañas. Se mantienen en la MISMA transacción que la
         // escritura porque `count(*)` sobre un estado con un millón de filas sigue
         // siendo un recorrido de índice, y eso se pagaría en cada repintado.

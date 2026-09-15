@@ -83,29 +83,97 @@ class TasklaneDiagnosticsTest {
         assertTrue(DiagnosticsReport.render(report).contains("(none loaded yet)"))
     }
 
+    /**
+     * **Los blobs ya no se pesan recorriendo el directorio** (§4.2): la cifra viene de la
+     * tabla, y lo único que sigue yendo al disco son los ficheros del formato viejo y la
+     * base. Es el cambio de la Fase 4 que se puede comprobar desde fuera: aquí se
+     * escriben diez blobs de verdad y el informe **no** los ve, porque nadie los ha
+     * apuntado.
+     */
     @Test
-    fun `pesa el fichero de tareas y los blobs del disco`() {
+    fun `pesa los ficheros del disco y las imagenes de la tabla`() {
         val dir = Files.createTempDirectory("tasklane-diag")
         try {
             val layout = StorageLayout(dir)
             val tasks = SyntheticCorpus.tasks(30, blobPool = 30)
             SyntheticCorpus.writeTasksXml(layout.tasksFile(repo), count = 30, blobPool = 30)
-            // Sólo diez de los treinta blobs: los otros veinte están referenciados y
-            // no existen, que es exactamente el caso que la tarjeta pinta como hueco.
             SyntheticBlobs.writeAll(layout.attachmentsDir(repo), 10)
 
-            val only = TasklaneDiagnostics.collect(layout, mapOf(repo to statsOf(tasks))).repos.single()
+            val onDiskOnly = TasklaneDiagnostics.collect(layout, mapOf(repo to statsOf(tasks))).repos.single()
+            assertEquals("lo que no está apuntado no se cuenta", 0, onDiskOnly.blobCount)
+
+            val blobs = BlobStats(count = 10, bytes = 330_000, oversized = 2, oversizedBytes = 800_000)
+            val only = TasklaneDiagnostics
+                .collect(layout, mapOf(repo to statsOf(tasks)), blobs = mapOf(repo to blobs))
+                .repos.single()
 
             // El `tasks.xml` ya no es lo que pesa: desde la Fase 3 es la base, y el
             // fichero viejo cuenta como copia conservada.
             assertTrue("el fichero conservado pesa", only.backupBytes > 30 * 2_000)
             assertEquals(10, only.blobCount)
-            assertTrue("los blobs pesan", only.blobBytes > 10 * 10_000)
-            assertFalse(only.blobsTruncated)
+            assertEquals(330_000L, only.blobBytes)
             assertEquals(only.tasksFileBytes + only.backupBytes + only.blobBytes, only.totalBytes)
         } finally {
             dir.toFile().deleteRecursively()
         }
+    }
+
+    /**
+     * Mientras la reconciliación no haya pasado, lo que la tabla sabe está **incompleto**
+     * y el informe tiene que decirlo. Un «0 imágenes» sobre un directorio lleno mandaría
+     * a mirar al sitio equivocado, que es justo lo que este informe existe para evitar.
+     */
+    @Test
+    fun `avisa de que las cifras de imagenes aun no estan reconciliadas`() {
+        val stats = mapOf(repo to statsOf(SyntheticCorpus.tasks(5)))
+        val pending = TasklaneDiagnostics.collect(null, stats)
+        assertTrue(pending.pending)
+        assertTrue(DiagnosticsReport.render(pending).contains("still being reconciled"))
+
+        val done = TasklaneDiagnostics.collect(null, stats, reconciled = setOf(repo))
+        assertFalse(done.pending)
+        assertFalse(DiagnosticsReport.render(done).contains("still being reconciled"))
+    }
+
+    /**
+     * Las capturas que ya estaban guardadas cuando el tope bajó a 400 px **no se tocan**
+     * —reescalarlas cambiaría su SHA, que es su nombre—, así que lo mínimo que se le debe
+     * a quien tenga tres gigas de ellas es decirle cuántas son.
+     */
+    @Test
+    fun `dice cuantas imagenes estan por encima del tope de hoy`() {
+        val text = DiagnosticsReport.render(
+            TasklaneDiagnostics.collect(
+                null,
+                mapOf(repo to statsOf(SyntheticCorpus.tasks(5))),
+                blobs = mapOf(repo to BlobStats(count = 50, bytes = 20_000_000, oversized = 7, oversizedBytes = 2_800_000)),
+                imageMaxSize = 400,
+            ),
+        )
+        assertTrue(text, text.contains("7 image(s) above the 400 px cap"))
+    }
+
+    /** La cuota del §4.5 se enseña siempre que esté puesta, y se marca cuando se cruza. */
+    @Test
+    fun `el informe enseña la cuota y dice cuando se pasa`() {
+        val stats = mapOf(repo to statsOf(SyntheticCorpus.tasks(5)))
+        val quota = 1024L * 1024 * 1024
+
+        val under = DiagnosticsReport.render(
+            TasklaneDiagnostics.collect(null, stats, blobs = mapOf(repo to BlobStats(1, 1024)), quotaBytes = quota),
+        )
+        assertTrue(under, under.contains("of 1.0 GB quota"))
+        assertFalse(under, under.contains("OVER"))
+
+        val over = DiagnosticsReport.render(
+            TasklaneDiagnostics.collect(
+                null,
+                stats,
+                blobs = mapOf(repo to BlobStats(1, 2 * quota)),
+                quotaBytes = quota,
+            ),
+        )
+        assertTrue(over, over.contains("OVER"))
     }
 
     /** Sin `StorageLayout` —proyecto por defecto, tests ligeros— no se cae: informa lo que sabe. */

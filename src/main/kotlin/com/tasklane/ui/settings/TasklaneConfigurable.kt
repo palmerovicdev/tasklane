@@ -79,6 +79,18 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         IMAGE_SIZE_STEP,
     )
 
+    /**
+     * A partir de cuántos megabytes de imágenes se avisa (§4.5). Cero apaga el aviso, y
+     * por eso el mínimo del *spinner* es cero y no el mínimo de la cuota: «no me avises»
+     * tiene que poder decirse.
+     */
+    private val imageQuotaSpinner = JBIntSpinner(
+        TasklaneConfig.DEFAULT_IMAGE_QUOTA_MB,
+        TasklaneConfig.NO_IMAGE_QUOTA,
+        TasklaneConfig.MAX_IMAGE_QUOTA_MB,
+        IMAGE_QUOTA_STEP,
+    )
+
     /** Aviso de validación bajo las tablas; la fila exacta la marca la tabla. */
     private val problemLabel = JBLabel("", AllIcons.General.Error, SwingConstants.LEADING).apply {
         isVisible = false
@@ -133,6 +145,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         group(TasklaneBundle.message("settings.images.title")) {
             row(TasklaneBundle.message("settings.images.maxSize")) { cell(imageSizeSpinner) }
             row { comment(TasklaneBundle.message("settings.images.comment")) }
+            row(TasklaneBundle.message("settings.images.quota")) { cell(imageQuotaSpinner) }
+            row { comment(TasklaneBundle.message("settings.images.quota.comment")) }
         }
 
         row { cell(problemLabel) }
@@ -153,6 +167,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         triggersCheckBox.isSelected = config.triggersEnabled
         depthSpinner.number = config.repoDepth
         imageSizeSpinner.number = config.imageMaxSize
+        imageQuotaSpinner.number = config.imageQuotaMegabytes
         stateReassign.clear()
         priorityReassign.clear()
         updateProblems()
@@ -200,6 +215,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             triggersCheckBox.isSelected,
             depthSpinner.number,
             imageSizeSpinner.number,
+            imageQuotaSpinner.number,
         ).normalized()
 
     // ----------------------------------------------------------- validación
@@ -392,5 +408,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
         /** Saltos de 100 px: el ajuste es un orden de magnitud, no una medida fina. */
         private const val IMAGE_SIZE_STEP = 100
+
+        /** Un giga por paso: la cuota se piensa en gigas, no en megas. */
+        private const val IMAGE_QUOTA_STEP = 1024
     }
 }

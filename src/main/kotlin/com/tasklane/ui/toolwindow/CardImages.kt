@@ -38,9 +38,9 @@ internal interface CardPreviews {
  * estado está cada imagen —[stateOf]— y, si ya está, pedirla escalada, que a esas
  * alturas es un acierto de caché en `AttachmentService`.
  *
- * La primera vez que se ve una imagen se **decodifica en segundo plano** y se avisa
- * con [onLoaded] cuando llega. El hueco no espera al disco: hasta entonces la tarjeta
- * pinta el marcador de carga, exactamente igual que el editor del diálogo.
+ * La primera vez que se ve una imagen se **decodifica en segundo plano** —su miniatura,
+ * no el original— y se avisa con [onLoaded] cuando llega. El hueco no espera al disco:
+ * hasta entonces la tarjeta pinta el marcador de carga, igual que el editor del diálogo.
  *
  * `ModalityState.any()` en la vuelta al EDT por lo mismo que en el diálogo: sin ella
  * la respuesta se quedaría en la cola mientras haya cualquier modal abierto, y el
@@ -67,7 +67,7 @@ internal class CardImages(project: Project, private val onLoaded: () -> Unit) : 
     }
 
     override fun preview(repo: RepoKey, id: AttachmentId, maxWidth: Int, maxHeight: Int): BufferedImage? =
-        service.preview(repo, id, maxWidth, maxHeight)
+        service.cardPreview(repo, id, maxWidth, maxHeight)
 
     /**
      * Olvida las que no estaban, para que vuelvan a intentarse.
@@ -85,7 +85,12 @@ internal class CardImages(project: Project, private val onLoaded: () -> Unit) : 
     private fun load(key: Key) {
         if (!loading.add(key)) return
         ApplicationManager.getApplication().executeOnPooledThread {
-            val present = service.image(key.repo, key.id) != null
+            // La MINIATURA, nunca el original (§4.4). Una tarjeta desplegada con diez
+            // imágenes son diez `BufferedImage` vivos a la vez; con las capturas de
+            // 1600 px que puede haber guardadas de antes eso son 102 MB, y con sus
+            // miniaturas son 2,6. La primera vez que se ve una imagen grande, esta
+            // llamada además la crea — una vez por blob, aquí, en el hilo de fondo.
+            val present = service.thumbnail(key.repo, key.id) != null
             ApplicationManager.getApplication().invokeLater(
                 {
                     loading -= key

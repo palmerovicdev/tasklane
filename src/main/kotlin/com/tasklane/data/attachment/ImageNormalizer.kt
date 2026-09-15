@@ -31,6 +31,41 @@ object ImageNormalizer {
     const val EXTENSION = "png"
 
     /**
+     * El lado mayor de una miniatura (§4.4).
+     *
+     * Existe para que **la lista no descodifique nunca el original**. Una tarjeta
+     * desplegada con diez imágenes son diez `BufferedImage` en memoria a la vez; a
+     * 1600 px son 10,2 MB cada una, a 400 px son 640 KB y a 256 px son 260 KB. Y no es
+     * una cifra teórica: el disco de quien ya usaba el plugin está lleno de capturas de
+     * 1600 px que esta fase decide **no tocar** —reescalarlas cambiaría su SHA, que es
+     * su nombre, y con él todas las referencias de los cuerpos—, así que la miniatura es
+     * lo que hace que esas capturas dejen de pesar aunque sigan ahí.
+     *
+     * 256 y no 400: una tarjeta de la lista mide lo que mide la tool window, y ahí una
+     * vista previa más grande no se ve mejor, sólo ocupa más. Para mirar de cerca está
+     * el popup, que sí lee el original.
+     */
+    const val THUMB_SIZE = 256
+
+    /**
+     * A partir de qué tamaño una miniatura **se paga a sí misma**.
+     *
+     * Una miniatura no es gratis: es un fichero más por blob —o sea, el doble de
+     * ficheros en el árbol— y un 45 % más de disco sobre una captura de 400 px. Con el
+     * tope nuevo, el original ya está a un factor 2,4 de su miniatura en memoria
+     * (640 KB contra 262 KB), y a cambio de ese factor se duplicaría justo lo que esta
+     * fase viene a acotar.
+     *
+     * Con el doble del tope de la miniatura, la cuenta cambia de signo: una captura de
+     * 1600 px —las que puede haber ya guardadas— cuesta 10,2 MB descodificada contra
+     * 262 KB, cuarenta veces más. **Ahí sí**, y por eso la miniatura existe.
+     */
+    const val THUMB_THRESHOLD = THUMB_SIZE * 2
+
+    /** ¿Merece la pena una miniatura para una imagen de este tamaño? Ver [THUMB_THRESHOLD]. */
+    fun needsThumbnail(width: Int, height: Int): Boolean = maxOf(width, height) > THUMB_THRESHOLD
+
+    /**
      * Suelo de cordura, no la política. Cuánto se reescala lo decide el usuario y lo
      * acota [com.tasklane.domain.model.TasklaneConfig.normalized]: tener el rango en
      * un solo sitio es lo que evita que el fichero de configuración y esta clase
@@ -52,6 +87,45 @@ object ImageNormalizer {
         ImageIO.write(scaled, EXTENSION, out)
         return out.toByteArray()
     }
+
+    /**
+     * La miniatura de una imagen ya guardada, en bytes PNG.
+     *
+     * @return `null` cuando no merece la pena —ver [THUMB_THRESHOLD]—, que con el tope
+     *   nuevo de 400 px es el caso de **todo lo que se pegue a partir de ahora**. Un
+     *   fichero que no se escribe es un fichero que no hay que recolectar, reconciliar
+     *   ni contar, y quien lea sabe caer al original.
+     */
+    fun thumbnail(source: BufferedImage, maxSize: Int = THUMB_SIZE): ByteArray? {
+        if (!needsThumbnail(source.width, source.height)) return null
+        val out = ByteArrayOutputStream(INITIAL_BUFFER)
+        ImageIO.write(scale(source, maxSize), EXTENSION, out)
+        return out.toByteArray()
+    }
+
+    /** El tamaño de un PNG, en píxeles. */
+    data class Size(val width: Int, val height: Int)
+
+    /**
+     * Las dimensiones de un PNG **sin descodificarlo**: se leen de la cabecera.
+     *
+     * La cabecera `IHDR` de un PNG está siempre en el mismo sitio —ocho bytes de firma,
+     * ocho de longitud y tipo, y ahí el ancho y el alto en big-endian—, así que esto son
+     * veinticuatro bytes en vez de los diez megas que ocupa descodificar una captura de
+     * 1600 px. Importa porque quien lo llama es el reconciliador del §4.3, que puede
+     * estar adoptando **millones** de ficheros de una tacada.
+     *
+     * @return `null` si no es un PNG o si está truncado. Ausente no es excepcional: por
+     *   ahí pasa cualquier cosa que alguien haya dejado caer en el directorio.
+     */
+    fun dimensions(header: ByteArray): Size? {
+        if (header.size < IHDR_END) return null
+        for (i in SIGNATURE.indices) if (header[i] != SIGNATURE[i]) return null
+        return Size(readInt(header, IHDR_WIDTH), readInt(header, IHDR_WIDTH + 4))
+    }
+
+    /** Cuántos bytes hay que leer de un fichero para que [dimensions] pueda contestar. */
+    const val HEADER_BYTES = 24
 
     /** SHA-256 en hexadecimal: el nombre del fichero y el ID del adjunto. */
     fun sha256(bytes: ByteArray): String =
@@ -97,4 +171,14 @@ object ImageNormalizer {
     }
 
     private const val INITIAL_BUFFER = 64 * 1024
+
+    private val SIGNATURE = byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)
+    private const val IHDR_WIDTH = 16
+    private const val IHDR_END = 24
+
+    private fun readInt(bytes: ByteArray, at: Int): Int =
+        ((bytes[at].toInt() and 0xFF) shl 24) or
+            ((bytes[at + 1].toInt() and 0xFF) shl 16) or
+            ((bytes[at + 2].toInt() and 0xFF) shl 8) or
+            (bytes[at + 3].toInt() and 0xFF)
 }

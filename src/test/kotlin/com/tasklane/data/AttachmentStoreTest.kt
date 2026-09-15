@@ -1,6 +1,7 @@
 package com.tasklane.data
 
 import com.tasklane.data.attachment.AttachmentStore
+import com.tasklane.data.attachment.BlobLayout
 import com.tasklane.data.attachment.ImageNormalizer
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.domain.model.AttachmentId
@@ -16,7 +17,16 @@ import org.junit.rules.TemporaryFolder
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.file.Files
+import java.nio.file.Path
 
+/**
+ * El almacén de blobs, ya fragmentado (§4.1).
+ *
+ * Lo que hay que fijar aquí son dos cosas que se pisan: que lo nuevo se escribe en su
+ * hoja `ab/cd`, y que **lo viejo se sigue encontrando en plano mientras no se traslade**.
+ * Sin lo segundo, actualizar el plugin dejaría a todo el mundo con las capturas
+ * «desaparecidas» hasta que terminara un trabajo de fondo.
+ */
 class AttachmentStoreTest {
 
     @get:Rule
@@ -28,18 +38,31 @@ class AttachmentStoreTest {
     private fun layout() = StorageLayout(tmp.root.toPath().resolve("tasklane"))
     private fun store() = AttachmentStore(layout())
 
-    private fun png(color: Color = Color.RED): ByteArray {
-        val image = BufferedImage(20, 10, BufferedImage.TYPE_INT_ARGB)
+    private fun png(size: Int = 20, color: Color = Color.RED): ByteArray {
+        val image = BufferedImage(size, size / 2, BufferedImage.TYPE_INT_ARGB)
         image.createGraphics().run {
             setColor(color)
-            fillRect(0, 0, 20, 10)
+            fillRect(0, 0, size, size / 2)
             dispose()
         }
-        return ImageNormalizer.normalize(image, 1600)
+        return ImageNormalizer.normalize(image, MAX)
+    }
+
+    /** Todos los blobs del árbol, recorriéndolo como lo hace la reconciliación. */
+    private fun scanned(store: AttachmentStore, repo: RepoKey): List<AttachmentStore.Blob> {
+        val out = ArrayList<AttachmentStore.Blob>()
+        store.scan(repo) { out += it.blobs }
+        return out
+    }
+
+    private fun temporaries(store: AttachmentStore, repo: RepoKey): List<AttachmentStore.Blob> {
+        val out = ArrayList<AttachmentStore.Blob>()
+        store.scan(repo) { out += it.temporaries }
+        return out
     }
 
     @Test
-    fun `guardar devuelve el sha del contenido y deja el fichero donde toca`() {
+    fun `guardar devuelve el sha del contenido y lo deja en su hoja`() {
         val store = store()
         val bytes = png()
         val id = store.put(repo, bytes)
@@ -47,6 +70,12 @@ class AttachmentStoreTest {
         assertEquals(ImageNormalizer.sha256(bytes), id.value)
         assertTrue(store.exists(repo, id))
         assertEquals(bytes.toList(), Files.readAllBytes(store.path(repo, id)).toList())
+
+        // `attachments/ab/cd/<sha>.png`, y ni un fichero suelto en la raíz.
+        val root = layout().attachmentsDir(repo)
+        assertEquals(root.resolve(id.value.substring(0, 2)).resolve(id.value.substring(2, 4)),
+            store.path(repo, id).parent)
+        assertTrue(Files.list(root).use { it.allMatch(Files::isDirectory) })
     }
 
     @Test
@@ -56,7 +85,7 @@ class AttachmentStoreTest {
         val second = store.put(repo, png())
 
         assertEquals(first, second)
-        assertEquals(1, store.list(repo).size)
+        assertEquals(1, scanned(store, repo).size)
     }
 
     /** Las tareas viven por repositorio; sus imágenes también. */
@@ -66,8 +95,8 @@ class AttachmentStoreTest {
         val id = store.put(repo, png())
         store.put(other, png())
 
-        assertEquals(1, store.list(repo).size)
-        assertEquals(1, store.list(other).size)
+        assertEquals(1, scanned(store, repo).size)
+        assertEquals(1, scanned(store, other).size)
         assertTrue(store.exists(other, id))
     }
 
@@ -104,26 +133,185 @@ class AttachmentStoreTest {
         assertNull(store.load(repo, id))
     }
 
+    // ------------------------------------------------------- lo que ya estaba
+
+    /**
+     * **La garantía de la actualización**: una captura escrita por la 2.0 en el
+     * directorio plano se sigue encontrando, tal cual, sin haber trasladado nada.
+     */
     @Test
-    fun `el listado ignora lo que no es un blob`() {
+    fun `un blob en plano se sigue encontrando`() {
+        val store = store()
+        val bytes = png()
+        val id = AttachmentId(ImageNormalizer.sha256(bytes))
+        writeFlat(id, bytes)
+
+        assertTrue(store.exists(repo, id))
+        assertEquals(store.legacyPath(repo, id), store.locate(repo, id))
+        assertNotNull(store.load(repo, id))
+        // Y no se reescribe en la hoja: ya está guardado, el nombre es su contenido.
+        assertEquals(id, store.put(repo, bytes))
+        assertFalse(Files.exists(store.path(repo, id)))
+    }
+
+    @Test
+    fun `el traslado mueve lo plano a su hoja, con su miniatura`() {
+        val store = store()
+        val bytes = png()
+        val id = AttachmentId(ImageNormalizer.sha256(bytes))
+        writeFlat(id, bytes)
+        writeFlat(id, bytes, thumbnail = true)
+
+        val pass = store.relocate(repo)
+
+        assertEquals(2, pass.moved)
+        assertFalse(pass.remaining)
+        assertTrue(Files.exists(store.path(repo, id)))
+        assertTrue(Files.exists(store.thumbnailPath(repo, id)))
+        assertFalse(Files.exists(store.legacyPath(repo, id)))
+        assertEquals(store.path(repo, id), store.locate(repo, id))
+    }
+
+    /** Por tandas: con un millón de ficheros en plano, moverlos todos de una vez es la operación que no termina. */
+    @Test
+    fun `el traslado va por tandas y dice si queda mas`() {
+        val store = store()
+        repeat(5) { writeFlat(AttachmentId(ImageNormalizer.sha256(png(size = 20 + it * 2))), png(size = 20 + it * 2)) }
+
+        val first = store.relocate(repo, limit = 2)
+        assertEquals(2, first.moved)
+        assertTrue(first.remaining)
+
+        val rest = store.relocate(repo, limit = 10)
+        assertEquals(3, rest.moved)
+        assertFalse(rest.remaining)
+        assertEquals(5, scanned(store, repo).size)
+    }
+
+    @Test
+    fun `el traslado no toca lo que no es un blob`() {
+        val store = store()
+        val dir = layout().attachmentsDir(repo)
+        Files.createDirectories(dir)
+        Files.writeString(dir.resolve("notas.txt"), "hola")
+        Files.writeString(dir.resolve("a1b2.png"), "sha demasiado corto")
+
+        assertEquals(0, store.relocate(repo).moved)
+        assertTrue(Files.exists(dir.resolve("notas.txt")))
+    }
+
+    // ------------------------------------------------------------ miniaturas
+
+    @Test
+    fun `la miniatura vive al lado y no se confunde con un blob`() {
+        val store = store()
+        val id = store.put(repo, png())
+        store.putThumbnail(repo, id, png(size = 8))
+
+        assertTrue(Files.exists(store.thumbnailPath(repo, id)))
+        assertNotNull(store.load(repo, id, thumbnail = true))
+        // El recorrido ve UN blob, no dos: una miniatura no se referencia ni se recoge
+        // por su cuenta, se va con su original.
+        assertEquals(1, scanned(store, repo).size)
+    }
+
+    @Test
+    fun `borrar se lleva el original y su miniatura`() {
+        val store = store()
+        val id = store.put(repo, png())
+        store.putThumbnail(repo, id, png(size = 8))
+
+        assertTrue(store.delete(repo, id))
+        assertFalse(store.exists(repo, id))
+        assertNull(store.locate(repo, id, thumbnail = true))
+        assertTrue(scanned(store, repo).isEmpty())
+    }
+
+    /** También si la pareja se quedó en plano: un traslado a medias no puede dejar basura sin dueño. */
+    @Test
+    fun `borrar tambien limpia lo que quedo en plano`() {
+        val store = store()
+        val bytes = png()
+        val id = AttachmentId(ImageNormalizer.sha256(bytes))
+        writeFlat(id, bytes)
+        writeFlat(id, bytes, thumbnail = true)
+
+        assertTrue(store.delete(repo, id))
+        assertNull(store.locate(repo, id))
+        assertNull(store.locate(repo, id, thumbnail = true))
+    }
+
+    // -------------------------------------------------------------- recorrido
+
+    @Test
+    fun `el recorrido ignora lo que no es un blob`() {
         val store = store()
         store.put(repo, png())
         val dir = layout().attachmentsDir(repo)
         Files.writeString(dir.resolve("notas.txt"), "hola")
         Files.writeString(dir.resolve("a1b2.png"), "sha demasiado corto")
 
-        assertEquals(1, store.list(repo).size)
+        assertEquals(1, scanned(store, repo).size)
     }
 
     @Test
     fun `un temporal de una escritura interrumpida se detecta aparte`() {
         val store = store()
-        store.put(repo, png())
-        val dir = layout().attachmentsDir(repo)
-        Files.writeString(dir.resolve("${"c".repeat(64)}.tmp"), "a medias")
+        val id = store.put(repo, png())
+        val leftover = store.path(repo, id).resolveSibling("${"c".repeat(64)}.png.tmp")
+        Files.writeString(leftover, "a medias")
 
-        assertEquals(1, store.list(repo).size)
-        assertEquals(1, store.orphanTemporaries(repo).size)
+        assertEquals(1, scanned(store, repo).size)
+        assertEquals(listOf(leftover), temporaries(store, repo).map { it.path })
+    }
+
+    /**
+     * El recorrido cuenta lo que encuentra **fuera del árbol**, porque de eso depende que
+     * el traslado se pueda dar por terminado: si una versión anterior del plugin vuelve a
+     * escribir en plano, la marca deja de ser cierta.
+     */
+    @Test
+    fun `el recorrido distingue lo que quedo en plano`() {
+        val store = store()
+        store.put(repo, png())
+        val bytes = png(size = 30)
+        writeFlat(AttachmentId(ImageNormalizer.sha256(bytes)), bytes)
+
+        var blobs = 0
+        var flat = 0
+        store.scan(repo) {
+            blobs += it.blobs.size
+            flat += it.flat
+        }
+        assertEquals(2, blobs)
+        assertEquals(1, flat)
+    }
+
+    @Test
+    fun `el recorrido se puede parar`() {
+        val store = store()
+        repeat(6) { store.put(repo, png(size = 20 + it * 2)) }
+
+        var seen = 0
+        val complete = store.scan(repo, batch = 1, cancelled = { seen >= 2 }) { seen += it.blobs.size }
+
+        assertFalse("un recorrido cancelado no concluye nada", complete)
+        assertTrue(seen < 6)
+    }
+
+    @Test
+    fun `recorrer un repositorio sin adjuntos no falla`() {
+        assertTrue(scanned(store(), repo).isEmpty())
+    }
+
+    @Test
+    fun `las dimensiones salen de la cabecera del png`() {
+        val store = store()
+        val id = store.put(repo, png(size = 40))
+        val size = store.dimensionsOf(store.path(repo, id))
+
+        assertEquals(40, size?.width)
+        assertEquals(20, size?.height)
     }
 
     @Test
@@ -135,8 +323,16 @@ class AttachmentStoreTest {
         assertFalse(store.exists(repo, id))
     }
 
-    @Test
-    fun `listar un repositorio sin adjuntos no falla`() {
-        assertTrue(store().list(repo).isEmpty())
+    private fun writeFlat(id: AttachmentId, bytes: ByteArray, thumbnail: Boolean = false): Path {
+        val dir = layout().attachmentsDir(repo)
+        Files.createDirectories(dir)
+        val file = dir.resolve(BlobLayout.fileName(id, thumbnail))
+        Files.write(file, bytes)
+        return file
+    }
+
+    private companion object {
+        /** El tope viejo: aquí se guarda lo que se dibuja, sin reescalar. */
+        const val MAX = 1600
     }
 }

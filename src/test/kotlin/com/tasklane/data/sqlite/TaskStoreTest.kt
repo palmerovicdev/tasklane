@@ -360,17 +360,25 @@ class TaskStoreTest {
         assertEquals(1, stats.orphans)
     }
 
-    /** Los adjuntos que el recolector no puede tocar, sin recorrer el corpus. */
+    /**
+     * Los adjuntos que el recolector no puede tocar, sin recorrer el corpus **y sin
+     * traerse a memoria los del repositorio entero**: se pregunta por los candidatos de
+     * la tanda, que son los únicos sobre los que se va a decidir.
+     */
     @Test
     fun `las referencias a imagenes salen de su tabla`() = withStore { store, _ ->
         val sha = "b".repeat(64)
+        val otro = com.tasklane.domain.model.AttachmentId("c".repeat(64))
         store.put(task("a", body = "Con captura\n![](tasklane:$sha)"))
-        assertEquals(setOf(sha), store.referencedBlobs(REPO))
+
+        val candidatos = listOf(com.tasklane.domain.model.AttachmentId(sha), otro)
+        assertEquals(setOf(sha), store.referencedAmong(REPO, candidatos))
+        assertTrue("lo que no se pregunta no sale", store.referencedAmong(REPO, listOf(otro)).isEmpty())
 
         // Quitar la referencia del cuerpo la quita de la tabla: es lo que hace que el
         // recolector pueda volver a considerar el fichero.
         store.put(task("a", body = "Sin captura"))
-        assertTrue(store.referencedBlobs(REPO).isEmpty())
+        assertTrue(store.referencedAmong(REPO, candidatos).isEmpty())
     }
 
     /** Qué tareas cuelgan de un fichero: un salto de índice, no el modelo entero (§3.6). */

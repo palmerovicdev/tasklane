@@ -447,7 +447,7 @@ data class RepositoryRef(
 ├── data/
 │   ├── migration/  Migration, MigrationRunner, V1toV2
 │   ├── store/      StorageLayout, TasksCodec, TaskFileStore, ReadResult
-│   └── attachment/ AttachmentStore, ImageNormalizer, AttachmentGc
+│   └── attachment/ AttachmentStore, BlobLayout, ImageNormalizer, AttachmentGc, AttachmentQuota
 ├── settings/
 │   ├── TasklaneConfig.kt             # @Service project-level → .idea/tasklane.xml
 │   ├── TasklaneDefaults.kt           # @Service app-level: plantilla de proyectos nuevos
@@ -476,7 +476,7 @@ data class RepositoryRef(
 ├── actions/         QuickAddAction, FocusSearchAction, ToggleCompleteAction,
 │                    ChangeStateAction, ChangePriorityAction, DeleteTaskAction,
 │                    ExportStateAction, ExportGroupAction, ExportSelectionAction
-└── startup/         AttachmentGcActivity (ProjectActivity)</code></pre>
+└── startup/         AttachmentMaintenanceActivity (ProjectActivity)</code></pre>
   <div class="adr warn">
     <span class="tag">Corregido durante la Fase 1 · no hay capa de DTOs</span>
     <p>El diseño original tenía un paquete <code>data/dto</code> con clases anotadas para <code>com.intellij.util.xmlb</code>. Al implementarlo apareció un problema que lo invalida: <strong>xmlb descarta los atributos que no reconoce</strong>. Eso destruye justo la garantía que <code>Task.extra</code> existe para dar — que abrir el proyecto con una versión vieja del plugin no borre datos escritos por una nueva.</p>
@@ -520,7 +520,8 @@ data class RepositoryRef(
         │   ├── tasks.xml
         │   ├── tasks.xml.bak          # última versión que se leyó correctamente
         │   └── attachments/
-        │       └── 9f86d08188…e7cf.png
+        │       └── 9f/86/9f86d08188…e7cf.png      # fragmentado desde la 2.1
+        │           9f/86/9f86d08188…e7cf.thumb.png
         └── sinonte-backend-api-a3f91d0e/
             ├── tasks.xml
             └── attachments/</code></pre>
@@ -831,7 +832,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
   <h3>Imágenes</h3>
   <div class="adr">
     <span class="tag">Representación elegida</span>
-    <p>Cuerpo en <strong>Markdown-lite</strong>, imágenes como <strong>blobs direccionados por contenido</strong> fuera del fichero de tareas. La referencia es <code>![](tasklane:&lt;sha256&gt;)</code> y el fichero vive en <code>attachments/&lt;sha256&gt;.png</code>.</p>
+    <p>Cuerpo en <strong>Markdown-lite</strong>, imágenes como <strong>blobs direccionados por contenido</strong> fuera del fichero de tareas. La referencia es <code>![](tasklane:&lt;sha256&gt;)</code> y el fichero vive en <code>attachments/&lt;ab&gt;/&lt;cd&gt;/&lt;sha256&gt;.png</code> — fragmentado desde la 2.1, ver abajo.</p>
     <p>Direccionar por contenido resuelve tres cosas de golpe: la misma captura pegada en dos tareas ocupa un blob, no hay nombres que colisionen, y la recolección de basura es contar referencias. Base64 embebido se descartó por lo obvio — infla el fichero de tareas, lo carga entero en memoria y destroza cualquier diff.</p>
   </div>
   <p>Markdown se elige porque mantiene el cuerpo como texto plano (búsqueda, exportación y diff triviales) y porque coincide con la ruta de renderizado que recomienda JetBrains: convertir con <code>org.jetbrains:markdown</code> y mostrar en <code>JBHtmlPane</code>. Pero no se impone como sintaxis al usuario: quien escriba texto plano nunca ve una marca.</p>
@@ -844,8 +845,22 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <li><strong>Previsualización en línea:</strong> <code>InlayModel.addBlockElement</code> con un <code>EditorCustomElementRenderer</code> que pinta la imagen escalada bajo la línea de la referencia. Los inlays se recalculan con debounce al cambiar el documento y la <code>BufferedImage</code> escalada se cachea por <code>(repo, id, ancho)</code>; <code>JBUIScale</code> mantiene la nitidez en HiDPI. La imagen se decodifica fuera del EDT: mientras tanto el hueco ya está puesto, con su marcador.</li>
     <li><strong>Ampliar:</strong> el clic sobre el inlay abre la imagen en un <code>JBPopup</code>, escalada a la pantalla.</li>
     <li><strong>Borrar:</strong> se selecciona el <code>[image]</code> y se pulsa <code>Supr</code>, como cualquier otro texto. Al desaparecer la referencia desaparece la vista previa.</li>
-    <li><strong>Recolección:</strong> <code>AttachmentGc</code> corre al abrir el proyecto, fuera del EDT, y borra blobs sin referencias con un periodo de gracia de 24 h — para que deshacer un pegado no deje una referencia rota. Sólo mira repositorios ya leídos y nunca los abiertos en solo lectura: en los dos casos «no veo referencias» significaría «no lo sé», no «no las hay».</li>
+    <li><strong>Recolección:</strong> <code>AttachmentGc</code> corre al abrir el proyecto, fuera del EDT, y borra blobs sin referencias con un periodo de gracia de 24 h — para que deshacer un pegado no deje una referencia rota. Nunca los abiertos en solo lectura ni los que están a medio importar: en los dos casos «no veo referencias» significaría «no lo sé», no «no las hay».</li>
   </ul>
+
+  <div class="adr warn">
+    <span class="tag">2.1.0 · los adjuntos a escala (Fase 4)</span>
+    <p>Lo de arriba era correcto para un puñado de capturas y dejó de serlo por las mismas dos razones de siempre, una de disco y otra de memoria. <strong>De disco:</strong> saber qué blobs sobraban era listar el directorio —<code>Files.list</code> más un <code>readAttributes</code> por entrada, en cada apertura—, y un directorio plano con millones de ficheros no es lento, es intratable. <strong>De memoria:</strong> la lista descodificaba el original para pintar una vista previa del tamaño de un sello, y una captura de 1600&nbsp;px en <code>INT_ARGB</code> son 10,2&nbsp;MB.</p>
+    <p><strong>Tres piezas, y las tres son el mismo movimiento que la Fase 3</strong> — dejar de recorrer y empezar a preguntar:</p>
+    <ul>
+      <li><strong>El árbol</strong>: <code>attachments/ab/cd/&lt;sha&gt;.png</code>, los cuatro primeros dígitos hexadecimales del hash. 65.536 hojas, ~150 blobs por hoja con diez millones, y ningún directorio del árbol por encima de 256 entradas. El SHA reparte solo, así que no hay nada que equilibrar. Lo que quedara en plano se traslada en segundo plano y por tandas, y <code>AttachmentStore.locate</code> prueba las dos rutas mientras tanto: ninguna lectura depende de que el traslado haya terminado.</li>
+      <li><strong>La contabilidad</strong>: la tabla <code>blob</code> —qué hay, cuánto pesa, de qué tamaño, desde cuándo— junto a la <code>blob_ref</code> que ya mantenía la Fase 3. Recoger pasa a ser un <code>SELECT … NOT EXISTS … LIMIT 1000</code> por índice, a tandas y cancelable. La reconciliación semanal es lo que mantiene tabla y disco de acuerdo en los dos sentidos, y se apoya en una columna <code>seen_at</code>: el recorrido sella lo que ve y al final lo que quedó con el sello viejo es lo que falta — sin retener un solo identificador en memoria.</li>
+      <li><strong>Las miniaturas</strong>: <code>&lt;sha&gt;.thumb.png</code> a 256&nbsp;px, al lado del original. La lista, el tooltip del margen y cualquier sitio que pinte muchas a la vez piden la miniatura; el original sólo se lee al ampliar. <strong>Sólo la tienen los blobs que la pagan</strong> —por encima del doble de 256&nbsp;px—: escribirla siempre sería un fichero más por blob y un 45&nbsp;% de disco a cambio de un factor 2,4, mientras que sobre una captura de 1600&nbsp;px el factor es cuarenta. Por debajo del umbral no hay fichero y quien lee cae al original, que pesa lo que pesaría su miniatura.</li>
+    </ul>
+    <p><strong>El tope de escalado baja de 1600 a 400&nbsp;px</strong> para lo que se pegue a partir de ahora. <strong>Lo ya guardado no se toca</strong>, y la razón es la misma propiedad que hace bueno el direccionamiento por contenido: el nombre de un blob es el hash de sus bytes, así que reescalarlo cambiaría su nombre y obligaría a reescribir el cuerpo de todas las tareas que lo nombran. Lo que sí se hace es contarlo — <em>Diagnostics</em> dice cuántas capturas quedan por encima del tope y cuánto ocupan— y no descodificarlo nunca en la lista, que es de donde venía el coste.</p>
+    <p><strong>Las dos tablas entran sin subir <code>user_version</code></strong>, y es una decisión: subirla dejaría en <strong>solo lectura</strong> cualquier proyecto que luego se abriera con la 2.0 —la promesa de la Fase 3, aplicada donde no toca—, o sea bloquearía editar tareas para proteger contabilidad que la reconciliación sabe reconstruir. La regla queda escrita en <code>TaskSchema.VERSION</code>: se sube cuando una versión anterior escribiendo perdería datos <em>irreconstruibles</em>, no por tablas derivadas.</p>
+    <p><strong>Y una política, porque la aritmética no la arregla el diseño:</strong> diez millones de capturas a 400&nbsp;px son 315&nbsp;GB, o 31&nbsp;GB con deduplicación 10:1. El plugin va igual de rápido con ellas; lo que no puede es inventar disco. Al cruzar un umbral configurable —5&nbsp;GB por defecto— se avisa una vez, con el peso y con las salidas. Nunca se borra nada por cuota.</p>
+  </div>
   <p class="cap">Se descartó incrustar el preview JCEF del plugin Markdown: viola la restricción de no usar WebView y añade una dependencia dura a un plugin que no está en todos los IDEs.</p>
   <div class="adr warn">
     <span class="tag">Corregido durante la Fase 6 · la ampliación es un popup, no un editor de fichero</span>
@@ -988,7 +1003,7 @@ GitRepository.GIT_REPO_CHANGE                         → refrescar rama en el t
     <li>Adjunto referenciado pero ausente: marcador de posición en el inlay; la referencia no se borra.</li>
     <li>Misma imagen en dos tareas: un solo blob; sólo se recoge cuando no queda ninguna referencia.</li>
     <li>Captura enorme del portapapeles: se reescala al máximo configurado antes de guardar.</li>
-    <li>Deshacer tras pegar: el texto se revierte; el blob queda huérfano y lo recoge el GC tras el periodo de gracia.</li>
+    <li>Deshacer tras pegar: el texto se revierte; el blob queda huérfano y lo recoge el GC tras el periodo de gracia. Volver a verlo en un escaneo <strong>no</strong> reinicia ese periodo, o no se recogería nunca.</li>
   </ul>
 </section>
 

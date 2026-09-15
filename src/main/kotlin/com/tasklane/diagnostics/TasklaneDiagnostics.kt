@@ -4,7 +4,6 @@ import com.tasklane.data.store.StorageLayout
 import com.tasklane.domain.model.RepoKey
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.attribute.BasicFileAttributes
 
 /**
  * El retrato de un proyecto: cuántas tareas hay, cuánto ocupan y cuánto pesan sus
@@ -23,22 +22,16 @@ import java.nio.file.attribute.BasicFileAttributes
  * [com.tasklane.data.attachment.AttachmentGc] por la misma razón: una cifra que se
  * enseña al usuario tiene que ser una cifra que un test pueda fijar.
  *
- * **Bloqueante.** Recorre directorios: llamar desde `Dispatchers.IO`, nunca del EDT.
- * Es justamente el recorrido que el §1.6 dice que no termina con diez millones de
- * blobs, así que [collect] lleva su propio tope y lo dice cuando lo alcanza.
+ * **Lo que la Fase 4 quitó de aquí.** Hasta la 2.0 esto pesaba el directorio de
+ * adjuntos recorriéndolo, con un tope de 200.000 ficheros y un «+» cuando lo alcanzaba:
+ * era la única forma de saber cuánto ocupaban, y era justamente el recorrido que el
+ * §1.6 dice que no termina. Ahora las imágenes las cuenta la tabla `blob` —§4.2—, así
+ * que la cifra es exacta, es instantánea y ya no hay nada que truncar. Al disco sólo se
+ * va a pesar tres ficheros: la base, su diario y lo que quede del formato XML.
+ *
+ * **Bloqueante**, aunque mucho menos que antes: llamar desde `Dispatchers.IO`.
  */
 object TasklaneDiagnostics {
-
-    /**
-     * Cuántos ficheros de adjuntos se miran como mucho.
-     *
-     * Con diez millones en un directorio plano, `Files.list` más un `readAttributes`
-     * por entrada es minutos de trabajo —el §1.6—, y una acción de diagnóstico que
-     * cuelga el IDE es peor que no tener acción de diagnóstico. Al llegar al tope se
-     * deja de contar y se **dice** que la cifra está truncada: un número redondo sin
-     * aviso se leería como el total.
-     */
-    const val BLOB_SCAN_LIMIT = 200_000
 
     data class RepoReport(
         val repo: RepoKey,
@@ -54,16 +47,33 @@ object TasklaneDiagnostics {
         val distinctImages: Int,
         val tasksFileBytes: Long,
         val backupBytes: Long,
-        val blobCount: Int,
-        val blobBytes: Long,
-        /** El directorio tenía más de [BLOB_SCAN_LIMIT] ficheros y se dejó de contar. */
-        val blobsTruncated: Boolean,
+        /** Lo que la tabla `blob` sabe de este repositorio. Ver [BlobStats]. */
+        val blobs: BlobStats = BlobStats(),
+        /**
+         * Si la reconciliación del §4.3 ya pasó por este repositorio.
+         *
+         * Importa decirlo: hasta que pasa la primera vez, la tabla sólo conoce los blobs
+         * que se hayan escrito con la 2.1 en adelante, así que las cifras de imágenes de
+         * un proyecto recién actualizado están **incompletas**, no a cero. Un informe que
+         * dijera «0 imágenes» de un directorio lleno sería exactamente el mismo error que
+         * el §1.6 le prohíbe al recolector.
+         */
+        val reconciled: Boolean = false,
     ) {
+        val blobCount: Int get() = blobs.count
+        val blobBytes: Long get() = blobs.bytes
+
         /** Lo que este repositorio ocupa en `.idea`, tareas y capturas juntas. */
         val totalBytes: Long get() = tasksFileBytes + backupBytes + blobBytes
 
-        /** Blobs que están en disco pero que ya no nombra ninguna tarea. Candidatos del GC. */
-        val unreferencedBlobs: Int get() = (blobCount - distinctImages).coerceAtLeast(0)
+        /**
+         * Blobs que están en disco pero que ya no nombra ninguna tarea. Candidatos del GC.
+         *
+         * Sale de restar lo que hay menos lo que se nombra, y las dos cifras vienen ya de
+         * la base: `blob` contra `blob_ref`. Antes la primera había que ir a buscarla al
+         * directorio.
+         */
+        val unreferencedBlobs: Int get() = (blobs.present - distinctImages).coerceAtLeast(0)
     }
 
     data class Report(
@@ -71,12 +81,20 @@ object TasklaneDiagnostics {
         val heapUsedBytes: Long,
         val heapMaxBytes: Long,
         val latencies: List<TasklaneMetrics.Sample>,
+        /** El umbral de aviso del §4.5, o `0` si está apagado. */
+        val quotaBytes: Long = 0,
+        /** El tope de escalado vigente: es contra él contra lo que se cuenta lo sobredimensionado. */
+        val imageMaxSize: Int = 0,
     ) {
         val tasks: Int get() = repos.sumOf { it.tasks }
         val blobCount: Int get() = repos.sumOf { it.blobCount }
         val blobBytes: Long get() = repos.sumOf { it.blobBytes }
+        val missingBlobs: Int get() = repos.sumOf { it.blobs.missing }
+        val oversizedBlobs: Int get() = repos.sumOf { it.blobs.oversized }
+        val oversizedBytes: Long get() = repos.sumOf { it.blobs.oversizedBytes }
         val totalBytes: Long get() = repos.sumOf { it.totalBytes }
-        val truncated: Boolean get() = repos.any { it.blobsTruncated }
+        val pending: Boolean get() = repos.any { !it.reconciled }
+        val overQuota: Boolean get() = quotaBytes > 0 && blobBytes >= quotaBytes
     }
 
     /**
@@ -88,6 +106,10 @@ object TasklaneDiagnostics {
     fun collect(
         layout: StorageLayout?,
         stats: Map<RepoKey, TaskStats>,
+        blobs: Map<RepoKey, BlobStats> = emptyMap(),
+        reconciled: Set<RepoKey> = emptySet(),
+        quotaBytes: Long = 0,
+        imageMaxSize: Int = 0,
         metrics: List<TasklaneMetrics.Sample> = emptyList(),
     ): Report {
         val runtime = Runtime.getRuntime()
@@ -97,16 +119,25 @@ object TasklaneDiagnostics {
         var db = layout?.let(::dbBytes) ?: 0L
         return Report(
             repos = stats.map { (repo, counts) ->
-                repoReport(layout, repo, counts, db).also { db = 0L }
+                repoReport(layout, repo, counts, db, blobs[repo] ?: BlobStats(), repo in reconciled)
+                    .also { db = 0L }
             },
             heapUsedBytes = runtime.totalMemory() - runtime.freeMemory(),
             heapMaxBytes = runtime.maxMemory(),
             latencies = metrics,
+            quotaBytes = quotaBytes,
+            imageMaxSize = imageMaxSize,
         )
     }
 
-    private fun repoReport(layout: StorageLayout?, repo: RepoKey, stats: TaskStats, dbBytes: Long): RepoReport {
-        val blobs = layout?.let { scanBlobs(it.attachmentsDir(repo)) } ?: BlobScan.EMPTY
+    private fun repoReport(
+        layout: StorageLayout?,
+        repo: RepoKey,
+        stats: TaskStats,
+        dbBytes: Long,
+        blobs: BlobStats,
+        reconciled: Boolean,
+    ): RepoReport {
         return RepoReport(
             repo = repo,
             tasks = stats.tasks,
@@ -123,9 +154,8 @@ object TasklaneDiagnostics {
             // migración y la copia de seguridad que escribía el volcado. Es espacio que
             // el usuario puede recuperar en cuanto se fíe, y por eso se dice.
             backupBytes = layout?.let { xmlBytes(it, repo) } ?: 0L,
-            blobCount = blobs.count,
-            blobBytes = blobs.bytes,
-            blobsTruncated = blobs.truncated,
+            blobs = blobs,
+            reconciled = reconciled,
         )
     }
 
@@ -141,47 +171,6 @@ object TasklaneDiagnostics {
         return sizeOf(base) +
             sizeOf(base.resolveSibling("${StorageLayout.DB_FILE}-wal")) +
             sizeOf(base.resolveSibling("${StorageLayout.DB_FILE}-shm"))
-    }
-
-    private data class BlobScan(val count: Int, val bytes: Long, val truncated: Boolean) {
-        companion object {
-            val EMPTY = BlobScan(0, 0L, false)
-        }
-    }
-
-    /**
-     * Cuenta y pesa el directorio de adjuntos, hasta [BLOB_SCAN_LIMIT].
-     *
-     * Con `Files.newDirectoryStream` y no con `Files.list(dir).toList()` —que es lo
-     * que hace hoy `AttachmentStore.list`— justamente porque aquí sí se puede parar:
-     * el `toList()` materializa el directorio entero antes de que nadie pueda decidir
-     * que ya son demasiados.
-     */
-    private fun scanBlobs(dir: Path): BlobScan {
-        if (!Files.isDirectory(dir)) return BlobScan.EMPTY
-        var count = 0
-        var bytes = 0L
-        var truncated = false
-        try {
-            Files.newDirectoryStream(dir).use { entries ->
-                for (path in entries) {
-                    if (count >= BLOB_SCAN_LIMIT) {
-                        truncated = true
-                        break
-                    }
-                    val attrs = runCatching {
-                        Files.readAttributes(path, BasicFileAttributes::class.java)
-                    }.getOrNull() ?: continue
-                    if (!attrs.isRegularFile) continue
-                    count++
-                    bytes += attrs.size()
-                }
-            }
-        } catch (_: Exception) {
-            // Un directorio ilegible no es motivo para no dar el resto del informe.
-            return BlobScan(count, bytes, truncated)
-        }
-        return BlobScan(count, bytes, truncated)
     }
 
     private fun sizeOf(file: Path): Long = runCatching { Files.size(file) }.getOrDefault(0L)
@@ -211,6 +200,32 @@ object TasklaneDiagnostics {
  * un millón de cuerpos para decir cuánto ocupan—, y ahora salen de siete `count(*)` y un
  * `sum(length(body))` que SQLite resuelve sin construir una sola `Task`.
  */
+/**
+ * Lo que la tabla `blob` sabe de un repositorio, en agregados (§4.2).
+ *
+ * Es el sustituto exacto del recorrido del directorio que hacía el informe hasta la 2.0:
+ * cinco números que SQLite saca de un índice, contra `Files.list` más un
+ * `readAttributes` por fichero.
+ *
+ * [oversized] es la cifra que la Fase 4 se debe a sí misma. Al bajar el tope de escalado
+ * de 1600 a 400 px se decidió **no tocar lo ya guardado** —el nombre de un blob es el
+ * SHA de sus bytes, así que reescalarlo cambiaría su nombre y habría que reescribir
+ * todos los cuerpos que lo nombran—, y lo mínimo que se le debe a quien tenga tres gigas
+ * de capturas antiguas es decirle cuántas son y cuánto ocupan.
+ */
+data class BlobStats(
+    val count: Int = 0,
+    val bytes: Long = 0,
+    /** Filas cuyo fichero ya no está. Lo detecta la reconciliación del §4.3. */
+    val missing: Int = 0,
+    /** Blobs guardados por encima del tope de escalado de hoy. */
+    val oversized: Int = 0,
+    val oversizedBytes: Long = 0,
+) {
+    /** Los que de verdad están en disco. */
+    val present: Int get() = (count - missing).coerceAtLeast(0)
+}
+
 data class TaskStats(
     val tasks: Int = 0,
     val bodyChars: Long = 0,

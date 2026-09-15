@@ -13,8 +13,9 @@ import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
+import com.tasklane.data.attachment.AttachmentChore
+import com.tasklane.data.attachment.AttachmentQuota
 import com.tasklane.data.store.StorageLayout
-import com.tasklane.domain.command.TaskReducer
 import com.tasklane.service.TaskService
 import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
@@ -29,10 +30,11 @@ import javax.swing.JComponent
  * el banco mide en un portátil con un corpus inventado, y esto mide el proyecto de
  * quien se está quejando.
  *
- * **El recorrido va en segundo plano y con barra de progreso.** Pesar el directorio de
- * adjuntos es justo la operación que el §1.6 dice que no termina con diez millones de
- * ficheros; abrirlo desde el EDT convertiría la acción de diagnosticar cuelgues en una
- * forma de provocarlos.
+ * **Sigue yendo en segundo plano y con barra de progreso**, aunque desde la Fase 4 ya no
+ * haga falta tanto: hasta la 2.0 esto pesaba el directorio de adjuntos recorriéndolo
+ * —justo la operación que el §1.6 dice que no termina con diez millones de ficheros— y
+ * ahora las imágenes las cuenta la tabla `blob`. Lo que queda son agregados de SQLite y
+ * tres `Files.size`, pero siguen siendo disco, y el disco no se toca desde el EDT.
  */
 internal class DiagnosticsAction : DumbAwareAction() {
 
@@ -43,35 +45,54 @@ internal class DiagnosticsAction : DumbAwareAction() {
     }
 
     override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val service = TaskService.getInstance(project)
-        val repos = service.snapshot.value.repositories.map { it.key }
-        val metrics = TasklaneMetrics.getInstance(project).snapshot()
-        val layout = StorageLayout.forProject(project)
-
-        ProgressManager.getInstance().run(
-            object : ProgressTask.Backgroundable(project, TasklaneBundle.message("diagnostics.progress"), true) {
-                private var text: String? = null
-
-                override fun run(indicator: ProgressIndicator) {
-                    indicator.isIndeterminate = true
-                    val report = TasklaneDiagnostics.collect(
-                        layout = layout,
-                        // Del almacén, en agregados: siete `count(*)` por repositorio en
-                        // vez de recorrer las tareas que hubiera en memoria — que además
-                        // ya no las hay.
-                        stats = repos.associateWith(service::statsOf),
-                        metrics = metrics,
-                    )
-                    text = DiagnosticsReport.render(report)
-                }
-
-                override fun onSuccess() {
-                    text?.let { DiagnosticsDialog(project, it).show() }
-                }
-            },
-        )
+        showDiagnostics(e.project ?: return)
     }
+}
+
+/**
+ * El informe, calculado en segundo plano y enseñado en su diálogo.
+ *
+ * Aparte de la acción porque desde la Fase 4 hay **dos** puertas al mismo informe: el
+ * menú, y el aviso de cuota del §4.5 —que ofrece «qué está ocupando el sitio» y tiene
+ * que llevar exactamente aquí—.
+ */
+internal fun showDiagnostics(project: Project) {
+    val service = TaskService.getInstance(project)
+    val config = service.snapshot.value.config
+    val repos = service.snapshot.value.repositories.map { it.key }
+    val metrics = TasklaneMetrics.getInstance(project).snapshot()
+    val layout = StorageLayout.forProject(project)
+
+    ProgressManager.getInstance().run(
+        object : ProgressTask.Backgroundable(project, TasklaneBundle.message("diagnostics.progress"), true) {
+            private var text: String? = null
+
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                val report = TasklaneDiagnostics.collect(
+                    layout = layout,
+                    // Del almacén, en agregados: siete `count(*)` por repositorio en
+                    // vez de recorrer las tareas que hubiera en memoria — que además
+                    // ya no las hay.
+                    stats = repos.associateWith(service::statsOf),
+                    // Y las imágenes, de la tabla `blob`: cinco agregados por
+                    // repositorio en vez del recorrido del directorio (§4.2).
+                    blobs = repos.associateWith { service.blobStatsOf(it, config.imageMaxSize) },
+                    reconciled = repos.filterTo(HashSet()) {
+                        service.chore(AttachmentChore.reconcile(it.value)) != null
+                    },
+                    quotaBytes = AttachmentQuota.bytesOf(config.imageQuotaMegabytes),
+                    imageMaxSize = config.imageMaxSize,
+                    metrics = metrics,
+                )
+                text = DiagnosticsReport.render(report)
+            }
+
+            override fun onSuccess() {
+                text?.let { DiagnosticsDialog(project, it).show() }
+            }
+        },
+    )
 }
 
 /**

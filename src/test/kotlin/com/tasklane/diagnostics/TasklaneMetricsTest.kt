@@ -100,7 +100,7 @@ class TasklaneMetricsTest {
         repeat(100) { metrics.record(TasklaneMetrics.Op.RENDER, 2_125_000) }
 
         val text = DiagnosticsReport.render(
-            TasklaneDiagnostics.collect(null, emptyMap(), metrics.snapshot()),
+            TasklaneDiagnostics.collect(null, emptyMap(), metrics = metrics.snapshot()),
         )
         assertTrue(text, text.contains("WARNING: render runs on the EDT"))
     }
@@ -111,7 +111,7 @@ class TasklaneMetricsTest {
         repeat(100) { metrics.record(TasklaneMetrics.Op.RENDER, 3_000) }
 
         val text = DiagnosticsReport.render(
-            TasklaneDiagnostics.collect(null, emptyMap(), metrics.snapshot()),
+            TasklaneDiagnostics.collect(null, emptyMap(), metrics = metrics.snapshot()),
         )
         assertTrue(text, !text.contains("WARNING"))
     }

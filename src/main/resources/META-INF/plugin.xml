@@ -227,7 +227,7 @@
 
         <!-- Recoleccion de adjuntos sin referencias. Espera a que las tareas esten
              leidas: sin eso no sabria que esta referenciado. -->
-        <postStartupActivity implementation="com.tasklane.startup.AttachmentGcActivity"/>
+        <postStartupActivity implementation="com.tasklane.startup.AttachmentMaintenanceActivity"/>
 
         <!-- Enciende las marcas de las anclas sobre el codigo. Es solo el empujon: el
              servicio se suscribe al modelo y se pinta solo. Sin esto no existiria

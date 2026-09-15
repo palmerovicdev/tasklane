@@ -1,5 +1,6 @@
 package com.tasklane.bench
 
+import com.tasklane.data.attachment.BlobLayout
 import com.tasklane.domain.model.AttachmentId
 import java.awt.Color
 import java.awt.image.BufferedImage
@@ -143,14 +144,29 @@ object SyntheticBlobs {
     /**
      * Escribe [count] blobs en [dir] con los nombres que el corpus referencia.
      *
-     * @param dir el directorio de adjuntos del repositorio, plano como hoy.
+     * @param dir el directorio de adjuntos del repositorio.
+     * @param sharded `true` para el árbol `ab/cd` de la Fase 4; `false` para el
+     *   directorio plano de hasta la 2.0, que es lo que hay que poder medir para saber
+     *   de qué se viene.
      * @return los bytes escritos en total.
      */
-    fun writeAll(dir: Path, count: Int, size: Int = DEFAULT_SIZE, onProgress: (Int) -> Unit = {}): Long {
+    fun writeAll(
+        dir: Path,
+        count: Int,
+        size: Int = DEFAULT_SIZE,
+        sharded: Boolean = false,
+        onProgress: (Int) -> Unit = {},
+    ): Long {
         Files.createDirectories(dir)
         var bytes = 0L
         for (n in 0 until count) {
-            val file = dir.resolve("${id(n).value}.png")
+            val id = id(n)
+            val file = if (sharded) {
+                val (first, second) = BlobLayout.shardsOf(id)!!
+                dir.resolve(first).resolve(second).also(Files::createDirectories).resolve("${id.value}.png")
+            } else {
+                dir.resolve("${id.value}.png")
+            }
             if (!Files.exists(file)) {
                 val data = png(n, size)
                 Files.write(file, data)

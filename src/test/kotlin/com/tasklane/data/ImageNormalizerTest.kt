@@ -1,8 +1,10 @@
 package com.tasklane.data
 
 import com.tasklane.data.attachment.ImageNormalizer
+import com.tasklane.domain.model.TasklaneConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.awt.Color
@@ -88,6 +90,54 @@ class ImageNormalizerTest {
     }
 
     /** La transparencia de una ventana con esquinas redondeadas no puede volverse negra. */
+    // ----------------------------------------------- miniaturas y cabeceras (Fase 4)
+
+    @Test
+    fun `la miniatura encoge al tope y conserva la proporcion`() {
+        val thumb = ImageNormalizer.thumbnail(image(1600, 800))
+        assertNotNull(thumb)
+        val decoded = decode(thumb!!)
+        assertEquals(ImageNormalizer.THUMB_SIZE, decoded.width)
+        assertEquals(ImageNormalizer.THUMB_SIZE / 2, decoded.height)
+    }
+
+    /**
+     * Una miniatura cuesta **un fichero más por blob** y un 45 % de disco sobre una
+     * captura de 400 px, así que sólo se escribe cuando de verdad ahorra. Con el tope
+     * nuevo eso quiere decir: nunca para lo que se pegue ahora, siempre para las
+     * capturas de 1600 px que ya estuvieran guardadas.
+     */
+    @Test
+    fun `solo hay miniatura cuando se paga a si misma`() {
+        assertNull(ImageNormalizer.thumbnail(image(200, 100)))
+        assertNull(ImageNormalizer.thumbnail(image(TasklaneConfig.DEFAULT_IMAGE_MAX_SIZE, 300)))
+        assertNull(ImageNormalizer.thumbnail(image(ImageNormalizer.THUMB_THRESHOLD, 10)))
+        assertNotNull(ImageNormalizer.thumbnail(image(ImageNormalizer.THUMB_THRESHOLD + 1, 10)))
+        assertNotNull(ImageNormalizer.thumbnail(image(1600, 900)))
+    }
+
+    /**
+     * Las dimensiones salen de la cabecera, no de descodificar: es lo que hace que la
+     * reconciliación pueda adoptar millones de ficheros leyendo veinticuatro bytes de
+     * cada uno.
+     */
+    @Test
+    fun `el tamano se lee de la cabecera sin descodificar`() {
+        val bytes = ImageNormalizer.normalize(image(640, 360), 1600)
+        assertEquals(ImageNormalizer.Size(640, 360), ImageNormalizer.dimensions(bytes))
+        // Y con lo justo: la cabecera de un PNG cabe en los primeros bytes del fichero.
+        assertEquals(
+            ImageNormalizer.Size(640, 360),
+            ImageNormalizer.dimensions(bytes.copyOf(ImageNormalizer.HEADER_BYTES)),
+        )
+    }
+
+    @Test
+    fun `lo que no es un png no tiene tamano`() {
+        assertNull(ImageNormalizer.dimensions("no soy un png en absoluto".toByteArray()))
+        assertNull(ImageNormalizer.dimensions(ByteArray(4)))
+    }
+
     @Test
     fun `se conserva el canal alfa`() {
         val source = BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB)

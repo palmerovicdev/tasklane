@@ -314,7 +314,7 @@ cualquier otra edición.
 | | |
 |---|---|
 | Qué se pega | Una imagen del portapapeles —una captura de pantalla— o un fichero de imagen copiado del explorador |
-| Qué se guarda | Un PNG por imagen, reescalado al máximo de los ajustes (1600 px por defecto), en `.idea/tasklane/repos/<repo>/attachments/` |
+| Qué se guarda | Un PNG por imagen, reescalado al máximo de los ajustes (400 px por defecto), en `.idea/tasklane/repos/<repo>/attachments/ab/cd/` |
 | Qué se ve en el texto | `[image]`; la referencia larga queda plegada detrás |
 | Ampliar | Un clic sobre la vista previa la abre a tamaño de pantalla |
 | Quitar | Se selecciona el `[image]` y `Supr`. Al irse la referencia se va la imagen |
@@ -326,8 +326,24 @@ nombres que colisionen, y saber qué sobra es contar referencias.
 
 **Lo que ya no referencia ninguna tarea se borra al abrir el proyecto**, con 24 horas
 de gracia — lo justo para que deshacer un pegado, o cancelar el diálogo, no deje la
-imagen a medio camino. Sólo se miran los repositorios cuyas tareas están leídas: en
-uno sin leer, «no veo referencias» significa «no lo sé», no «no hay ninguna».
+imagen a medio camino. Qué hay guardado lo lleva la base, no un recorrido del directorio,
+y no se recolecta un repositorio mientras su `tasks.xml` se está importando: ahí «no veo
+referencias» significa «todavía no lo sé», no «no hay ninguna».
+
+**El directorio está fragmentado** por los cuatro primeros dígitos del SHA —`ab/cd/`—
+porque un único directorio con millones de ficheros no es lento, es intratable. Lo que
+quedara de versiones anteriores se traslada solo, en segundo plano, y se sigue viendo
+mientras tanto.
+
+**La lista nunca descodifica una captura grande**: de las guardadas a 1600 px pinta una
+miniatura de 256 px —`<sha>.thumb.png`, creada sola la primera vez que se ve—, y de las
+nuevas el propio fichero, que ya es pequeño. El clic sobre la vista previa sí abre el
+original entero. Es lo que permite que las capturas antiguas **no se toquen**: reescalarlas
+cambiaría su SHA, que es su nombre, y con él todas las referencias de los cuerpos.
+*Tasklane: Diagnostics* dice cuántas son y cuánto ocupan.
+
+**Se avisa cuando las imágenes pasan de 5 GB** —configurable, o apagable—. Es un aviso,
+no un tope: nada se rechaza y nada se borra por cruzarlo.
 
 Un adjunto que falta no borra su referencia: el editor pinta un marcador en su sitio.
 Y las referencias no salen al exportar — fuera del IDE, un SHA de 64 caracteres no es
@@ -498,7 +514,7 @@ puerta y su versión.
 | E1 | Quitar los O(n) por comando | `1.5.0` | ✅ |
 | E2 | UI acotada | `1.6.0` | ✅ |
 | E3 | El almacén (SQLite + FTS5) | `2.0.0` | ✅ |
-| E4 | Adjuntos a escala | | |
+| E4 | Adjuntos a escala | `2.1.0` | ✅ |
 | E5 | Las operaciones grandes | | |
 | E6 | Endurecimiento | | |
 
@@ -517,7 +533,17 @@ de **3.027 ms a 9,2 ms**, guardar de un volcado de **1.168 ms a una transacción
 0,44 ms**, y el plugin pasa de ocupar **1,29 GB de memoria a 2,5 MB**. Es una versión
 mayor porque cambia el formato: la migración es automática y en segundo plano, y el
 `tasks.xml` se conserva al lado como `tasks.xml.migrated` — quitarle el sufijo es la
-vuelta atrás. Lo que queda por debajo —las capturas en disco— es la Fase 4.
+vuelta atrás.
+
+La `2.1.0` cierra la **Fase 4**, que es lo que quedaba por debajo: las capturas. El
+directorio de adjuntos se fragmenta en `ab/cd/`, lo que hay se contabiliza en la base
+—recoger la basura deja de listar el disco— y la lista pasa a pintar **miniaturas**, así
+que una tarjeta con diez capturas grandes baja de 134 MB a 36 MB
+de memoria. Las capturas nuevas se guardan a 400 px en vez de 1600 —de 407 KB a 33 KB cada
+una— y **las que ya estaban no se tocan**: el nombre de un blob es el hash de su
+contenido, así que reescalarlo sería reescribir las tareas que lo nombran. Lo que no se
+puede resolver con ingeniería —que diez millones de capturas ocupan lo que ocupan— se
+resuelve avisando: hay una cuota con aviso, configurable, que no borra nada.
 
 En paralelo al plan de ocho fases fue el **rediseño a tarjetas**, con su propia
 numeración y su propio plan: [`docs/plan-rediseno.md`](docs/plan-rediseno.md). Está
@@ -556,7 +582,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.0.0 && git push origin v2.0.0
+git tag v2.1.0 && git push origin v2.1.0
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

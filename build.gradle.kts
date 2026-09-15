@@ -105,6 +105,46 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.1.0 &mdash; pasted images stop weighing</h3>
+            <p><b>Screenshots used to live in one flat folder that had to be listed whole
+               every time the project opened, and the list decoded the full-size original
+               to paint a thumbnail-sized preview.</b> Neither happens any more.</p>
+            <ul>
+              <li><b>The list never decodes a large screenshot again.</b> Ones saved at
+                  1600&nbsp;px get a 256&nbsp;px thumbnail, made in the background the
+                  first time they are shown. A card with ten of them took 134&nbsp;MB of
+                  memory and 176&nbsp;ms to open; it is now 36&nbsp;MB and 8.7&nbsp;ms.
+                  Clicking a preview still opens the full original.</li>
+              <li><b>New screenshots are scaled to 400&nbsp;px</b> instead of 1600.
+                  Measured on PNGs calibrated against a real screen capture: 407&nbsp;KB
+                  per shot at 1600, 33&nbsp;KB at 400. <b>Images you already saved are left
+                  exactly as they are</b> &mdash; a blob is named after its own checksum,
+                  so rescaling one would mean rewriting every task that points at it.</li>
+              <li><b>Images are stored in subfolders</b>
+                  (<code>attachments/ab/cd/&lt;sha&gt;.png</code>). With ten million files,
+                  a single folder is not slow &mdash; it is unusable. Whatever you have is
+                  moved in the background, in batches, and nothing stops being visible
+                  while it happens.</li>
+              <li><b>Finding which images are unused stops looking at the disk.</b> The
+                  database keeps count: with 100,000 images saved, that went from a
+                  329&nbsp;ms folder scan on every open to a 0.49&nbsp;ms query &mdash;
+                  and unlike the scan, it does not grow with how much you have saved.</li>
+              <li><b>A warning when images pass 5&nbsp;GB</b>, with the size and what to do
+                  about it. <b>Nothing is ever deleted because of it</b>, and the threshold
+                  can be raised or switched off in the settings.</li>
+              <li><b>A weekly background reconciliation</b> adopts images that appear in the
+                  folder without the plugin knowing, and marks as missing the ones deleted
+                  from outside it.</li>
+              <li><i>Tasklane: Diagnostics</i> now counts images from the database: the
+                  figure is exact instead of stopping at 200,000, and it says how many are
+                  stored above today&rsquo;s scaling cap.</li>
+            </ul>
+            <p><b>Compatibility:</b> an older version of the plugin will not find images
+               that have already been moved and will paint them as missing. Nothing is
+               lost &mdash; the files are there, in their subfolders, and they come back as
+               soon as you open the project with 2.1 again &mdash; and tasks keep reading
+               and editing normally.</p>
+
             <h3>2.0.0 &mdash; your tasks move into a database</h3>
             <p><b>Tasks no longer live in a <code>tasks.xml</code> that was read whole on
                open and rewritten whole on save.</b> They live in a local SQLite database
@@ -349,6 +389,11 @@ tasks {
 
         // El tamano del corpus del banco. Los tests normales lo ignoran.
         providers.gradleProperty("benchN").orNull?.let { systemProperty("tasklane.bench.n", it) }
+
+        // Y el numero de blobs de las puertas de la Fase 4, que es un eje distinto: un
+        // millon de tareas son 10 GB de base y un millon de capturas son 33 GB de PNG,
+        // asi que pedirlos a la vez es una noche de disco y ninguna puerta lo necesita.
+        providers.gradleProperty("benchBlobs").orNull?.let { systemProperty("tasklane.bench.blobs", it) }
 
         // Sin esto una @Ignore que se desactiva a mano no imprime nada util.
         testLogging {

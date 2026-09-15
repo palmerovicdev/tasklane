@@ -9,6 +9,62 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.1.0] — Las imágenes dejan de pesar
+
+La **Fase 4** del plan de escala (`docs/plan-escala.md`): los adjuntos. Hasta ahora todas
+las capturas de un repositorio vivían en un único directorio que había que **listar
+entero** al abrir el proyecto para saber cuáles sobraban, y la lista descodificaba la
+imagen original para pintar una vista previa del tamaño de un sello. Las dos cosas se
+acabaron.
+
+**Las capturas nuevas se guardan a 400 px** en vez de 1600 —doce veces y media menos
+disco por captura—, **las que ya estaban no se tocan** y se siguen viendo igual, y ahora
+*Tasklane: Diagnostics* dice cuántas son y cuánto ocupan por si se quieren revisar.
+
+### Añadido
+- **Miniaturas.** La lista **nunca** descodifica una captura grande: de las de 1600 px
+  pinta una miniatura de 256 px, que se crea sola la primera vez y en segundo plano. Una
+  tarjeta con diez de ellas ocupaba **134 MB** de memoria y tardaba **176 ms** en abrirse;
+  ahora son **36 MB** y **8,7 ms**. Para mirar de cerca, el clic sigue abriendo el
+  original a tamaño de pantalla.
+- **Aviso de cuota.** Cuando las imágenes del proyecto pasan de 5 GB se avisa una vez, con
+  el peso y con qué hacer al respecto. **No se borra nada**: el umbral se sube, se baja o
+  se apaga en *Settings → Tools → Tasklane → Images*.
+- **Reconciliación semanal**, en segundo plano: adopta las imágenes que aparezcan en el
+  directorio sin que el plugin lo sepa, y marca como ausentes las filas cuyo fichero se
+  borró por fuera. Detecta la deriva en los dos sentidos sin tener que recorrer nada en
+  cada apertura.
+- **El informe de diagnóstico cuenta las imágenes desde la base**: la cifra es exacta y ya
+  no viene con un «+» de «he dejado de contar a las 200.000». Dice además cuántas están
+  guardadas por encima del tope de escalado de hoy, cuántas faltan del disco y cuánto se
+  lleva la cuota.
+
+### Cambiado
+- **El tope de escalado por defecto baja de 1600 px a 400 px.** Medido sobre PNG
+  calibrados contra una captura real: 407 KB por captura a 1600, 33 KB a 400. Afecta sólo
+  a lo que se pegue a partir de ahora, y el ajuste llega hasta 4000 px para quien lo
+  quiera.
+- **Las imágenes se guardan en subdirectorios** —`attachments/ab/cd/<sha>.png`— en vez de
+  todas en el mismo. Con diez millones de ficheros, un único directorio no es lento: es
+  intratable. El traslado de lo que hubiera es automático, por tandas, en segundo plano, y
+  nada deja de verse mientras ocurre.
+- **Saber qué imágenes sobran deja de mirar el disco.** Las lleva la base: con 100.000
+  capturas guardadas, eso pasa de un recorrido del directorio de **329 ms en cada
+  apertura** a una consulta de **0,49 ms** — y, al revés que el recorrido, no crece con lo
+  que haya guardado.
+- **Recolectar va por tandas y se puede cancelar**, con el mismo periodo de gracia de 24
+  horas de siempre y con una salvaguarda nueva: no se recolecta un repositorio mientras su
+  `tasks.xml` se está importando.
+
+### Compatibilidad
+- La base gana dos tablas y **no sube de versión de esquema**, a propósito: subirla
+  dejaría en solo lectura cualquier proyecto que luego se abriera con la 2.0.0 —o sea,
+  bloquearía editar tareas para proteger dos tablas de contabilidad que se reconstruyen
+  solas—. Las tablas se crean al abrir; no hay migración que esperar.
+- **Una versión anterior del plugin no encontrará las imágenes ya trasladadas** y las
+  pintará como ausentes. No se pierde nada —los ficheros están en sus subdirectorios—, las
+  tareas se siguen leyendo y editando con normalidad, y al volver a la 2.1 todo aparece.
+
 ## [2.0.0] — Las tareas se mudan a una base de datos
 
 La **Fase 3** del plan de escala (`docs/plan-escala.md`): las tareas dejan de vivir en

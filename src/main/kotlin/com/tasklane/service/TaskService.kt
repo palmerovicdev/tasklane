@@ -12,6 +12,8 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task as ProgressTask
 import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
+import com.tasklane.data.attachment.BlobRecord
+import com.tasklane.data.attachment.Chore
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.data.sqlite.Fts5Index
@@ -22,12 +24,14 @@ import com.tasklane.data.sqlite.TasksXmlReader
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.store.TaskFileStore
 import com.tasklane.data.store.TasksCodec
+import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TaskStats
 import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.AnchoredTask
+import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
@@ -266,8 +270,95 @@ class TaskService(
     /** Qué tareas cuelgan de un fichero. Es el §3.6: un salto de índice, no el modelo entero. */
     fun anchorsIn(path: String): List<AnchoredTask> = store?.anchorsIn(path).orEmpty()
 
-    /** Los adjuntos que alguna tarea sigue nombrando. Lo pregunta el recolector. */
-    fun referencedBlobs(repo: RepoKey): Set<String> = store?.referencedBlobs(repo).orEmpty()
+    /**
+     * Cuáles de estos adjuntos sigue nombrando alguna tarea. Lo pregunta el recolector,
+     * por tandas: ver `TaskStore.referencedAmong`.
+     */
+    fun referencedAmong(repo: RepoKey, ids: List<AttachmentId>): Set<String> =
+        store?.referencedAmong(repo, ids).orEmpty()
+
+    // ------------------------------------------------------- adjuntos (Fase 4)
+
+    /**
+     * ¿Se puede fiar el recolector de las referencias de este repositorio?
+     *
+     * Es **la** salvaguarda de la Fase 4, y la que sustituye a la espera con la que
+     * `AttachmentGcActivity` se protegía hasta la 2.0: entonces las referencias salían
+     * del corpus en memoria y había que esperar a tenerlo cargado; ahora salen de
+     * `blob_ref`, que se mantiene en la misma transacción que la escritura de la tarea.
+     * Pero hay un momento en que esa tabla está legítimamente incompleta: **mientras el
+     * `tasks.xml` se está importando**. Recolectar ahí no encontraría basura,
+     * encontraría todas las imágenes del usuario.
+     */
+    fun referencesComplete(repo: RepoKey): Boolean {
+        val store = store ?: return false
+        if (store.readOnly || isReadOnly(repo) || repo in importing) return false
+        val layout = layout ?: return false
+        return store.isImported(repo) || !Files.exists(layout.tasksFile(repo))
+    }
+
+    /** Apunta en la tabla un blob recién escrito. Ver `TaskStore.recordBlob`. */
+    fun recordBlob(repo: RepoKey, blob: BlobRecord, at: Instant) {
+        val store = store ?: return
+        if (store.readOnly) return
+        runCatching { store.write { store.recordBlob(repo, blob, at.toEpochMilli()) } }
+            .onFailure { thisLogger().warn("Tasklane: no se pudo apuntar el adjunto ${blob.id.value}", it) }
+    }
+
+    /** Los candidatos a recoger, por tandas. Ver `TaskStore.collectibleBlobs`. */
+    fun collectibleBlobs(repo: RepoKey, before: Instant, limit: Int): List<BlobRecord> =
+        store?.collectibleBlobs(repo, before.toEpochMilli(), limit).orEmpty()
+
+    fun forgetBlobs(repo: RepoKey, ids: List<AttachmentId>) {
+        val store = store ?: return
+        if (store.readOnly || ids.isEmpty()) return
+        store.write { store.forgetBlobs(repo, ids) }
+    }
+
+    /** Cuáles de estos ya conoce la tabla. Lo pregunta la reconciliación. */
+    fun knownBlobs(repo: RepoKey, ids: List<AttachmentId>): Set<String> =
+        store?.knownBlobs(repo, ids).orEmpty()
+
+    /**
+     * Sella lo que el recorrido encontró y adopta lo que no conocía, **en una sola
+     * transacción**: una tanda del recorrido es una unidad, y media tanda confirmada
+     * dejaría filas selladas junto a filas que no se llegaron a adoptar.
+     */
+    fun reconcileBlobs(repo: RepoKey, seen: List<AttachmentId>, adopted: List<BlobRecord>, at: Instant) {
+        val store = store ?: return
+        if (store.readOnly) return
+        if (seen.isEmpty() && adopted.isEmpty()) return
+        store.write {
+            if (seen.isNotEmpty()) store.seeBlobs(repo, seen, at.toEpochMilli())
+            if (adopted.isNotEmpty()) store.adoptBlobs(repo, adopted, at.toEpochMilli())
+        }
+    }
+
+    /** Marca ausentes las filas que el recorrido no volvió a ver. @return cuántas. */
+    fun markMissingBlobs(repo: RepoKey, before: Instant): Int {
+        val store = store ?: return 0
+        if (store.readOnly) return 0
+        return store.write { store.markMissingBlobs(repo, before.toEpochMilli()) }
+    }
+
+    fun blobStatsOf(repo: RepoKey, maxSize: Int): BlobStats = store?.blobStatsOf(repo, maxSize) ?: BlobStats()
+
+    /** Lo que ocupan los adjuntos del proyecto. Es la cifra que vigila la cuota del §4.5. */
+    fun blobBytes(): Long = store?.blobBytes() ?: 0L
+
+    fun chore(name: String): Chore? = store?.chore(name)
+
+    fun saveChore(name: String, at: Instant, n: Long) {
+        val store = store ?: return
+        if (store.readOnly) return
+        store.write { store.saveChore(name, at.toEpochMilli(), n) }
+    }
+
+    fun forgetChore(name: String) {
+        val store = store ?: return
+        if (store.readOnly) return
+        store.write { store.forgetChore(name) }
+    }
 
     fun statsOf(repo: RepoKey): TaskStats = store?.statsOf(repo) ?: TaskStats()
 

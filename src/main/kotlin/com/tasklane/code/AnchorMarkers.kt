@@ -381,8 +381,10 @@ internal class AnchorMarkers(
      * como un fallo del plugin.
      */
     private fun previewOf(service: AttachmentService, repo: RepoKey, id: AttachmentId): AnchorTooltip.Preview? {
-        val file = service.file(repo, id) ?: return null
-        val image = service.image(repo, id) ?: return null
+        // La miniatura (§4.4), que es lo que se va a enseñar a 200 px: pasar el ratón
+        // por un ancla no puede costar descodificar una captura de 1600.
+        val image = service.thumbnail(repo, id) ?: return null
+        val file = service.thumbnailFile(repo, id) ?: return null
         val factor = minOf(
             1.0,
             JBUIScale.scale(PREVIEW_WIDTH).toDouble() / image.width,
