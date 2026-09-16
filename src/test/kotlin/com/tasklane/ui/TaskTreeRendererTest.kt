@@ -594,6 +594,85 @@ class TaskTreeRendererTest {
     }
 
     /**
+     * **La imagen no se va porque la fila se haya medido a otro ancho** (2.6.0).
+     *
+     * Era el fallo de «a veces se ve y a veces no»: el árbol guarda el alto de cada
+     * fila y el contenido se monta contra el ancho de cada momento, así que aparecer o
+     * desaparecer la barra de desplazamiento dejaba la tarjeta pidiendo más alto del
+     * que tenía, y la línea que sobraba —la vista previa— se caía entera. Quedaba una
+     * tarjeta alta y vacía con los distintivos pegados al fondo. Ver [RowStack].
+     */
+    @Test
+    fun `la imagen se ve aunque la fila se haya medido a otro ancho`() {
+        val task = task("ver lo de los endpoints de configuracion de brand de company\n![](tasklane:$SHA)")
+        renderer.images = previewsOf(AttachmentId(SHA) to square(90))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        // Medida a 600 y pintada a 300: el título pide una línea más de las que se
+        // midieron, y lo que sobraba era justo la captura.
+        tree.setSize(MIN_WIDTH, 400)
+        tree.doLayout()
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Image
+        }
+
+        assertEquals(AttachmentId(SHA), hit?.id)
+    }
+
+    /**
+     * **El contador de capturas se pulsa** (2.6.0): amplía las imágenes de la tarea sin
+     * desplegar la tarjeta ni abrir el diálogo. Hasta la 2.5 ese icono caía en la
+     * etiqueta de los enlaces y, sin enlaces, no hacía nada.
+     */
+    @Test
+    fun `el contador de capturas amplia las imagenes de la tarea`() {
+        val tree = treeWith(task("Comprar pan\n![](tasklane:$SHA)"))
+
+        val hit = scan(tree, painted(tree, 0)) {
+            renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Images
+        }
+
+        assertEquals(listOf(AttachmentId(SHA)), hit?.ids)
+    }
+
+    /**
+     * Con enlaces **y** capturas, el mismo distintivo lleva a los dos sitios: el icono
+     * de cadena y su número abren los enlaces, y el `1 img` de al lado, las capturas.
+     */
+    @Test
+    fun `el indicador con enlaces y capturas lleva a los dos`() {
+        val tree = treeWith(task("Migrar el indice https://ejemplo.com/guia\n![](tasklane:$SHA)"))
+        val bounds = painted(tree, 0)
+
+        val hits = scanAll(tree, bounds) { point ->
+            renderer.hotspotAt(tree, point)?.takeIf { renderer.caretAt(tree, point) == null }
+        }
+
+        assertTrue(
+            "los enlaces se siguen abriendo desde el icono",
+            hits.filterIsInstance<TaskTreeRenderer.Hotspot.Links>().any { it.links.isNotEmpty() },
+        )
+        assertEquals(
+            listOf(AttachmentId(SHA)),
+            hits.filterIsInstance<TaskTreeRenderer.Hotspot.Images>().firstOrNull()?.ids,
+        )
+    }
+
+    /** Sin capturas no hay nada que ampliar, y el indicador no finge que sí. */
+    @Test
+    fun `una tarea sin capturas no ofrece ampliar nada`() {
+        val tree = treeWith(task("Migrar el indice https://ejemplo.com/guia"))
+
+        assertTrue(
+            scanAll(tree, painted(tree, 0)) {
+                renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Images
+            }.isEmpty(),
+        )
+    }
+
+    /**
      * Las imágenes que se le dan por listas; el resto, ausentes. Sin esto haría falta
      * la `Application` del IDE, que es lo que este test evita.
      */

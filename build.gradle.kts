@@ -118,6 +118,22 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.6.1 &mdash; pin an image while you code</h3>
+            <ul>
+              <li><b>An enlarged screenshot can be pinned.</b> The pin in its header keeps
+                  the window <b>above the editor</b> and stops it from closing when you
+                  click elsewhere, so you can write code with the image in front of you.
+                  Unpinned it still closes on the first click outside.</li>
+              <li><b>The image counter on a row is now a button</b>: click it to enlarge
+                  the task&rsquo;s screenshots without expanding the card, and hover it to
+                  see the screenshot itself instead of a sentence.</li>
+              <li><b>The preview of an expanded card no longer disappears now and then</b>
+                  when the scroll bar comes and goes: it shrinks those few pixels instead
+                  of dropping out of the row.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.5.2 and 2.6.1 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.5.2 &mdash; task workflow fixes</h3>
             <ul>
               <li><b>Copy task text with one click</b>, without card metadata or Markdown markers.</li>

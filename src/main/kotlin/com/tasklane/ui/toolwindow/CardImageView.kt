@@ -24,10 +24,12 @@ import javax.swing.JComponent
  * un componente más de la pila de líneas de la fila, que es lo único que [RowStack]
  * sabe apilar.
  *
- * **No lee disco y no escala.** Recibe la imagen ya escalada al ancho de la tarjeta
- * —[CardImages] la pide a la caché del servicio— porque este componente se pinta en
- * cada repintado del árbol, y reescalar ahí un PNG de 1600 px se notaría al mover el
- * ratón por la lista.
+ * **No lee disco.** Recibe la imagen ya escalada al ancho de la tarjeta —[CardImages]
+ * la pide a la caché del servicio— porque este componente se pinta en cada repintado
+ * del árbol, y reescalar ahí un PNG de 1600 px se notaría al mover el ratón por la
+ * lista. Lo único que escala es el caso raro de [getMinimumSize] —la fila vino más
+ * corta de lo que se midió—, y ahí es un `drawImage` sobre la miniatura, no una copia
+ * nueva del original.
  *
  * Como el resto del renderer, el componente se **reutiliza**: el pozo de vistas vive
  * en [TaskTreeRenderer] y cada fila le pone encima su imagen.
@@ -63,7 +65,25 @@ internal class CardImageView : JComponent() {
         return Dimension(ready.width + margin * 2, ready.height + margin * 2)
     }
 
-    override fun getMinimumSize(): Dimension = preferredSize
+    /**
+     * Con cuánto se conforma, que es **menos** de lo que pide (2.6.0).
+     *
+     * [RowStack] tira las líneas que no caben, y el alto de la fila lo mide el árbol
+     * una vez y lo guarda: basta con que al pintar la tarjeta haya un píxel más de
+     * ancho que cuando se midió —aparece o desaparece la barra de desplazamiento, se
+     * arrastra el borde de la tool window— para que la vista previa mida un píxel más
+     * de alto y se caiga entera. Ese era el fallo de «a veces se ve la imagen y a veces
+     * no»: una tarjeta alta y vacía, con los distintivos pegados al fondo.
+     *
+     * Devolviendo un mínimo más bajo, la línea se queda con el hueco que haya y
+     * [paintComponent] pinta la imagen dentro. Lo que se pierde en el peor caso son
+     * unos píxeles de captura; lo que se ganaba antes era no verla.
+     */
+    override fun getMinimumSize(): Dimension {
+        val preferred = preferredSize
+        if (state != State.READY || image == null) return preferred
+        return Dimension(preferred.width, minOf(preferred.height, JBUIScale.scale(MIN_HEIGHT)))
+    }
 
     override fun paintComponent(g: Graphics) {
         val g2 = g.create() as Graphics2D
@@ -75,7 +95,13 @@ internal class CardImageView : JComponent() {
                 paintPlaceholder(g2, margin, margin)
                 return
             }
-            g2.drawImage(ready, margin, margin, null)
+            // Casi siempre 1:1 —la imagen llega ya escalada al ancho de la tarjeta—,
+            // salvo cuando la fila vino más corta de lo que se midió y [RowStack] ha
+            // encogido esta línea: ahí se pinta lo mismo, un poco más pequeño. Ver
+            // [getMinimumSize].
+            val box = fitted(ready)
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            g2.drawImage(ready, margin, margin, box.width, box.height, null)
             // Un borde tenue: sin él, una captura de fondo claro sobre un tema claro
             // se funde con la tarjeta y no se ve dónde acaba.
             g2.color = JBColor.border()
@@ -85,8 +111,8 @@ internal class CardImageView : JComponent() {
                 RoundRectangle2D.Float(
                     margin - 0.5f,
                     margin - 0.5f,
-                    ready.width + 1f,
-                    ready.height + 1f,
+                    box.width + 1f,
+                    box.height + 1f,
                     arc,
                     arc,
                 ),
@@ -94,6 +120,27 @@ internal class CardImageView : JComponent() {
         } finally {
             g2.dispose()
         }
+    }
+
+    /**
+     * A qué tamaño entra [ready] en el sitio que la fila le ha dado de verdad, con su
+     * proporción. Si cabe entera —el caso normal— es su tamaño y no se escala nada.
+     */
+    private fun fitted(ready: BufferedImage): Dimension {
+        val margin = JBUIScale.scale(MARGIN)
+        val roomWidth = width - margin * 2
+        val roomHeight = height - margin * 2
+        if (roomWidth <= 0 || roomHeight <= 0) return Dimension(ready.width, ready.height)
+        val factor = minOf(
+            1.0,
+            roomWidth.toDouble() / ready.width,
+            roomHeight.toDouble() / ready.height,
+        )
+        if (factor >= 1.0) return Dimension(ready.width, ready.height)
+        return Dimension(
+            (ready.width * factor).toInt().coerceAtLeast(1),
+            (ready.height * factor).toInt().coerceAtLeast(1),
+        )
     }
 
     /**
@@ -118,6 +165,13 @@ internal class CardImageView : JComponent() {
         private const val ARC = 4
         private const val GAP = 4
         private const val PLACEHOLDER_HEIGHT = 22
+
+        /**
+         * Lo mínimo con lo que una vista previa sigue diciendo algo. Ver
+         * [getMinimumSize]: por debajo de esto no es una captura encogida, es una
+         * franja, y entonces sí es mejor que la línea se caiga.
+         */
+        private const val MIN_HEIGHT = 48
 
         /**
          * Una vista previa más alta que esto convertiría la tarjeta en una pared y

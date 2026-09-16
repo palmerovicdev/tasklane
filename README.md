@@ -49,6 +49,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas; las tareas cerradas salen tachadas |
 | **Enlaces de un clic** | En el título y en cualquier línea del cuerpo, también en la gris. Acortados al pintarse, enteros al abrirse; el contador los lista todos |
 | **Desplegar la tarjeta** | Para leer el cuerpo entero y ver sus capturas sin salir de la lista; un clic en una captura la amplía |
+| **Ver una captura mientras programas** | La ventana de una captura ampliada se **fija** con la chincheta de su cabecera: se queda encima del editor y deja de cerrarse al pulsar fuera |
 | **Seleccionar y copiar** | El texto de la tarjeta se marca con el ratón y se copia con `⌘C` |
 | **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
 | **Mover de estado sin diálogo** | *Move To ▸* o `⇧⌥←/→`, también sobre una selección |
@@ -85,7 +86,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.5.2.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.6.1.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -187,7 +188,7 @@ tarea de una frase sigue midiendo una línea.
 | Casilla | Siempre. Marcarla lleva la tarea al estado terminal; desmarcarla, al de por defecto |
 | Título | Hasta **tres** líneas; lo que no cabe se recorta. Una tarea cerrada sale tachada. Doble clic o `Enter` abre la tarea entera |
 | Descripción | Si hay cuerpo bajo el título. Una línea, recortada |
-| Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas**, el contador de **enlaces e imágenes** y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
+| Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas**, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
 | Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas |
 | Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
 
@@ -198,8 +199,8 @@ que sí se queda fuera cuando no cabe es lo demás, empezando por lo menos impor
 
 **Desplegada**, la tarjeta deja de resumir: el título entero, todas las líneas del cuerpo y
 sus imágenes, cada una detrás de la línea que la nombra. Un clic en una imagen la abre a
-tamaño de pantalla. El texto de la tarjeta se **selecciona con el ratón** y se copia con
-`⌘C`; `Escape` quita la selección.
+tamaño de pantalla —y esa ventana se puede **fijar**, ver más abajo—. El texto de la
+tarjeta se **selecciona con el ratón** y se copia con `⌘C`; `Escape` quita la selección.
 
 El título y la descripción se pintan **en Markdown**: `**negrita**`, `*cursiva*`,
 `` `código` `` y `~~tachado~~` salen con su estilo y sin las marcas. Los guiones bajos
@@ -427,7 +428,8 @@ cualquier otra edición.
 | Qué se pega | Una imagen del portapapeles —una captura de pantalla— o un fichero de imagen copiado del explorador |
 | Qué se guarda | La imagen **a su tamaño**, en `.idea/tasklane/repos/<repo>/attachments/ab/cd/`: una captura como PNG sin pérdida, un fichero soltado o copiado con sus bytes tal cual |
 | Qué se ve en el texto | `[image]`; la referencia larga queda plegada detrás |
-| Ampliar | Un clic sobre la vista previa la abre a tamaño de pantalla |
+| Ampliar | Un clic sobre la vista previa la abre a tamaño de pantalla. También desde la lista: sobre la captura de una tarjeta desplegada, o sobre el contador de imágenes de cualquier fila |
+| Fijar la ventana | La chincheta de su cabecera la deja **encima del editor** y deja de cerrarse al pulsar fuera, para programar con la captura delante. Fijada se cierra con su ✕, o con `Escape` estando encima de ella |
 | Quitar | Se selecciona el `[image]` y `Supr`. Al irse la referencia se va la imagen |
 | Buscar | `has:image` filtra las tareas que llevan alguna |
 
@@ -832,7 +834,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.5.2 && git push origin v2.5.2
+git tag v2.6.1 && git push origin v2.6.1
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

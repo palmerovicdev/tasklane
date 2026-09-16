@@ -997,6 +997,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * Indicador de enlaces e imágenes. El icono de cadena con el número funciona esté
      * donde esté el enlace dentro del cuerpo, así que nunca hace falta entrar a
      * editar para abrir uno que viva en el detalle.
+     *
+     * El contador de imágenes también se pulsa (2.6.0): amplía las capturas de la
+     * tarea sin desplegar la tarjeta ni abrir el diálogo. Hasta la 2.5 el icono era
+     * decorativo —pulsarlo caía en la etiqueta de los enlaces, y sin enlaces no hacía
+     * nada—, que es lo peor que puede hacer un icono que se ve pulsable.
      */
     private fun renderDetail(task: Task) {
         val hasLinks = task.links.isNotEmpty()
@@ -1019,9 +1024,18 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             } else {
                 images.toString()
             }
-            detail.append(text, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+            detail.append(text, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, IMAGES)
         }
     }
+
+    /**
+     * Qué responde el **icono** del indicador, que no lleva fragmento con etiqueta.
+     *
+     * Es el mismo reparto que hace [renderDetail] al elegirlo: con enlaces es la
+     * cadena y son todos los enlaces; sin ellos es el icono de imagen y son las
+     * capturas.
+     */
+    private fun detailIconTag(): Any = if (pendingTask?.links.orEmpty().isNotEmpty()) LINKS else IMAGES
 
     // ------------------------------------------------------------------ medida de la fila
 
@@ -1225,6 +1239,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             is TaskLink -> Hotspot.Links(listOf(tag))
             is CodeAnchor -> Hotspot.Anchor(tag)
             is TaskPriority -> Hotspot.Priority(task)
+            IMAGES -> task.attachments.map { it.id }.distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { Hotspot.Images(task.repo, it) }
+
             is AttachmentId -> Hotspot.Image(task.repo, tag)
             is CopyTask -> Hotspot.Copy(tag.task)
             else -> null
@@ -1237,6 +1255,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         class Anchor(val anchor: CodeAnchor) : Hotspot
         class Priority(val task: Task) : Hotspot
         class Image(val repo: RepoKey, val id: AttachmentId) : Hotspot
+
+        /** El contador de capturas de la línea de distintivos: todas las de la tarea. */
+        class Images(val repo: RepoKey, val ids: List<AttachmentId>) : Hotspot
         class Copy(val task: Task) : Hotspot
     }
 
@@ -1289,7 +1310,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // color **es** la prioridad, y el indicador de enlaces es icono y contador.
         // Dejarlo fuera dejaba medio control sin responder.
         if (target.findFragmentAt(local) == SimpleColoredComponent.FRAGMENT_ICON) {
-            return if (target === detail) LINKS else target.firstTag()
+            return if (target === detail) detailIconTag() else target.firstTag()
         }
         return target.getFragmentTagAt(local)
     }
@@ -1550,6 +1571,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         /** Etiqueta del contador del indicador: representa *todos* los enlaces de la fila. */
         val LINKS = Any()
+
+        /** Y ésta, *todas* sus capturas. Ver [renderDetail]. */
+        val IMAGES = Any()
 
         /** El distintivo del ancla se pinta como enlace porque se pulsa como un enlace. */
         val ANCHOR_STYLE = SimpleTextAttributes(

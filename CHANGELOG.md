@@ -9,6 +9,41 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.6.1]
+
+Menor sin cambio de formato: mirar una captura deja de ser un vistazo y pasa a poder
+quedarse delante mientras se escribe código.
+
+### Añadido
+- **La ventana de una captura ampliada se puede fijar.** La chincheta de su cabecera la
+  deja **encima del editor** y deja de cerrarse al pulsar fuera, así que se puede
+  programar con la imagen delante —el error que hay que reproducir, el diseño que hay
+  que copiar—. Fijada se cierra con su ✕ o con Esc estando encima de ella; suelta sigue
+  yéndose al primer clic fuera, como hasta ahora. Vale en los tres sitios desde los que
+  se amplía: el editor del cuerpo de la tarea, la vista previa de la tarjeta desplegada
+  y el contador de capturas de la fila.
+- **El contador de capturas de la fila (`1 img`) se pulsa y se mira.** Pulsarlo amplía
+  las imágenes de la tarea sin desplegar la tarjeta ni abrir el diálogo; pararse encima
+  enseña **la captura**, no una frase. Hasta la 2.5 ese icono se veía pulsable y no
+  hacía nada.
+
+### Corregido
+- **La chincheta y la ✕ de la ventana ampliada ya no quedan pegadas a la esquina.**
+  El botón que se cuelga de la cabecera de un popup entra sin ningún margen propio —a
+  diferencia del botón de fábrica de la plataforma, que sí lo trae—, y con uno solo no
+  se notaba; con los dos juntos —fijado— quedaban encajados contra la curva de la
+  ventana.
+- **La imagen de una tarjeta desplegada ya no desaparece a ratos.** El árbol guarda el
+  alto de cada fila una vez y el contenido se monta contra el ancho de cada momento:
+  aparecer o desaparecer la barra de desplazamiento dejaba la tarjeta pidiendo unos
+  píxeles más de los que tenía, y la línea que sobraba —la vista previa entera— se caía.
+  Quedaba una tarjeta alta y vacía sin nada que explicara la diferencia. Ahora la vista
+  previa **encoge** esos píxeles en vez de irse.
+
+### Compatibilidad
+- Sin cambio de formato: el esquema sigue en la versión 1, y la 2.5.2 abre un proyecto
+  usado por la 2.6.1 y al revés.
+
 ## [2.5.2]
 
 Parche sin cambio de formato: mejoras de uso diario y correcciones de contraste en el editor.

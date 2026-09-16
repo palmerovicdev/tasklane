@@ -28,6 +28,16 @@ import java.awt.LayoutManager
  * lee entero desplegando la tarjeta— antes que la línea que dice de qué va la tarea,
  * que desaparecía sin dejar ninguna pista de por qué.
  *
+ * **Y la que sabe encogerse, encoge en vez de caerse** (2.6.0). Para un renglón de
+ * texto, irse es barato: son doce píxeles y el mismo texto está en el diálogo. Para una
+ * vista previa no: es *todo* lo que la tarjeta desplegada tenía que enseñar, y perderla
+ * por un píxel de desacuerdo entre la medida y el pintado dejaba una tarjeta alta y
+ * vacía —la imagen aparecía y desaparecía sin que nada lo explicara, según hubiera
+ * barra de desplazamiento cuando al árbol le tocó medir—. Una línea con
+ * `minimumSize` más bajo que su `preferredSize` —hoy sólo [CardImageView]— se queda con
+ * el hueco que haya y se pinta dentro; sólo se cae si ni para eso llega. Para las
+ * demás, `minimumSize == preferredSize` y no cambia nada.
+ *
  * Apilarlas encima no valdría: los hijos se pintan del último al primero, así que la de
  * abajo quedaría **debajo** del texto, y el *hit testing* encontraría antes la línea de
  * arriba. Invisible e impulsable, que es de donde se venía.
@@ -58,6 +68,8 @@ internal class RowStack : LayoutManager {
         var y = insets.top
         for ((index, child) in visible.withIndex()) {
             val height = heights[index]
+            // Hasta dónde puede llegar esta línea sin comerse el hueco de la de abajo.
+            val limit = insets.top + room - reserved
             when {
                 index == visible.lastIndex -> {
                     // El tope es el borde de arriba: sacarla por ahí sería mudar de
@@ -66,12 +78,18 @@ internal class RowStack : LayoutManager {
                     child.setBounds(insets.left, top, width, height)
                 }
 
-                short && y + height > insets.top + room - reserved -> child.setBounds(0, 0, 0, 0)
-
-                else -> {
+                !short || y + height <= limit -> {
                     child.setBounds(insets.left, y, width, height)
                     y += height
                 }
+
+                // Lo que cabría si esta línea se conformara con el hueco que queda.
+                (limit - y) >= child.minimumSize.height && limit > y -> {
+                    child.setBounds(insets.left, y, width, limit - y)
+                    y = limit
+                }
+
+                else -> child.setBounds(0, 0, 0, 0)
             }
         }
     }
