@@ -264,5 +264,5 @@ internal object ImagePreviewPopup {
      * Más aire por el lado que da a la esquina redondeada del popup: es donde el
      * recorte de la ventana empieza a comerse píxeles del icono. Ver [header].
      */
-    private const val HEADER_RIGHT_MARGIN = 4
+    private const val HEADER_RIGHT_MARGIN = 0
 }
