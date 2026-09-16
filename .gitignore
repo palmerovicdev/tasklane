@@ -16,3 +16,4 @@ out/
 *.hprof
 
 .DS_Store
+/.codebase-memory/
