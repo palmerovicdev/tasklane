@@ -52,6 +52,12 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
 
         @Attribute
         var anchorMarker: String? = null
+
+        @Attribute
+        var dueReminders: Boolean = true
+
+        @Attribute
+        var archiveDays: Int = 0
     }
 
     private var state = WorkspaceState()
@@ -103,6 +109,29 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
         get() = AnchorMarkerStyle.entries.firstOrNull { it.name == state.anchorMarker } ?: AnchorMarkerStyle.GUTTER
         set(value) {
             state.anchorMarker = value.name
+        }
+
+    /**
+     * Si se avisa de lo que vence hoy o ya venció (2.9.0). Encendido de fábrica: es para
+     * lo que existe la fecha. De la persona y no del proyecto, como [anchorMarker]: que
+     * a uno le moleste el aviso no dice nada de cómo trabaja el resto del equipo.
+     */
+    var dueReminders: Boolean
+        get() = state.dueReminders
+        set(value) {
+            state.dueReminders = value
+        }
+
+    /**
+     * Cuántos días hacia atrás se enseña lo terminado (2.10.0); `0` es «todo», que es como
+     * venía y como sigue de fábrica: esconder tareas sin que nadie lo pida sería
+     * indistinguible de perderlas. De la persona, como el filtro de vista: es una forma
+     * de mirar la lista, no de guardarla.
+     */
+    var archiveDays: Int
+        get() = state.archiveDays.coerceAtLeast(0)
+        set(value) {
+            state.archiveDays = value.coerceAtLeast(0)
         }
 
     /** Formato del portapapeles. Markdown por defecto: es lo que entiende el destino habitual. */

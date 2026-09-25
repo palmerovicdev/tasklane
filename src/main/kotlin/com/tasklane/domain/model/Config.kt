@@ -24,6 +24,12 @@ data class TaskState(
     val terminal: Boolean = false,
     /** Destino por defecto de las tareas nuevas. Debe haber exactamente uno. */
     val isDefault: Boolean = false,
+    /**
+     * Orden manual (2.11.0): la lista sigue a `Task.order`, que se cambia arrastrando, en
+     * vez de a la prioridad y la fecha. Lo marcado sigue arriba. Es del estado, como la
+     * agrupación: *ToDo* puede ir a mano y *Done* por fecha.
+     */
+    val manualOrder: Boolean = false,
 )
 
 data class TaskPriority(

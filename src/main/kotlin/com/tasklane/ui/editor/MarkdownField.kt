@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.ex.EditorEx
@@ -19,6 +20,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.tasklane.domain.text.Checklist
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.RepoKey
 import java.awt.Image
@@ -153,6 +155,30 @@ internal class MarkdownField(
             for (line in last downTo first) {
                 val text = if (numbered) "${line - first + 1}. " else marker
                 document.insertString(document.getLineStartOffset(line), text)
+            }
+        }
+    }
+
+    /**
+     * Convierte en casillas `- [ ] ` las líneas tocadas por la selección (2.11.0). Una
+     * línea que ya es una viñeta se queda con su marcador y gana los corchetes —`- algo`
+     * pasa a `- [ ] algo`, no a `- [ ] - algo`—, y una que ya es casilla no se toca.
+     */
+    fun checklistLines() {
+        val editor = component.editor ?: return
+        edit(editor) { document ->
+            val caret = editor.caretModel.currentCaret
+            val first = document.getLineNumber(caret.selectionStart)
+            val last = document.getLineNumber(caret.selectionEnd)
+            for (line in last downTo first) {
+                val start = document.getLineStartOffset(line)
+                val text = document.getText(TextRange(start, document.getLineEndOffset(line)))
+                if (Checklist.parse(text) != null) continue
+                val lead = text.indexOfFirst { it != ' ' && it != '\t' }.let { if (it < 0) text.length else it }
+                val bullet = text.getOrNull(lead)?.let { it == '-' || it == '*' || it == '+' } == true &&
+                    text.getOrNull(lead + 1) == ' '
+                if (bullet) document.insertString(start + lead + 2, "[ ] ")
+                else document.insertString(start + lead, "- [ ] ")
             }
         }
     }

@@ -112,3 +112,26 @@ internal abstract class SelectStateAction(private val delta: Int) : PanelAction(
 internal class SelectNextStateAction : SelectStateAction(1)
 
 internal class SelectPreviousStateAction : SelectStateAction(-1)
+
+/**
+ * Subir o bajar la tarea seleccionada un puesto en una pestaña con orden manual
+ * (2.11.0). El atajo de serie —`⌘⇧↑/↓`, las teclas de *Move Line Up/Down*— lo instala
+ * [TasklanePanel] sobre su lista; declararlas las hace reasignables y las pone en el menú
+ * contextual, que es donde se descubre que la lista se puede ordenar a mano.
+ */
+internal abstract class MoveByPlaceAction(private val delta: Int) : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        val panel = panelOf(e)
+        e.presentation.isVisible = panel?.manualOrder == true
+        e.presentation.isEnabled = panel?.canMoveSelected() == true
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        panelOf(e)?.moveSelectedBy(delta)
+    }
+}
+
+internal class MoveUpAction : MoveByPlaceAction(-1)
+
+internal class MoveDownAction : MoveByPlaceAction(1)

@@ -132,7 +132,12 @@ internal class MemoryPager(
         // Lo marcado va primero pase lo que pase: marcar es precisamente decir «que
         // no se me pierda esto». Después la prioridad, que es lo que se mira en una
         // lista de pendientes, y dentro de la misma prioridad lo más reciente arriba.
-        val natural = compareByDescending<Task> { it.bookmarked }
+        //
+        // Un estado a mano (2.11.0) ordena por `order` en vez de por prioridad y fecha, y
+        // de mayor a menor como la fecha: lo recién creado, que lleva el más alto, arriba.
+        val natural = if (state.manualOrder) {
+            compareByDescending<Task> { it.bookmarked }.thenByDescending { it.order }.thenByDescending { it.id.value }
+        } else compareByDescending<Task> { it.bookmarked }
             .thenByDescending { config.priorityOrDefault(it.priorityId).order }
             .thenByDescending { (DateGrouper.anchorOf(it, state.anchor) ?: it.updatedAt).toEpochMilli() }
             // El desempate, que desde la Fase 3 no es opcional: `SqlitePager` ordena

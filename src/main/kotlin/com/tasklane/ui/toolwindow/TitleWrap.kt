@@ -20,8 +20,10 @@ internal class Run(
     val link: TaskLink? = null,
     val matched: Boolean = false,
     val code: Boolean = false,
+    /** Lo que se pulsa en este tramo si no es un enlace: una casilla (2.11.0). */
+    val tag: Any? = null,
 ) {
-    fun withText(text: String): Run = Run(text, style, link, matched, code)
+    fun withText(text: String): Run = Run(text, style, link, matched, code, tag)
 }
 
 /**

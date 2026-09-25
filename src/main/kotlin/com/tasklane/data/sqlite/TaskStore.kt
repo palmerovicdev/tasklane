@@ -190,6 +190,8 @@ internal class TaskStore(private val db: TaskDb) {
                     is Mutation.Reprioritize -> rows += reprioritize(config, mutation, deltas)
                     is Mutation.Backfill -> rows += backfill(config, mutation.states)
                     is Mutation.Forget -> rows += forget(mutation.repo, deltas)
+                    is Mutation.Place -> rows += place(mutation)
+                    is Mutation.SeedOrder -> rows += seedOrder(mutation.state)
                     is Mutation.Renormalize -> {
                         val result = renormalize(mutation.before, config, deltas)
                         rows += result.rows
@@ -450,6 +452,117 @@ internal class TaskStore(private val db: TaskDb) {
             }
         }
         return rows
+    }
+
+    // ------------------------------------------------------------- orden manual (2.11.0)
+
+    /**
+     * Le da a una tarea el `ord` que la deja entre sus dos vecinas. Ver [Mutation.Place].
+     *
+     * Sólo cuentan las vecinas del mismo estado y del mismo lado de la marca: lo marcado
+     * va siempre arriba, así que soltar una tarea sin marcar entre dos marcadas es
+     * soltarla al principio de las suyas. La que falta se busca en la base, porque lo que
+     * hay debajo de la última fila cargada puede estar en una página que nadie ha pedido.
+     *
+     * Si no queda hueco —dos vecinas con `ord` seguidos, tras muchas vueltas al mismo
+     * sitio— se reparte el estado otra vez con [TaskStore.ORDER_GAP] de separación, y se
+     * vuelve a intentar. Pasa muy de tarde en tarde: cada hueco nuevo aguanta diez
+     * bisecciones.
+     */
+    private fun place(move: Mutation.Place): Int {
+        val repo = move.repo.value
+        val me = sql.first(
+            "SELECT state, bookmarked FROM task WHERE id = ? AND repo = ?",
+            move.id.value,
+            repo,
+        ) { it.getString(0).orEmpty() to it.getInt(1) } ?: return 0
+        val (state, marked) = me
+
+        fun ordOf(id: TaskId?): Long? = id?.takeIf { it != move.id }?.let {
+            sql.first(
+                "SELECT ord FROM task WHERE id = ? AND repo = ? AND state = ? AND bookmarked = ?",
+                it.value,
+                repo,
+                state,
+                marked,
+            ) { row -> row.getLong(0) }
+        }
+
+        fun neighbour(sqlText: String, from: Long): Long? = sql.first(
+            sqlText,
+            repo,
+            state,
+            marked,
+            from,
+            move.id.value,
+        ) { it.getLong(0) }.takeIf { it != Long.MIN_VALUE }
+
+        repeat(2) {
+            var hi = ordOf(move.above)
+            var lo = ordOf(move.below)
+            if (hi == null && lo == null) return 0
+            if (lo == null) {
+                lo = neighbour(
+                    "SELECT coalesce(max(ord), ${Long.MIN_VALUE}) FROM task " +
+                        "WHERE repo = ? AND state = ? AND bookmarked = ? AND ord < ? AND id <> ?",
+                    hi!!,
+                ) ?: (hi - 2 * ORDER_GAP)
+            }
+            if (hi == null) {
+                hi = neighbour(
+                    "SELECT coalesce(min(ord), ${Long.MIN_VALUE}) FROM task " +
+                        "WHERE repo = ? AND state = ? AND bookmarked = ? AND ord > ? AND id <> ?",
+                    lo,
+                ) ?: (lo + 2 * ORDER_GAP)
+            }
+            val top = maxOf(hi, lo)
+            val bottom = minOf(hi, lo)
+            if (top - bottom >= 2) {
+                sql.update("UPDATE task SET ord = ? WHERE id = ?", bottom + (top - bottom) / 2, move.id.value)
+                return 1
+            }
+            respace(repo, state)
+        }
+        return 0
+    }
+
+    /**
+     * Vuelve a espaciar el orden manual de un estado de un repositorio: las mismas
+     * posiciones, a [ORDER_GAP] unas de otras. Empieza en el `ord` más bajo que ya hubiera,
+     * para no mover el estado respecto a lo recién creado, que se crea por encima de todo.
+     */
+    private fun respace(repo: String, state: String) {
+        sql.update(
+            "WITH ranked AS MATERIALIZED (" +
+                "SELECT id, ROW_NUMBER() OVER (ORDER BY ord ASC, id ASC) AS rn FROM task WHERE repo = ? AND state = ?), " +
+                "base AS MATERIALIZED (SELECT coalesce(min(ord), 0) AS m FROM task WHERE repo = ? AND state = ?) " +
+                "UPDATE task SET ord = base.m + (ranked.rn - 1) * $ORDER_GAP FROM ranked, base WHERE task.id = ranked.id",
+            repo,
+            state,
+            repo,
+            state,
+        )
+    }
+
+    /**
+     * El orden manual de [state] sembrado con el que se estaba viendo. Ver
+     * [Mutation.SeedOrder]. En todos los repositorios —el modo es del estado, y el estado
+     * es del proyecto— y por encima del `ord` más alto de cada uno, así que no toca el
+     * orden de ningún otro estado.
+     */
+    private fun seedOrder(state: StateId): Int {
+        val n = sql.count("SELECT count(*) FROM task WHERE state = ?", state.value)
+        if (n == 0) return 0
+        sql.update(
+            "WITH ranked AS MATERIALIZED (" +
+                "SELECT id, repo, ROW_NUMBER() OVER (PARTITION BY repo ORDER BY ${TaskSchema.ORDER_BY_ASC}) AS rn " +
+                "FROM task WHERE state = ?), " +
+                "tops AS MATERIALIZED (SELECT repo, max(ord) AS m FROM task GROUP BY repo) " +
+                "UPDATE task SET ord = tops.m + ranked.rn * $ORDER_GAP " +
+                "FROM ranked JOIN tops ON tops.repo = ranked.repo WHERE task.id = ranked.id",
+            state.value,
+        )
+        return n
     }
 
     private fun forget(repo: RepoKey, deltas: Deltas): Int {

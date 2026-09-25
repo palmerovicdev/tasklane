@@ -27,12 +27,17 @@ internal class StateRow(
     var anchor: DateAnchor,
     var terminal: Boolean,
     var isDefault: Boolean,
+    /**
+     * No tiene columna: se elige en la barra de la ventana, como la agrupación rápida.
+     * Viaja aquí para que aplicar los ajustes no lo devuelva al orden automático.
+     */
+    val manualOrder: Boolean = false,
 ) {
-    fun toDomain(order: Int) = TaskState(id, name.trim(), order, grouping, anchor, terminal, isDefault)
+    fun toDomain(order: Int) = TaskState(id, name.trim(), order, grouping, anchor, terminal, isDefault, manualOrder)
 
     companion object {
         fun of(state: TaskState) =
-            StateRow(state.id, state.name, state.grouping, state.anchor, state.terminal, state.isDefault)
+            StateRow(state.id, state.name, state.grouping, state.anchor, state.terminal, state.isDefault, state.manualOrder)
 
         fun fresh(name: String) =
             StateRow(StateId("s-${UUID.randomUUID()}"), name, Grouping.NONE, DateAnchor.UPDATED, false, false)

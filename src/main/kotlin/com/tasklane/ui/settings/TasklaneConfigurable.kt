@@ -20,11 +20,13 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.panel
 import com.tasklane.TasklaneBundle
 import com.tasklane.code.AnchorMarkers
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.data.config.TasklaneDefaultsService
+import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TasklaneDiagnostics
 import com.tasklane.domain.command.TaskCommand
@@ -39,6 +41,7 @@ import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.service.AttachmentService
 import com.tasklane.service.TaskService
+import com.tasklane.service.ViewService
 import javax.swing.JList
 import javax.swing.SwingConstants
 
@@ -110,6 +113,23 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
     private val markers = AnchorMarkers.getInstance(project)
 
+    private val workspace = TasklaneWorkspaceService.getInstance(project)
+
+    private val view = ViewService.getInstance(project)
+
+    /**
+     * El archivo de lo terminado (2.10.0): la casilla dice si se esconde algo y el número
+     * desde cuándo. Sin marcar se ve todo, que es lo de fábrica. Van a mano y no con el
+     * `bind` del DSL porque los dos controles son **un** valor guardado —`0` es «todo»— y
+     * el número tiene que sobrevivir a desmarcar y volver a marcar.
+     */
+    private val archiveCheckBox = JBCheckBox(TasklaneBundle.message("settings.archive.enabled")).apply {
+        addActionListener { archiveSpinner.isEnabled = isSelected }
+    }
+    private val archiveSpinner = JBIntSpinner(DEFAULT_ARCHIVE_DAYS, 1, MAX_ARCHIVE_DAYS).apply {
+        isEnabled = false
+    }
+
     // Subclase y no SimpleListCellRenderer.create, que la 2026.2 marca para eliminarse.
     private val markerRenderer = object : SimpleListCellRenderer<AnchorMarkerStyle?>() {
         override fun customize(
@@ -162,6 +182,24 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.anchors.comment")) }
         }
 
+        // Como la marca del editor, el aviso es de la persona: `workspace.xml`.
+        group(TasklaneBundle.message("settings.due.title")) {
+            row {
+                checkBox(TasklaneBundle.message("settings.due.remind"))
+                    .bindSelected({ workspace.dueReminders }, { workspace.dueReminders = it })
+            }
+            row { comment(TasklaneBundle.message("settings.due.comment")) }
+        }
+
+        group(TasklaneBundle.message("settings.archive.title")) {
+            row {
+                cell(archiveCheckBox)
+                cell(archiveSpinner)
+                label(TasklaneBundle.message("settings.archive.days"))
+            }
+            row { comment(TasklaneBundle.message("settings.archive.comment")) }
+        }
+
         // Todo lo de este grupo es del repositorio activo, como el resto de Tasklane: el
         // peso que se enseña, los dos botones y el umbral del aviso.
         group(TasklaneBundle.message("settings.images.title")) {
@@ -194,6 +232,10 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         depthSpinner.number = config.repoDepth
         refreshImageWeight()
         imageQuotaSpinner.number = config.imageQuotaMegabytes
+        val days = view.archive.value.days
+        archiveCheckBox.isSelected = days > 0
+        archiveSpinner.number = if (days > 0) days else DEFAULT_ARCHIVE_DAYS
+        archiveSpinner.isEnabled = days > 0
         stateReassign.clear()
         priorityReassign.clear()
         updateProblems()
@@ -204,7 +246,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         super.isModified() ||
             currentConfig() != configService.config.value ||
             stateReassign.isNotEmpty() ||
-            priorityReassign.isNotEmpty()
+            priorityReassign.isNotEmpty() ||
+            archiveDays() != view.archive.value.days
 
     override fun apply() {
         val config = currentConfig()
@@ -213,6 +256,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         }
 
         val service = TaskService.getInstance(project)
+        if (archiveDays() != view.archive.value.days) view.setArchiveDays(archiveDays())
 
         // 1. Reasignaciones explícitas ANTES de tocar la configuración: mientras el
         //    estado de origen siga existiendo, mover es un cambio de estado normal.
@@ -233,6 +277,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
         super.apply()
     }
+
+    private fun archiveDays(): Int = if (archiveCheckBox.isSelected) archiveSpinner.number else 0
 
     private fun currentConfig(): TasklaneConfig =
         buildConfig(
@@ -545,6 +591,12 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         const val ID = "com.tasklane.settings"
         private const val HELP_TOPIC = "com.tasklane.settings"
         private const val KEYMAP_ID = "preferences.keymap"
+
+        /** Lo que propone la casilla del archivo al marcarla por primera vez: un mes. */
+        private const val DEFAULT_ARCHIVE_DAYS = 30
+
+        /** Diez años: por encima, «todo» dice lo mismo sin el número. */
+        private const val MAX_ARCHIVE_DAYS = 3650
 
         /** Un giga por paso: la cuota se piensa en gigas, no en megas. */
         private const val IMAGE_QUOTA_STEP = 1024

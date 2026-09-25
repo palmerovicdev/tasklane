@@ -97,6 +97,12 @@ internal interface TaskPager {
      */
     fun <T> snapshot(block: (TaskPager) -> T): T = block(this)
 
+    /**
+     * Cuántas tareas de [stateId] esconde el archivo de lo terminado (2.10.0). Cero en
+     * quien no archiva: buscando se ve todo, y las vencidas nunca están cerradas.
+     */
+    fun archived(stateId: StateId): Int = 0
+
     companion object {
         /**
          * Tareas por tanda al exportar. Lo bastante grande como para que el coste de cada

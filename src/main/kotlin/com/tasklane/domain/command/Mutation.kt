@@ -61,4 +61,21 @@ sealed interface Mutation {
 
     /** Saca del almacén un repositorio entero. Lo emite «Exportar y quitar». */
     data class Forget(val repo: RepoKey) : Mutation
+
+    /**
+     * Pone [id] entre [above] y [below] en el orden manual de su estado (2.11.0): le da un
+     * `ord` que quede en medio. Lo resuelve el almacén y no el reducer porque el hueco
+     * puede no existir —dos vecinas con `ord` seguidos— y entonces hay que volver a
+     * espaciar el estado entero, que no cabe en memoria. Cualquiera de los dos vecinos
+     * puede faltar: el principio o el final de lo que se ve, y entonces el almacén busca
+     * el siguiente de verdad, que puede estar en una página sin cargar.
+     */
+    data class Place(val repo: RepoKey, val id: TaskId, val above: TaskId?, val below: TaskId?) : Mutation
+
+    /**
+     * Siembra el orden manual de [state] con el orden que se estaba viendo (2.11.0): al
+     * pasar a mano, la lista no se mueve. Sin esto saldría en orden de creación, que no
+     * es nada que el usuario estuviera mirando.
+     */
+    data class SeedOrder(val state: StateId) : Mutation
 }

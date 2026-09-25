@@ -9,6 +9,104 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.11.0]
+
+Menor sin cambio de formato: orden manual por estado, y vuelven las listas de
+comprobación.
+
+### Añadido
+- **Orden manual.** *Group By ▸ Manual Order* pone un estado a mano: la lista deja de
+  ordenarse por prioridad y fecha y sigue `Task.order`, el campo que se guardaba desde la
+  Fase 1 sin que nada lo leyera.
+  - Se reordena **arrastrando la tarjeta por su franja de color** —con cursor de mover al
+    pasar por encima; el resto de la tarjeta sigue seleccionando texto— o con `⌘⇧↑/↓`
+    (*Move Up* / *Move Down*, también en el menú contextual y asignables en el Keymap).
+  - Al pasar a mano **la lista no se mueve**: el orden se siembra con el que se estaba
+    viendo.
+  - Lo marcado sigue arriba y no se cruza; lo nuevo entra arriba del todo; la agrupación
+    sigue valiendo y se ordena dentro de cada grupo. Buscando no se arrastra: manda la
+    relevancia.
+  - Es del estado y va a `tasklane.xml`, como la agrupación.
+- **Listas de comprobación.** `- [ ] algo` / `- [x] algo` —con `-`, `*`, `+` o `1.`— se
+  pintan en la tarjeta como casillas, **también en el título**, sin la marca. Un clic
+  escribe o quita la `x` en el cuerpo; lo marcado sale tachado y en gris. La línea de
+  distintivos lleva `☑ 2/5`. En el diálogo, el botón *Checklist* convierte en casillas
+  las líneas seleccionadas (una viñeta `- algo` pasa a `- [ ] algo`). Lo que va entre
+  vallas de código no cuenta.
+  Ya estuvieron hasta la `1.0.0` y se quitaron porque una tarea cuyo cuerpo **era** la
+  lista enseñaba `- [ ]` en crudo en el título; eso es justo lo que ahora se pinta como
+  casilla.
+
+### Cambiado
+- `SqlitePager` y `MemoryPager` ordenan un estado a mano por `ord` (y el desempate de
+  siempre), con los mismos resultados en las cuatro agrupaciones: lo fija un test.
+- Índice nuevo `task_manual`, que se crea **una vez** al abrir una base existente. Con
+  cientos de miles de tareas esa primera apertura tarda unos segundos más.
+- `Mutation.Place` pone el `ord` entre dos vecinas en el almacén y, si no queda hueco,
+  reespacia el estado; `Mutation.SeedOrder` siembra el orden al pasar a mano.
+- `TaskCommand.ToggleCheck` vuelve a comprobar que en esa posición sigue habiendo una
+  casilla antes de escribir.
+
+## [2.10.0]
+
+Menor sin cambio de formato: las tareas salen en *Search Everywhere* y lo terminado se
+puede archivar.
+
+### Añadido
+- **Tareas en *Search Everywhere*.** `⇧⇧`, escribir, y las tareas salen en la pestaña
+  *All* —detrás de clases, ficheros y símbolos— y en una propia, *Tasklane*. Busca con el
+  mismo índice, la misma sintaxis (`p:high`, `#api`, `file:Auth`) y el mismo alcance que
+  el buscador de la ventana, para que las dos no respondan cosas distintas. Cada fila
+  lleva el punto de su prioridad, el título —tachado si está cerrada— y en gris el
+  estado, y el repositorio si hay más de uno. `Enter` abre la tool window con la tarea
+  seleccionada. Con la consulta vacía no enseña nada.
+- **Archivar lo terminado.** *Settings → Tools → Tasklane → Completed tasks*: esconder
+  lo que se cerró hace más de N días (un mes al marcar la casilla; hasta diez años). De
+  fábrica no se esconde nada.
+  - Sólo en los estados **terminales** y sólo en la lista: buscar sigue encontrándolo
+    todo.
+  - La lista, las cabeceras de grupo y el contador de la pestaña cuentan lo mismo: lo
+    que se ve.
+  - **El pie de la lista dice cuántas se esconden**, con *Show* para verlas hasta cerrar
+    el proyecto y *Hide them* para volver. Ir a una tarea archivada —`⇧⇧`, una marca del
+    editor— las enseña también.
+  - Una tarea terminal sin fecha de cierre se ve siempre.
+  - Es preferencia de cada uno (`workspace.xml`).
+
+### Cambiado
+- `SqlitePager` recibe el corte del archivo y lo aplica a las siete consultas de la
+  lista, sobre `completed_at`, que ya estaba en la cola de los tres índices: no hay
+  índice nuevo ni salto a la tabla. Los contadores de los estados terminales dejan de
+  salir de `counter` mientras haya archivo, y se cuentan con la misma condición.
+
+## [2.9.0]
+
+Menor sin cambio de formato: borrar se puede deshacer y los vencimientos avisan.
+
+### Añadido
+- **Deshacer un borrado.** Borrar sigue sin preguntar, pero ahora sale un aviso
+  *«3 tasks deleted from backend — Undo»*, y `⌘Z` con el foco en la lista devuelve lo
+  último que se borró. Las tareas vuelven **tal como estaban** —el mismo id, las mismas
+  fechas, el mismo sitio en su grupo, sus imágenes— y no como copias nuevas, que se
+  irían al grupo de hoy. Vale para la selección y para borrar un grupo entero, hasta
+  10.000 tareas; por encima el aviso dice que no se puede deshacer. Sólo se deshace lo
+  último, como en un editor: un borrado nuevo retira el aviso del anterior.
+  Las imágenes no corren peligro: la limpieza de adjuntos sólo pasa al abrir el
+  proyecto.
+- **Aviso de vencimientos.** Un aviso dice cuántas tareas del **repositorio activo**
+  están vencidas y cuántas vencen hoy —*«2 overdue · 1 due today in backend»*—, con
+  *Show* para ir a ellas. Sale al abrir el proyecto, al cambiar de repositorio y cada
+  media hora, y sólo si hay alguna de la que no se haya avisado ya hoy; el aviso nuevo
+  retira el anterior. Se apaga desde el propio aviso (*Don't Remind Me*) o en
+  *Settings → Tools → Tasklane → Due dates*, y es preferencia de cada uno
+  (`workspace.xml`).
+
+### Cambiado
+- `TaskCommand.Restore`: devuelve tareas borradas con su id; las que ya existen se
+  dejan como están, así que deshacer dos veces no duplica. Si entretanto se quitó su
+  estado o su prioridad, vuelven aparcadas en la de por defecto, como hace la
+  renormalización.
+
 ## [2.8.0]
 
 Menor sin cambio de formato: un ancla de código se puede escribir, los TODO del código

@@ -19,6 +19,7 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.CheckBox
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.DetailBlock
 import com.tasklane.domain.model.RepoKey
@@ -152,6 +153,27 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * controles que casi nunca se usan.
      */
     var hoveredRow: Int = -1
+
+    /**
+     * Si la lista se puede reordenar arrastrando (2.11.0): la pestaña va a mano y no se
+     * está buscando —buscando manda la relevancia, y soltar entre dos aciertos no diría
+     * nada del orden de verdad—. Lo pone la pestaña en cada repintado.
+     */
+    var reorderable: Boolean = false
+
+    /**
+     * Si [point] cae sobre el asa de una tarjeta: la franja de prioridad y el margen hasta
+     * la casilla. Es por donde se arrastra para reordenar; el resto de la tarjeta se
+     * arrastra para seleccionar texto, y los dos gestos no pueden compartir sitio.
+     */
+    fun isOnHandle(tree: JTree, point: Point): Boolean {
+        if (!reorderable) return false
+        val row = rowAtHeight(tree, point.y)
+        if (row < 0 || tree.getPathForRow(row)?.lastPathComponent !is TaskNode) return false
+        val bounds = paintedRowBounds(tree, row) ?: return false
+        val x = point.x - bounds.x
+        return x >= 0 && x < JBUI.scale(STRIPE + STRIPE_GAP)
+    }
 
     /**
      * El texto seleccionado a mano, o `null`. Lo mantiene [CardTextSelection]; aquí
@@ -645,9 +667,29 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      */
     private fun bodyRuns(text: DetailBlock.Text, style: SimpleTextAttributes): List<Run> {
         val links = text.links
-        if (links.isEmpty()) return markdownRuns(text.text, style)
-        return markdownRuns(text.text, style) { index -> links.firstOrNull { it.range.first == index } }
+        val check = text.check
+        val base = if (check?.checked == true) checkedStyle(style) else style
+        val runs = if (links.isEmpty()) markdownRuns(text.text, base)
+        else markdownRuns(text.text, base) { index -> links.firstOrNull { it.range.first == index } }
+        return if (check == null) runs else listOf(checkRun(check)) + runs
     }
+
+    /**
+     * La casilla de una línea de lista de comprobación (2.11.0), como un tramo más que se
+     * pulsa: su etiqueta es la casilla, y quien atiende el clic —[RowClicks]— escribe o
+     * quita la `x` en el cuerpo. Un glifo y no un icono porque un `SimpleColoredComponent`
+     * lleva un solo icono, y ese sitio es de los distintivos.
+     */
+    private fun checkRun(check: CheckBox): Run {
+        val task = pendingTask
+        val tag = if (task == null) null else CheckTag(task, check.offset)
+        val style = if (check.checked) SimpleTextAttributes.GRAYED_ATTRIBUTES else SimpleTextAttributes.REGULAR_ATTRIBUTES
+        return Run(if (check.checked) CHECKED else UNCHECKED, style, tag = tag)
+    }
+
+    /** Lo marcado se tacha y se apaga, como una tarea cerrada: está hecho. */
+    private fun checkedStyle(base: SimpleTextAttributes): SimpleTextAttributes =
+        SimpleTextAttributes(base.style or SimpleTextAttributes.STYLE_STRIKEOUT, JBColor.GRAY)
 
     /**
      * El título, troceado por el énfasis Markdown que lleve y por los enlaces que
@@ -669,6 +711,19 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             )
         }
         val links = task.titleLinks
+        // Un título que es una casilla —la tarea **es** la lista— la pinta como tal y sin
+        // la marca delante: es lo que en la 1.0.0 salía como `- [ ]` en crudo.
+        val check = task.titleCheck
+        if (check != null) {
+            val cut = check.text.coerceIn(0, title.length)
+            val shifted = links.mapNotNull { link ->
+                if (link.range.first < cut) null else link.copy(range = (link.range.first - cut)..(link.range.last - cut))
+            }
+            val base = if (check.checked) checkedStyle(style) else style
+            return listOf(checkRun(check)) + markdownRuns(title.substring(cut), base, matched = true) { index ->
+                shifted.firstOrNull { it.range.first == index }
+            }
+        }
         return markdownRuns(title, style, matched = true) { index ->
             links.firstOrNull { it.range.first == index }
         }
@@ -763,6 +818,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         for (run in runs) {
             when {
                 run.link != null -> target.append(run.text, run.style, run.link)
+                run.tag != null -> target.append(run.text, run.style, run.tag)
                 // El subrayado de coincidencias lo pone la plataforma, que es la única
                 // forma de que salga correcto en ambos temas y sobre una fila
                 // seleccionada.
@@ -843,7 +899,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 continue
             }
             if (from > 0) out += run.withText(text.substring(0, from))
-            out += Run(text.substring(from, to), selectedStyle(run.style, background), run.link, code = run.code)
+            out += Run(text.substring(from, to), selectedStyle(run.style, background), run.link, code = run.code, tag = run.tag)
             if (to < text.length) out += run.withText(text.substring(to))
         }
         return out
@@ -935,6 +991,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES
             }
             chip(formatDate(due), TasklaneIcons.Calendar, style)
+        }
+
+        // Cuántas casillas van marcadas (2.11.0): plegada, la tarjeta enseña una línea
+        // del cuerpo, y una lista de ocho se quedaría en la primera casilla.
+        task.checklist.takeIf { it.second > 0 }?.let { (done, total) ->
+            chip("$CHECKED$done/$total", null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
 
         for (tag in task.tags) {
@@ -1327,6 +1389,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
             is AttachmentId -> Hotspot.Image(task.repo, tag)
             is CopyTask -> Hotspot.Copy(tag.task)
+            is CheckTag -> Hotspot.Check(tag.task, tag.offset)
             else -> null
         }
     }
@@ -1341,9 +1404,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         /** El contador de capturas de la línea de distintivos: todas las de la tarea. */
         class Images(val repo: RepoKey, val ids: List<AttachmentId>) : Hotspot
         class Copy(val task: Task) : Hotspot
+
+        /** Una casilla de lista de comprobación: [offset] es dónde está su `x` en el cuerpo. */
+        class Check(val task: Task, val offset: Int) : Hotspot
     }
 
     private class CopyTask(val task: Task)
+
+    private class CheckTag(val task: Task, val offset: Int)
 
     /** Una fila de tarea resuelta: el nodo y su fila, que hacen falta los dos para medirla. */
     private class Hit(val node: TaskNode, val row: Int)
@@ -1647,6 +1715,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     enum class RowTarget { EXPAND, BOOKMARK, MENU }
 
     private companion object {
+        /** Las casillas de una lista de comprobación, con el hueco que las separa del texto. */
+        const val UNCHECKED = "\u2610 "
+        const val CHECKED = "\u2611 "
+
         /**
          * Cuántas tarjetas desplegadas se recuerdan. Desplegar es un gesto suelto de
          * quien mira, así que el número real nunca se acerca a esto: el tope está para

@@ -65,6 +65,17 @@
                 <code>&larr;</code>/<code>&rarr;</code>, and shows how many tasks it holds.
                 <i>Today</i> is shown even when empty &mdash; <i>No tasks today &middot; You're
                 all caught up!</i> &mdash; because that is exactly what you came to check.</li>
+            <li><b>Archive what is done</b>: hide tasks completed more than N days ago, if you
+                want to. Only in the list of a done state &mdash; search still finds them
+                &mdash; and never silently: the list says how many are hidden, with a link to
+                show them.</li>
+            <li><b>Manual order</b>, per state: <i>Group By &#9656; Manual Order</i>, then drag a
+                card by its colour stripe or press <code>&#8984;&#8679;&uarr;/&darr;</code>. The
+                list does not jump when you switch: it starts from the order you were
+                seeing.</li>
+            <li><b>Checklists</b>: <code>- [ ] item</code> lines are drawn as checkboxes on the
+                card &mdash; in the title too &mdash; and a click ticks them, writing the
+                <code>x</code> into the body. A <code>&#9745; 2/5</code> badge counts them.</li>
             <li><b>Ungrouped order</b>: bookmarked tasks first, then by priority, then the most
                 recent.</li>
             <li><b>Built for huge lists.</b> The list loads a page at a time and says how many
@@ -123,6 +134,10 @@
                 priority, delete. Many tasks at once are one operation and one repaint; above ten
                 it runs in the background with a progress bar, and <b>cancelling undoes
                 it</b>.</li>
+            <li><b>Deleting can be undone</b>: a <i>3 tasks deleted &mdash; Undo</i>
+                notification, or <code>&#8984;Z</code> / <code>Ctrl+Z</code> in the list, brings
+                the last deletion back exactly as it was &mdash; same dates, same place, same
+                images.</li>
             <li><b>The checkbox</b> &mdash; or <i>Toggle Completed</i> &mdash; moves a task to the
                 done state and back to the default one. Entering a done state stamps the completion
                 date, which is what grouping <i>Done</i> by date uses.</li>
@@ -133,7 +148,7 @@
             <li><b>One dialog to create and edit</b>, so a task jotted down in a hurry is not born
                 different from one written calmly.</li>
             <li><b>Write in Markdown</b> with a formatting toolbar: bold, italics, code, link,
-                image, bulleted list and numbered list.</li>
+                image, bulleted list, numbered list and checklist.</li>
             <li><b>Images you can paste, drop or pick</b>: a screenshot from the clipboard, an
                 image file copied or dragged in, or one chosen from disk. It lands under the line
                 your caret was on and shows right there as a preview; the text only shows
@@ -144,7 +159,8 @@
             <li><b>A due date</b> from presets &mdash; today, tomorrow, end of week, next week
                 &mdash; or from a calendar. It falls due at the <i>end</i> of the day, so a task set
                 for today is not born overdue; once past, the card shows it in red and the
-                <i>Overdue</i> filter finds it.</li>
+                <i>Overdue</i> filter finds it. <b>A reminder</b> tells you what in the active
+                repository is overdue or due today, once per task per day.</li>
             <li><b>Tags as chips</b>, typed separated by comma or space, removed with their cross
                 or with <code>Backspace</code>. In the search field they are
                 <code>#api</code>.</li>
@@ -177,6 +193,9 @@
                 and <code>Escape</code> clears it.</li>
             <li><b>Search All Repositories</b> &mdash; shown when the window has more than one
                 &mdash; searches every repository and labels each row with its own.</li>
+            <li><b>Search Everywhere</b> (<code>&#8679;&#8679;</code>) finds tasks too, with the
+                same syntax, in its own <i>Tasklane</i> tab. Enter opens the tool window on
+                the task.</li>
         </ul>
 
         <h3>In the editor</h3>
@@ -280,6 +299,10 @@
                 &mdash; a view filter, never a delete.</li>
             <li><b>Code anchor marks</b>: gutter icon, inline chip or none. This one is yours alone
                 and is not shared with the project.</li>
+            <li><b>Due dates</b>: turn the overdue / due-today reminder on or off. Yours alone,
+                like the anchor marks.</li>
+            <li><b>Completed tasks</b>: hide tasks completed more than N days ago from the list of
+                a done state, or show them all (the default). Yours alone.</li>
             <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
                 the warning threshold.</li>
             <li><b>Save as template for new projects</b>, so configuring per project does not mean
@@ -295,8 +318,12 @@
                 <i>Plugins &rarr; Tasklane</i>, so anything you use daily can get its own key.</li>
             <li><b>Fully usable from the keyboard</b>: <code>Tab</code> walks the state row
                 (<code>Space</code> or <code>Enter</code> opens a tab), the search field and the
-                list; <code>Delete</code> removes the selected tasks. The list, the search field
-                and the dialog fields have names for screen readers.</li>
+                list; <code>Delete</code> removes the selected tasks and <code>&#8984;Z</code> /
+                <code>Ctrl+Z</code> brings them back; <code>&#8984;&#8679;&uarr;/&darr;</code>
+                moves a task in a manually ordered state. The list, the search field and the
+                dialog fields have names for screen readers.</li>
+            <li><b>Search Everywhere</b> (<code>&#8679;&#8679;</code>) finds tasks without opening
+                the tool window.</li>
         </ul>
 
         <h3>Where your tasks live, and how they are kept safe</h3>
@@ -372,6 +399,10 @@
              hasta que alguien abriera la tool window. -->
         <postStartupActivity implementation="com.tasklane.startup.AnchorMarkerActivity"/>
 
+        <!-- El aviso de vencimientos (2.9.0): al abrir, al cambiar de repositorio y cada
+             media hora, solo de lo que no se haya avisado ya hoy. -->
+        <postStartupActivity implementation="com.tasklane.startup.DueReminderActivity"/>
+
         <!-- Los servicios de configuracion son light services (@Service + @State),
              asi que no se declaran aqui: la plataforma los descubre al usarlos. -->
         <!-- Alt+Enter sobre un TODO: pasarlo a Tasklane (2.8.0). Sin <language>: vale
@@ -381,6 +412,9 @@
             <bundleName>messages.TasklaneBundle</bundleName>
             <categoryKey>intention.todo.category</categoryKey>
         </intentionAction>
+
+        <!-- Las tareas en Search Everywhere (2.10.0), con su propia pestana. -->
+        <searchEverywhereContributor implementation="com.tasklane.ui.search.TaskSearchContributor$Factory"/>
 
         <projectConfigurable
             id="com.tasklane.settings"
@@ -472,6 +506,14 @@
                 class="com.tasklane.ui.actions.MoveToNextStateAction"/>
         <action id="Tasklane.MoveToPreviousState"
                 class="com.tasklane.ui.actions.MoveToPreviousStateAction"/>
+        <!-- Subir y bajar a mano (2.11.0). ⌘⇧↑/↓ lo instala TasklanePanel sobre su
+             lista; solo se ven en una pestana con orden manual. -->
+        <action id="Tasklane.MoveUp"
+                class="com.tasklane.ui.actions.MoveUpAction"
+                icon="AllIcons.Actions.MoveUp"/>
+        <action id="Tasklane.MoveDown"
+                class="com.tasklane.ui.actions.MoveDownAction"
+                icon="AllIcons.Actions.MoveDown"/>
         <action id="Tasklane.SelectNextState"
                 class="com.tasklane.ui.actions.SelectNextStateAction"/>
         <action id="Tasklane.SelectPreviousState"
@@ -574,6 +616,8 @@
             <reference ref="Tasklane.ToggleBookmark"/>
             <reference ref="Tasklane.MoveToState"/>
             <reference ref="Tasklane.SetPriority"/>
+            <reference ref="Tasklane.MoveUp"/>
+            <reference ref="Tasklane.MoveDown"/>
             <separator/>
             <reference ref="Tasklane.Export"/>
             <separator/>

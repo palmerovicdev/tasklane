@@ -6,6 +6,7 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.domain.text.Checklist
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.LinkExtractor
 import java.time.Clock
@@ -99,6 +100,8 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 if (command.from == command.to) nothing(config)
                 else Plan(listOf(Mutation.Reprioritize(command.from, command.to, now)), config)
 
+            is TaskCommand.SeedManualOrder -> Plan(listOf(Mutation.SeedOrder(command.state)), config)
+
             is TaskCommand.BackfillCompletedAt ->
                 if (command.states.isEmpty()) nothing(config)
                 else Plan(listOf(Mutation.Backfill(command.states)), config)
@@ -139,6 +142,13 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
             }
 
             is TaskCommand.Batch -> batch(subject, command)
+
+            is TaskCommand.Restore -> {
+                // Sólo las que no están: deshacer dos veces —el aviso y `⌘Z`— no duplica.
+                val present = subject.tasks.mapTo(HashSet()) { it.id }
+                val back = command.tasks.filter { it.id !in present }.map { restored(it, config) }
+                if (back.isEmpty()) nothing(config) else Plan(listOf(Mutation.Upsert(back)), config)
+            }
 
             is TaskCommand.CreateMany -> {
                 // Un orden por tarea, seguidos y en el orden en que llegan: pedirle al
@@ -238,6 +248,15 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 if (tags == task.tags) task else task.copy(tags = tags, updatedAt = now)
             }
 
+            is TaskCommand.Move ->
+                if (subject.task(command.id) == null || (command.above == null && command.below == null)) nothing(config)
+                else Plan(listOf(Mutation.Place(command.repo, command.id, command.above, command.below)), config)
+
+            is TaskCommand.ToggleCheck -> edit(subject, command.id) { task ->
+                val body = Checklist.toggle(task.body, command.offset)
+                if (body == null) task else withDerived(task.copy(body = body, updatedAt = now))
+            }
+
             is TaskCommand.ToggleComplete -> edit(subject, command.id) { task ->
                 val isDone = config.stateOrDefault(task.stateId).terminal
                 val target = if (isDone) {
@@ -314,7 +333,10 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         is TaskCommand.ToggleBookmark -> listOf(command.id)
         is TaskCommand.SetTags -> listOf(command.id)
         is TaskCommand.ToggleComplete -> listOf(command.id)
+        is TaskCommand.ToggleCheck -> listOf(command.id)
+        is TaskCommand.Move -> listOf(command.id)
         is TaskCommand.Batch -> command.commands.flatMapTo(LinkedHashSet()) { targetsOf(it) }.toList()
+        is TaskCommand.Restore -> command.tasks.map { it.id }
         else -> emptyList()
     }
 
@@ -371,6 +393,26 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
             if (deleted.isNotEmpty()) add(Mutation.Delete(deleted.toList()))
         }
         return Plan(mutations, config)
+    }
+
+    /**
+     * Una tarea borrada, lista para volver. Tal cual, salvo si entretanto se quitó su
+     * estado o su prioridad de los ajustes: entonces se aparca en la de por defecto con
+     * la marca que la devuelve sola si vuelve, igual que hace la renormalización. Sin
+     * esto volvería a un estado que no pinta ninguna pestaña, que es seguir borrada.
+     */
+    private fun restored(task: Task, config: TasklaneConfig): Task {
+        var next = task
+        if (config.state(task.stateId) == null) {
+            next = next.copy(stateId = config.defaultState.id, extra = next.extra + (ORIG_STATE to task.stateId.value))
+        }
+        if (config.priority(task.priorityId) == null) {
+            next = next.copy(
+                priorityId = config.defaultPriority.id,
+                extra = next.extra + (ORIG_PRIORITY to task.priorityId.value),
+            )
+        }
+        return next
     }
 
     private fun upsert(config: TasklaneConfig, task: Task) =

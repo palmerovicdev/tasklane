@@ -131,6 +131,23 @@ class SearchService(
         workspace.searchAllRepos = value
     }
 
+    /**
+     * Una búsqueda suelta, fuera del pipeline de la ventana: la de *Search Everywhere*
+     * (2.10.0). Con la misma sintaxis y el mismo alcance que el buscador de la ventana
+     * —el repositorio activo, o todos si está puesto *Search All Repositories*—, para que
+     * `⇧⇧` y la ventana no respondan cosas distintas a la misma consulta.
+     *
+     * Bloqueante: llamar fuera del EDT, como hace la plataforma con sus contribuidores.
+     */
+    fun find(raw: String): List<com.tasklane.domain.model.Task> {
+        val query = QueryParser.parse(raw)
+        if (query.isEmpty) return emptyList()
+        val snapshot = tasks.snapshot.value
+        index.setCorpus(SearchCorpus(snapshot.config, snapshot.repositories))
+        val searchScope = if (_allRepos.value) SearchScope.All else SearchScope.Repo(snapshot.activeRepo)
+        return index.search(query, searchScope).map { it.task }
+    }
+
     private fun compute(input: Input): SearchResults {
         val query = QueryParser.parse(input.raw)
         if (query.isEmpty) return SearchResults.NONE

@@ -138,6 +138,9 @@ internal object TaskSchema {
      */
     const val ORDER_BY = "bookmarked DESC, priority_rank DESC, $SORT_DATE DESC, $TIE DESC"
 
+    /** [ORDER_BY] al revés: de lo último de la lista a lo primero. Lo usa sembrar el orden manual. */
+    const val ORDER_BY_ASC = "bookmarked ASC, priority_rank ASC, $SORT_DATE ASC, $TIE ASC"
+
     /**
      * Las pragmas de la conexión de escritura.
      *
@@ -210,6 +213,15 @@ internal object TaskSchema {
         """
         CREATE INDEX IF NOT EXISTS task_date
             ON task(repo, state, sort_date, undated, bookmarked, completed_at, due_date)
+        """,
+        // El de los estados con orden manual (2.11.0): el mismo papel que `task_board`,
+        // con `ord` donde aquél lleva la prioridad y la fecha. `sort_date` va en la cola
+        // para que un grupo de fecha se resuelva sin saltar a la tabla. Se crea al abrir
+        // una base existente, una vez, como cualquier otra cosa de esta lista.
+        """
+        CREATE INDEX IF NOT EXISTS task_manual
+            ON task(repo, state, bookmarked DESC, ord DESC, id DESC,
+                    undated, sort_date, completed_at, due_date)
         """,
         "CREATE INDEX IF NOT EXISTS task_by_priority ON task(repo, priority)",
         // PARCIAL otra vez, y por el mismo motivo. Agrupando por etiqueta hay un cajón

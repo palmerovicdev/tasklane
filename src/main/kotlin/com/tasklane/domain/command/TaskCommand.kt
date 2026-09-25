@@ -5,6 +5,7 @@ import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import java.time.Instant
@@ -109,6 +110,21 @@ sealed interface TaskCommand {
         val anchors: List<CodeAnchor>,
     ) : RepoScoped
 
+    /**
+     * Marca o desmarca la casilla `- [ ]` del cuerpo que está en [offset] (2.11.0). Es lo
+     * que hace pulsar una casilla en la tarjeta. Si ahí ya no hay una casilla —el cuerpo
+     * cambió entre pintar y pulsar— no hace nada, en vez de escribir una `x` a ciegas.
+     */
+    data class ToggleCheck(override val repo: RepoKey, val id: TaskId, val offset: Int) : RepoScoped
+
+    /**
+     * Lleva una tarea a otro sitio de la lista de un estado con orden manual (2.11.0):
+     * entre [above] y [below], las que quedarán justo encima y justo debajo. Cualquiera
+     * puede faltar —el principio o el final de lo que se ve—. No toca `updatedAt`, como
+     * marcar: reordenar no es editar. Ver `Mutation.Place`.
+     */
+    data class Move(override val repo: RepoKey, val id: TaskId, val above: TaskId?, val below: TaskId?) : RepoScoped
+
     /** Alterna entre el estado terminal y el estado por defecto. */
     data class ToggleComplete(override val repo: RepoKey, val id: TaskId) : RepoScoped
 
@@ -127,6 +143,19 @@ sealed interface TaskCommand {
     // ----------------------------------------------------- alcance de proyecto
 
     /**
+     * Devuelve tareas borradas **tal como estaban** (2.9.0): el mismo id, las mismas
+     * fechas, el mismo orden. Es el *Undo* del aviso que sale al borrar.
+     *
+     * No es un [Create]: una tarea recreada nacería con otro id y con la fecha de hoy,
+     * y se iría del grupo de fecha donde estaba, que es justo lo contrario de deshacer.
+     *
+     * De alcance de proyecto porque cada tarea lleva su repositorio: una selección
+     * borrada buscando en todos puede cruzar varios. Las que ya existen se dejan como
+     * están, así que deshacer dos veces no duplica nada.
+     */
+    data class Restore(val tasks: List<Task>) : TaskCommand
+
+    /**
      * Entró una configuración nueva —del fichero, de los ajustes o de la plantilla—.
      * Re-normaliza todas las tareas: las huérfanas se remapean y las que vuelven a
      * tener su estado disponible lo recuperan.
@@ -141,6 +170,12 @@ sealed interface TaskCommand {
     data class ReassignState(val from: StateId, val to: StateId) : TaskCommand
 
     data class ReassignPriority(val from: PriorityId, val to: PriorityId) : TaskCommand
+
+    /**
+     * Pasar un estado a orden manual sin que la lista se mueva (2.11.0): su orden empieza
+     * siendo el que se estaba viendo. Se emite justo antes de cambiar la configuración.
+     */
+    data class SeedManualOrder(val state: StateId) : TaskCommand
 
     /**
      * El registro acaba de publicar un catálogo nuevo —arranque, evento de VCS o

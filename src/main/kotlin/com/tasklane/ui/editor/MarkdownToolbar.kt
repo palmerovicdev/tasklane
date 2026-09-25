@@ -43,6 +43,8 @@ internal object MarkdownToolbar {
             Separator.getInstance(),
             button("bullet", TasklaneIcons.FormatBullet) { field.prefixLines("- ") },
             button("numbered", TasklaneIcons.FormatNumbered) { field.prefixLines("", numbered = true) },
+            // Casillas que luego se marcan desde la tarjeta (2.11.0).
+            button("checklist", TasklaneIcons.FormatChecklist) { field.checklistLines() },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.EDITOR_TOOLBAR, group, true)
         toolbar.targetComponent = target
@@ -50,7 +52,7 @@ internal object MarkdownToolbar {
     }
 
     /**
-     * Los siete llevan icono, y **tienen que llevarlo**: negrita, cursiva, código y
+     * Todos llevan icono, y **tienen que llevarlo**: negrita, cursiva, código y
      * lista numerada se declararon en su día con el glifo puesto en el texto de la
      * acción —«B», «I», «</>», «1.»— dando por hecho que la barra lo pintaría. No lo
      * pinta: un `ActionToolbar` dibuja iconos, y a la acción que no trae ninguno le

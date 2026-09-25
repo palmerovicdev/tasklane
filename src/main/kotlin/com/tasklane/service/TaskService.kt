@@ -1,5 +1,6 @@
 package com.tasklane.service
 
+import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
 import com.intellij.ide.actions.RevealFileAction
 import com.intellij.openapi.project.ProjectManager
@@ -42,6 +43,7 @@ import com.tasklane.data.store.TasksCodec
 import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TaskStats
 import com.tasklane.diagnostics.TasklaneMetrics
+import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
@@ -256,11 +258,28 @@ class TaskService(
      * Lo que se aplica es [TaskCommand.Batch], así que la semántica es la de los comandos
      * sueltos por construcción.
      */
-    fun applyAll(commands: List<RepoScoped>) {
+    fun applyAll(commands: List<RepoScoped>) = applyAll(commands, onDeleted = null)
+
+    /**
+     * Borra estas tareas y ofrece **deshacerlo** (2.9.0): un aviso con *Undo*, y `⌘Z` en
+     * la lista. No pregunta antes, a propósito: una confirmación estorba en el caso normal
+     * —se borra lo que se quería borrar— y no salva el otro, porque se acepta sin leerla.
+     * Deshacer después cuesta lo mismo y sólo se paga cuando hace falta.
+     *
+     * Un `Delete` por fila y no uno por repositorio, por lo que dice [applyAll]: así el
+     * lote cuenta filas, que es lo que decide si cabe en el gesto o va en segundo plano.
+     */
+    fun delete(tasks: List<Task>) {
+        applyAll(tasks.map { TaskCommand.Delete(it.repo, listOf(it.id)) }) { gone -> offerUndo(gone) }
+    }
+
+    private fun applyAll(commands: List<RepoScoped>, onDeleted: ((List<Task>) -> Unit)?) {
         when {
             commands.isEmpty() -> return
-            commands.size == 1 -> apply(commands.single())
-            commands.size <= BULK_INLINE -> apply(TaskCommand.Batch(commands))
+            commands.size <= BULK_INLINE -> metrics.time(TasklaneMetrics.Op.COMMAND) {
+                val command = commands.singleOrNull() ?: TaskCommand.Batch(commands)
+                synchronized(gate) { applyLocked(command, onDeleted = onDeleted) }
+            }
             else -> ProgressManager.getInstance().run(
                 object : ProgressTask.Backgroundable(
                     project,
@@ -275,10 +294,14 @@ class TaskService(
                                 // repartidas por todos los índices. Medido sobre 100.000
                                 // tareas, dos mil filas pasan de 965 ms a 739.
                                 inBulk {
-                                    applyLocked(TaskCommand.Batch(commands)) { done, total ->
-                                        indicator.checkCanceled()
-                                        indicator.fraction = done.toDouble() / total.coerceAtLeast(1)
-                                    }
+                                    applyLocked(
+                                        TaskCommand.Batch(commands),
+                                        { done, total ->
+                                            indicator.checkCanceled()
+                                            indicator.fraction = done.toDouble() / total.coerceAtLeast(1)
+                                        },
+                                        onDeleted,
+                                    )
                                 }
                             }
                         }
@@ -310,6 +333,14 @@ class TaskService(
                 TasklaneBundle.message("bulk.delete.progress", total),
                 false,
             ) {
+                /**
+                 * Lo borrado, para poder deshacerlo. Hasta [UNDO_LIMIT] tareas: un grupo de
+                 * cien mil guardado entero en memoria para un *Undo* que casi nadie pulsa no
+                 * compensa, y pasado el tope el aviso dice que no se puede deshacer.
+                 */
+                private val gone = ArrayList<Task>()
+                private var overflow = false
+
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = false
                     var removed = 0
@@ -334,9 +365,19 @@ class TaskService(
                             metrics.time(TasklaneMetrics.Op.COMMAND) {
                                 synchronized(gate) {
                                     inBulk {
-                                        applyLocked(TaskCommand.Batch(commands)) { done, _ ->
-                                            indicator.fraction =
-                                                (before + done).toDouble() / total.coerceAtLeast(1)
+                                        applyLocked(
+                                            TaskCommand.Batch(commands),
+                                            { done, _ ->
+                                                indicator.fraction =
+                                                    (before + done).toDouble() / total.coerceAtLeast(1)
+                                            },
+                                        ) { batch ->
+                                            if (overflow || gone.size + batch.size > UNDO_LIMIT) {
+                                                overflow = true
+                                                gone.clear()
+                                            } else {
+                                                gone += batch
+                                            }
                                         }
                                     }
                                 }
@@ -346,15 +387,116 @@ class TaskService(
                         }
                     }
                 }
+
+                override fun onFinished() {
+                    if (overflow) notifyDeletedForGood(total) else offerUndo(gone)
+                }
             },
         )
     }
+
+    // ------------------------------------------------------------- deshacer (2.9.0)
+
+    /** Lo último que se borró, mientras se pueda deshacer, y su aviso. */
+    private class Deletion(val tasks: List<Task>, val notification: Notification)
+
+    @Volatile
+    private var lastDeletion: Deletion? = null
+
+    /** Si `⌘Z` en la lista tiene algo que devolver. */
+    fun canUndoDelete(): Boolean = lastDeletion != null
+
+    /** Devuelve lo último que se borró. Lo piden el *Undo* del aviso y `⌘Z` en la lista. */
+    fun undoDelete() {
+        val deletion = synchronized(gate) { lastDeletion.also { lastDeletion = null } } ?: return
+        deletion.notification.expire()
+        restore(deletion.tasks)
+    }
+
+    /**
+     * Vuelve a poner [tasks]. Con muchas, en segundo plano como cualquier lote, y **sin**
+     * cancelar: dejar a medias un deshacer sería un segundo borrado que nadie pidió.
+     */
+    private fun restore(tasks: List<Task>) {
+        if (tasks.size <= BULK_INLINE) {
+            apply(TaskCommand.Restore(tasks))
+            return
+        }
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(
+                project,
+                TasklaneBundle.message("undo.progress", tasks.size),
+                false,
+            ) {
+                override fun run(indicator: ProgressIndicator) {
+                    metrics.time(TasklaneMetrics.Op.COMMAND) {
+                        synchronized(gate) { inBulk { applyLocked(TaskCommand.Restore(tasks)) } }
+                    }
+                }
+            },
+        )
+    }
+
+    /**
+     * El aviso de un borrado, con *Undo*. Sustituye al del borrado anterior: sólo se
+     * deshace lo último, como en un editor, y dos avisos con *Undo* a la vez dejarían en
+     * el aire cuál devuelve qué.
+     *
+     * Dice de qué repositorio salieron cuando son de uno solo, que es casi siempre: todo
+     * Tasklane habla del repositorio activo, y un aviso que no lo nombra obliga a adivinar.
+     */
+    private fun offerUndo(tasks: List<Task>) {
+        if (tasks.isEmpty()) return
+        val repos = tasks.mapTo(LinkedHashSet()) { it.repo }
+        val content = repos.singleOrNull()?.let { repo ->
+            TasklaneBundle.message("undo.deleted.repo", tasks.size, displayName(repo))
+        } ?: TasklaneBundle.message("undo.deleted", tasks.size)
+
+        val notification = NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(content, NotificationType.INFORMATION)
+        val deletion = Deletion(tasks, notification)
+        notification.addAction(
+            NotificationAction.createSimpleExpiring(TasklaneBundle.message("undo.action")) {
+                val mine = synchronized(gate) {
+                    (lastDeletion === deletion).also { if (it) lastDeletion = null }
+                }
+                if (mine) restore(deletion.tasks)
+            },
+        )
+        val previous = synchronized(gate) { lastDeletion.also { lastDeletion = deletion } }
+        previous?.notification?.expire()
+        notification.notify(project)
+    }
+
+    /** Un borrado demasiado grande para guardarlo: se dice, en vez de callar que no hay *Undo*. */
+    private fun notifyDeletedForGood(count: Int) {
+        val previous = synchronized(gate) { lastDeletion.also { lastDeletion = null } }
+        previous?.notification?.expire()
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP)
+            .createNotification(TasklaneBundle.message("undo.tooMany", count, UNDO_LIMIT), NotificationType.INFORMATION)
+            .notify(project)
+    }
+
+    private fun displayName(repo: RepoKey): String =
+        _snapshot.value.repositories.firstOrNull { it.key == repo }?.displayName ?: repo.value
 
     private fun applyNow(command: TaskCommand) = synchronized(gate) { applyLocked(command) }
 
     private fun <T> inBulk(block: () -> T): T = store?.bulk(block = block) ?: block()
 
-    private fun applyLocked(command: TaskCommand, progress: (Int, Int) -> Unit = { _, _ -> }) {
+    /**
+     * @param onDeleted recibe, **tras confirmarse la transacción**, las tareas que el
+     *   comando borró tal como estaban. Es lo que permite deshacer un borrado (2.9.0): se
+     *   leen dentro de la misma transacción que las borra, así que no hay una versión
+     *   anterior de la tarea que pueda colarse entre leerla y borrarla.
+     */
+    private fun applyLocked(
+        command: TaskCommand,
+        progress: (Int, Int) -> Unit = { _, _ -> },
+        onDeleted: ((List<Task>) -> Unit)? = null,
+    ) {
         val before = _snapshot.value
         val view = reducer.view(before, command)
         val store = store
@@ -365,6 +507,7 @@ class TaskService(
         }
 
         val repo = (command as? RepoScoped)?.repo ?: before.activeRepo
+        var gone: List<Task> = emptyList()
 
         // Leer el sujeto, planificar y escribir, todo dentro de la misma transacción.
         // Es lo que sustituye al bucle de compare-and-set: la atomicidad la da ahora
@@ -384,6 +527,10 @@ class TaskService(
                         nextOrder = { store.nextOrder(repo) },
                     )
                     val plan = reducer.plan(subject, command)
+                    if (onDeleted != null) {
+                        val ids = plan.mutations.filterIsInstance<Mutation.Delete>().flatMapTo(HashSet()) { it.ids }
+                        if (ids.isNotEmpty()) gone = subject.tasks.filter { it.id in ids }
+                    }
                     if (plan.isEmpty) null else store.apply(plan.config, plan.mutations, progress)
                 }
             } catch (e: Exception) {
@@ -399,6 +546,7 @@ class TaskService(
         val touched = applied != null && applied.rows > 0
         _snapshot.value = if (touched) view.touched() else view
         applied?.parked?.takeIf { it.count > 0 }?.let(::reportParked)
+        if (applied != null && gone.isNotEmpty()) onDeleted?.invoke(gone)
     }
 
     /** Un comando sobre un repositorio abierto en solo lectura no se aplica. */
@@ -407,6 +555,7 @@ class TaskService(
         // Un lote con **una** fila de un repositorio en solo lectura no se aplica entero:
         // aplicar el resto dejaría la selección a medias sin decir por qué.
         is TaskCommand.Batch -> command.commands.any { it.repo in readOnly }
+        is TaskCommand.Restore -> command.tasks.any { it.repo in readOnly }
         else -> false
     }
 
@@ -421,7 +570,7 @@ class TaskService(
      * una pestaña— y Kotlin para lo que está acotado por su propia naturaleza. Ver
      * `SqlitePager` y `MemoryPager`.
      */
-    internal fun pager(found: SearchResults, filter: TaskFilter, now: Instant): TaskPager {
+    internal fun pager(found: SearchResults, filter: TaskFilter, now: Instant, archivedBefore: Instant? = null): TaskPager {
         val snapshot = _snapshot.value
         val db = db
         val store = store
@@ -439,9 +588,25 @@ class TaskService(
 
             // `detach` es lo que deja a la exportación congelar la lista: ver
             // `TaskPager.snapshot`.
-            else -> SqlitePager(db.reader, snapshot.activeRepo, snapshot.config, filter, now, detach = db::openReader)
+            // El archivo de lo terminado sólo recorta la lista: buscando se ve todo —es la
+            // forma de llegar a lo archivado— y las vencidas nunca están cerradas.
+            else -> SqlitePager(
+                db.reader,
+                snapshot.activeRepo,
+                snapshot.config,
+                filter,
+                now,
+                detach = db::openReader,
+                archivedBefore = archivedBefore,
+            )
         }
     }
+
+    /**
+     * Las tareas abiertas de [repo] que vencen antes de [until], las ya vencidas primero.
+     * Lo pide el aviso de vencimientos —ver [DueReminders]— con [until] en el final de hoy.
+     */
+    fun dueBy(repo: RepoKey, until: Instant): List<Task> = store?.overdue(repo, until).orEmpty()
 
     /** Una tarea por id. La pide la ventana para saber si una petición de enseñar es suya. */
     fun task(id: TaskId): Task? = store?.task(id)
@@ -1266,6 +1431,9 @@ class TaskService(
          * barra: aparecer un instante cuesta menos que congelar.
          */
         const val BULK_INLINE = 10
+
+        /** Hasta cuántas tareas borradas se guardan para deshacer. Ver [deleteGroup]. */
+        const val UNDO_LIMIT = 10_000
 
         fun getInstance(project: Project): TaskService = project.service()
     }

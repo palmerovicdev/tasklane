@@ -118,6 +118,57 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.11.0 &mdash; manual order and checklists</h3>
+            <ul>
+              <li><b>Order a state by hand.</b> <i>Group By &#9656; Manual Order</i>, then drag a
+                  card by its colour stripe, or press <code>&#8984;&#8679;&uarr;/&darr;</code>
+                  (<i>Move Up</i> / <i>Move Down</i> in the context menu). Switching does not
+                  move anything: the manual order starts as the one you were seeing.
+                  Bookmarked tasks stay on top, new tasks come in at the top, and grouping
+                  still works &mdash; you order within each group.</li>
+              <li><b>Checklists are back.</b> <code>- [ ] item</code> lines are drawn as
+                  checkboxes on the card &mdash; in the title too, which is why they were
+                  removed in 1.0.0 &mdash; and one click ticks them, writing the
+                  <code>x</code> into the body. Ticked items are struck through, and a
+                  <code>&#9745; 2/5</code> badge counts them. The task dialog has a
+                  <i>Checklist</i> button.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change. Opening an existing project builds one
+               new index once. 2.10.0 opens 2.11.0 projects and simply ignores the manual
+               order.</p>
+
+            <h3>2.10.0 &mdash; tasks in Search Everywhere, and archiving what is done</h3>
+            <ul>
+              <li><b>Search Everywhere finds your tasks.</b> Press <code>&#8679;&#8679;</code>
+                  and type: tasks show up in the <i>All</i> tab and in their own
+                  <i>Tasklane</i> tab, with the same syntax and scope as the tool window
+                  search. Enter opens the tool window on the task, even if it was
+                  closed.</li>
+              <li><b>Archive what is done.</b> In <i>Settings &rarr; Tools &rarr; Tasklane</i>,
+                  hide tasks completed more than N days ago. Only in the list of a done state
+                  &mdash; the tab counts what it shows, and search still finds everything
+                  &mdash; and never silently: the list says how many are hidden, with a link
+                  to show them. Off by default.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.9.0 and 2.10.0 open each other&rsquo;s
+               projects.</p>
+
+            <h3>2.9.0 &mdash; undo deletions and due-date reminders</h3>
+            <ul>
+              <li><b>Deleting can be undone.</b> Deleting tasks still asks nothing, but it
+                  now shows a <i>N tasks deleted &mdash; Undo</i> notification, and
+                  <code>&#8984;Z</code> / <code>Ctrl+Z</code> in the task list brings the last
+                  deletion back. Tasks return exactly as they were: same dates, same place,
+                  same images. Also for deleting a whole group, up to 10,000 tasks.</li>
+              <li><b>Due-date reminders.</b> A notification says how many tasks of the active
+                  repository are overdue or due today &mdash; when the project opens, when you
+                  switch repository and every half hour, only for tasks not mentioned yet
+                  today. <i>Show</i> takes you to them. Turn it off from the notification or
+                  in <i>Settings &rarr; Tools &rarr; Tasklane</i>.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.8.0 and 2.9.0 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.8.0 &mdash; typed anchors, TODO comments and code blocks</h3>
             <ul>
               <li><b>Anchor a task by typing where it points.</b> In the task dialog, write

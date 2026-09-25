@@ -54,12 +54,15 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
 | **Mover de estado sin diálogo** | *Move To ▸* o `⇧⌥←/→`, también sobre una selección |
 | **Marcar** | Sube la tarea al principio de su grupo, sea cual sea su prioridad |
-| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
+| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace. Borrar se deshace con *Undo* o `⌘Z` |
 | **Agrupar y plegar** | Por fecha —hoy y un grupo por día—, por prioridad o por etiqueta, elegido por estado; cada cabecera se pliega |
 | **Filtrar la vista** | Todas, abiertas, vencidas o marcadas, sumado a la búsqueda |
-| **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag` |
+| **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag`. También desde `⇧⇧` |
+| **Archivar lo terminado** | Esconder lo cerrado hace más de N días, con el pie de la lista diciendo cuántas y un enlace para verlas |
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
-| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo. Etiquetas como fichas |
+| **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
+| **Orden manual** | Por estado: arrastrar por la franja o `⌘⇧↑/↓` |
+| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic |
 | **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
@@ -87,7 +90,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.8.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.11.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -105,7 +108,7 @@ Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 | `.idea/tasklane/tasklane.db.corrupt-<fecha>` | una base dañada que se reparó; se conserva y se puede borrar a mano | no |
 | `.idea/tasklane/repos/<repo>/attachments/` | las imágenes de cada repositorio | no |
 | `.idea/tasklane/layout.xml` | el registro de repositorios | no |
-| `workspace.xml` | tus preferencias: pestaña abierta, filtro, repositorio activo, buscar en todos, formato de copia y marca del editor | no |
+| `workspace.xml` | tus preferencias: pestaña abierta, filtro, repositorio activo, buscar en todos, formato de copia, marca del editor, aviso de vencimientos y archivo de lo terminado | no |
 | `tasklane-defaults.xml` (config del IDE) | plantilla para proyectos nuevos | n/a — es lo único que roamea |
 
 Un proyecto sin `.idea/tasklane.xml` se siembra desde la plantilla al abrirse, así que
@@ -222,10 +225,49 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
   encima de diez va en segundo plano con barra, y **cancelar la deshace entera**.
 - **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`.
 - **Cambiar la prioridad** de la selección con *Priority ▸*, cada entrada con su color.
-- **Borrar** con `Supr` o *Delete*. No pregunta: los datos están en tu disco y la copia
-  diaria de la base es la red.
+- **Borrar** con `Supr` o *Delete*. No pregunta, y **se deshace**: sale un aviso
+  *«3 tasks deleted — Undo»*, y `⌘Z` con el foco en la lista devuelve lo último que se
+  borró, tal como estaba —mismas fechas, mismo sitio, mismas imágenes—. Hasta 10.000
+  tareas de una vez; por encima el aviso dice que no hay vuelta.
 - **Entrar en un estado terminal** —*Done* de fábrica— apunta la fecha de cierre, que es
   la que usa *Done* para agrupar por fecha.
+- **Listas de comprobación.** Una línea `- [ ] algo` en el cuerpo se pinta en la tarjeta
+  como una casilla —también si es el título—, y **un clic la marca**: escribe la `x` en el
+  cuerpo, y lo marcado sale tachado. La línea de distintivos cuenta cuántas van
+  (`☑ 2/5`), porque plegada la tarjeta sólo enseña la primera. En el diálogo, el botón
+  *Checklist* convierte en casillas las líneas seleccionadas.
+
+### Orden manual
+
+Cada estado puede ir **a mano**: *Group By ▸ Manual Order*. Entonces la lista deja de
+ordenarse por prioridad y fecha y sigue el orden que se le dé:
+
+- **Arrastrando la tarjeta por su franja de color** —el cursor cambia al pasar por
+  encima—. El resto de la tarjeta sigue sirviendo para seleccionar texto.
+- **Con `⌘⇧↑/↓`**, las teclas de *Move Line Up/Down*, o *Move Up* / *Move Down* del menú
+  contextual.
+- Al pasar a mano **la lista no se mueve**: su orden empieza siendo el que se veía.
+- Lo marcado sigue arriba, las tareas nuevas entran arriba del todo, y la agrupación
+  sigue valiendo: se ordena dentro de cada grupo, y soltar en otro grupo no hace nada.
+- Buscando manda la relevancia, así que mientras hay búsqueda no se arrastra.
+- Es del estado, como la agrupación, y se guarda en `tasklane.xml`.
+
+### Archivar lo terminado
+
+*Done* sólo crece. En *Settings → Tools → Tasklane → Completed tasks* se puede **esconder
+lo que se cerró hace más de N días** —un mes, si se marca sin tocar el número—; sin marcar
+se ve todo, que es lo de fábrica.
+
+- Sólo en los estados **terminales**, y sólo en la lista: la pestaña cuenta lo que
+  enseña, y **buscar sigue encontrándolo todo**, que es la forma de llegar a una tarea
+  vieja.
+- **Nunca en silencio**: el pie de la lista dice cuántas se esconden —*«128 tasks
+  completed more than 30 days ago are hidden. Show»*— y *Show* las enseña hasta cerrar el
+  proyecto. Esconder datos sin decirlo es indistinguible de perderlos.
+- Ir a una tarea archivada —desde `⇧⇧` o una marca del editor— las enseña también.
+- Una tarea terminal sin fecha de cierre, de antes de que se sellara, se ve siempre: lo
+  que no se puede fechar no se puede dar por viejo.
+- Es de cada uno y va a `workspace.xml`, como el filtro de vista.
 
 ### Agrupar
 
@@ -234,7 +276,7 @@ Cuatro formas, elegidas en el desplegable de la barra y recordadas **por estado*
 
 | | |
 |---|---|
-| Sin agrupar | Lo marcado arriba, luego por prioridad, y dentro de cada una lo más reciente |
+| Sin agrupar | Lo marcado arriba, luego por prioridad, y dentro de cada una lo más reciente. O a mano: ver [Orden manual](#orden-manual) |
 | Por fecha | *Today* y, debajo, **un grupo por cada día con alguna tarea** —*Sep 14*, *Sep 10, 2025*—, y *No date* al final, contra la fecha que el estado ancle (creación, modificación o cierre) |
 | Por prioridad | De la más alta a la más baja, y sólo las que tengan algo |
 | Por etiqueta | Una tarea con dos etiquetas sale bajo las dos; las que no tienen ninguna, en un grupo al final |
@@ -256,7 +298,7 @@ del editor: una tarea apuntada de prisa no nace distinta de una escrita con calm
 | | |
 |---|---|
 | Cuerpo | Markdown. La primera línea con texto es el título |
-| Barra de formato | Negrita, cursiva, código, enlace, imagen, lista con viñetas y lista numerada |
+| Barra de formato | Negrita, cursiva, código, enlace, imagen, lista con viñetas, lista numerada y lista de comprobación |
 | Imágenes | Se pegan, se sueltan en la zona de abajo o se eligen del disco. Ver [Imágenes](#imágenes) |
 | Estado y prioridad | Desplegables; el estado sale de la pestaña desde la que se abrió |
 | Vencimiento | Preajustes o calendario propio |
@@ -271,6 +313,11 @@ cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sinta
 - **Vencimiento** por preajustes —hoy, mañana, final de la semana, la semana que viene— o
   con una fecha concreta del calendario. Vence al **acabar** el día, así que algo
   puesto para hoy no nace vencido. Pasada la fecha, la tarjeta lo pinta en rojo.
+- **Aviso de vencimientos**: *«2 overdue · 1 due today in backend»*, del repositorio
+  activo, con *Show* para ir a ellas. Sale al abrir el proyecto, al cambiar de
+  repositorio y cada media hora, y sólo si hay algo de lo que no se haya avisado ya hoy.
+  Se apaga desde el propio aviso o en *Settings → Tools → Tasklane → Due dates*; es
+  preferencia de cada uno y va a `workspace.xml`.
 - **Etiquetas** como fichas: se escriben separadas por coma o espacio y se quitan con
   su aspa, o con `Retroceso` desde el campo vacío. En el buscador son `#api`.
 - **Marcador**: sube la tarea al principio de su grupo pase lo que pase, porque
@@ -390,6 +437,11 @@ vaciar la lista, y un prefijo desconocido (`https:`) se busca como texto.
 **Alcance.** Sólo el repositorio activo, salvo que se active *Search All Repositories*
 en la barra — que sólo aparece cuando hay más de uno. Las filas de otro repositorio se
 etiquetan con su nombre.
+
+**Desde cualquier sitio, con `⇧⇧`.** Las tareas salen en *Search Everywhere*, en la
+pestaña *All* y en una propia, *Tasklane*, con la misma sintaxis y el mismo alcance que el
+buscador de la ventana. `Enter` abre la tool window con la tarea seleccionada, aunque
+estuviera cerrada o archivada. Con la consulta vacía no enseña nada.
 
 **Ordenado por relevancia.** Desde la `2.0.0` el texto va a un índice de texto completo
 (FTS5) dentro de la base, que puntúa más un acierto en el título que en el cuerpo, y la
@@ -572,6 +624,8 @@ actúan al pulsarlos.
 | **Priorities** | Otra tabla, **de la más alta a la más baja** como en la ventana: nombre, por defecto, trigger y color para tema claro y oscuro, que se cambia pulsando la muestra. Arrastrar las filas es cambiar el orden de prioridad. Debajo, el interruptor de los triggers |
 | **Repositories** | Hasta qué profundidad se detectan repositorios bajo la raíz. Un filtro de vista, nunca un borrado |
 | **Code anchors** | Marca en el margen, pastilla en la línea o ninguna. Es **tuyo**: va a `workspace.xml` |
+| **Due dates** | Encender o apagar el aviso de vencimientos. Tuyo, en `workspace.xml` |
+| **Completed tasks** | Esconder de la lista de un estado terminal lo cerrado hace más de N días, o verlo todo (de fábrica). Tuyo, en `workspace.xml`. Ver [Archivar lo terminado](#archivar-lo-terminado) |
 | **Images** | El peso de las imágenes del repositorio activo, *Delete Unused Images*, *Delete All Images…* y el umbral del aviso. Ver [Imágenes](#imágenes) |
 | Enlaces | *Save as template for new projects* y *Configure shortcuts in Keymap* |
 
@@ -654,7 +708,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.8.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.11.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -678,6 +732,9 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | `⌘K` | Foco en la búsqueda | Sólo dentro de la Tool Window, así que no compite con *Commit* |
 | `Enter` | Editar la tarea seleccionada | Dentro del árbol. Sobre «N more», trae la página siguiente |
 | `Supr` | Borrar las seleccionadas | Dentro del árbol |
+| `⌘Z` | Deshacer el último borrado | Dentro del árbol, y sólo si hay algo que devolver: si no, sigue siendo el *Undo* de siempre |
+| `⌘⇧↑/↓` | Subir / bajar la tarea un puesto | Dentro del árbol, en un estado con orden manual |
+| `⇧⇧` | Buscar tareas en *Search Everywhere* | Global, pestaña *Tasklane* |
 | `←` / `→` | Plegar / desplegar el grupo | Dentro del árbol |
 | `⌘C` / `Escape` | Copiar el texto marcado de la tarjeta / quitar la marca | Sólo con texto marcado |
 | `Enter` / `Escape` | Guardar la búsqueda en el historial / borrarla | En el buscador |

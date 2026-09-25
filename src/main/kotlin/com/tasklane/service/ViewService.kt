@@ -8,9 +8,12 @@ import com.tasklane.domain.model.TaskFilter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
- * Cómo se está mirando la lista. Hoy sólo el filtro de vista.
+ * Cómo se está mirando la lista: el filtro de vista y el archivo de lo terminado.
  *
  * Es un servicio aparte y no un campo de [TaskService] porque no es modelo —nada de
  * lo que hay aquí se guarda en el fichero de tareas ni se comparte con el equipo— y
@@ -32,6 +35,38 @@ class ViewService(project: Project) {
     fun setFilter(value: TaskFilter) {
         _filter.value = value
         workspace.viewFilter = value
+    }
+
+    /**
+     * El archivo de lo terminado (2.10.0): cuántos días se enseñan y si se ha pedido ver
+     * lo archivado **en esta sesión**. Lo segundo no se guarda a propósito: es un vistazo
+     * —el enlace del pie de la lista, o ir a una tarea archivada—, y la próxima vez la
+     * lista tiene que volver a ser la corta que se configuró.
+     */
+    data class Archive(val days: Int, val showingAll: Boolean = false) {
+        /** Si esconde algo ahora mismo. */
+        val active: Boolean get() = days > 0 && !showingAll
+
+        /**
+         * Desde cuándo se enseña lo terminado: el principio del día de hace [days] días.
+         * Por días y no por horas para que lo que se ve no cambie a lo largo de la tarde.
+         */
+        fun cutoff(today: LocalDate, zone: ZoneId): Instant? =
+            if (!active) null else today.minusDays(days.toLong()).atStartOfDay(zone).toInstant()
+    }
+
+    private val _archive = MutableStateFlow(Archive(workspace.archiveDays))
+    val archive: StateFlow<Archive> = _archive.asStateFlow()
+
+    /** Lo pide la página de ajustes al aplicar. */
+    fun setArchiveDays(days: Int) {
+        workspace.archiveDays = days
+        _archive.value = Archive(workspace.archiveDays)
+    }
+
+    /** Enseña u oculta lo archivado hasta que se cierre el proyecto. */
+    fun showArchived(show: Boolean) {
+        _archive.value = _archive.value.copy(showingAll = show)
     }
 
     companion object {

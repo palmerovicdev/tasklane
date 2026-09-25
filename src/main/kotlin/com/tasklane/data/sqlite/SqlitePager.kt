@@ -72,10 +72,21 @@ internal class SqlitePager(
      * pasa en los tests que no lo necesitan.
      */
     private val detach: (() -> Sql)? = null,
+    /**
+     * Lo terminado antes de este instante no se enseña (2.10.0): el archivo de *Done*.
+     * `null` == se enseña todo. Sólo toca a los estados **terminales**, y una tarea
+     * terminal sin fecha de cierre —de antes de que se sellara— se enseña siempre: lo que
+     * no se puede fechar no se puede dar por viejo. Ver [archiveSql].
+     */
+    private val archivedBefore: Instant? = null,
 ) : TaskPager {
 
-    /** Una combinación de `(marcada, prioridad)`. Ver «la mezcla de cubos» arriba. */
-    private data class Bucket(val bookmarked: Int, val rank: Int)
+    /**
+     * Una combinación de `(marcada, prioridad)`. Ver «la mezcla de cubos» arriba. En un
+     * estado con orden manual (2.11.0) la prioridad no ordena y [rank] es `null`: sólo
+     * hay dos cubos, marcadas y no.
+     */
+    private data class Bucket(val bookmarked: Int, val rank: Int?)
 
     /**
      * Por dónde sigue una página, y cuántas filas quedaron detrás.
@@ -105,6 +116,26 @@ internal class SqlitePager(
         }
     }
 
+    /** Los cubos de un estado a mano: lo marcado arriba, y nada más. */
+    private val manualBuckets: List<Bucket> = buildList {
+        for (marked in intArrayOf(1, 0)) {
+            if (filter == TaskFilter.BOOKMARKED && marked == 0) continue
+            add(Bucket(marked, null))
+        }
+    }
+
+    private fun isManual(stateId: StateId): Boolean = config.state(stateId)?.manualOrder == true
+
+    private fun bucketsOf(stateId: StateId): List<Bucket> = if (isManual(stateId)) manualBuckets else buckets
+
+    /**
+     * La columna que ordena dentro de un cubo y la que desempata. La fecha del anclaje,
+     * o `ord` en un estado a mano (2.11.0). En la tabla de unión de etiquetas no hay
+     * `ord`: se lee de la tarea, que en esas consultas siempre va unida como `t`.
+     */
+    private fun sortOf(stateId: StateId, alias: String): Pair<String, String> =
+        if (isManual(stateId)) "t.ord" to "t.id" else "$alias.sort_date" to tie(alias)
+
     /** Lo que ya se ha contado de cada lista. Ver el KDoc de `MemoryPager` sobre la concurrencia. */
     private val sizes = ConcurrentHashMap<Pair<StateId, GroupKey?>, Int>()
     private val outlines = ConcurrentHashMap<StateId, List<GroupOutline>>()
@@ -125,9 +156,36 @@ internal class SqlitePager(
             // es mejor que mentir.
             TaskFilter.OVERDUE -> "n"
         }
-        return sql.rows("SELECT state, $column FROM counter WHERE repo = ? AND $column > 0", repo.value) {
+        val counted = sql.rows("SELECT state, $column FROM counter WHERE repo = ? AND $column > 0", repo.value) {
             StateId(it.getString(0).orEmpty()) to it.getInt(1)
         }.toMap()
+        if (archivedBefore == null) return counted
+        // Con archivo, los estados terminales no pueden salir de `counter`, que lo cuenta
+        // todo: la pestaña diría «Done 4.213» sobre una lista de doce. Se cuentan con la
+        // misma condición que la lista, sobre la cola del índice —`completed_at` está en
+        // él—, y sólo los terminales que tienen algo.
+        return counted.mapValues { (state, n) ->
+            if (!isArchiving(state)) n
+            else sql.count(
+                "SELECT count(*) FROM task WHERE repo = ? AND state = ?" +
+                    "${filterSql("")}${bookmarkedSql("")}${archiveSql(state, "")}",
+                *params(repo.value, state.value),
+            )
+        }.filterValues { it > 0 }
+    }
+
+    /**
+     * Cuántas tareas de [stateId] se quedan fuera por el archivo, con el filtro de vista
+     * puesto. Es lo que dice el pie de la lista —«128 older completed tasks hidden»—, sin
+     * el que esconder tareas sería indistinguible de perderlas.
+     */
+    override fun archived(stateId: StateId): Int {
+        if (!isArchiving(stateId)) return 0
+        return sql.count(
+            "SELECT count(*) FROM task WHERE repo = ? AND state = ?${filterSql("")}${bookmarkedSql("")} " +
+                "AND completed_at <> ${TaskSchema.NO_DATE} AND completed_at < ${archivedBefore!!.toEpochMilli()}",
+            *params(repo.value, stateId.value),
+        )
     }
 
     // ------------------------------------------------------------------- cabeceras
@@ -168,7 +226,7 @@ internal class SqlitePager(
         while (true) {
             val next = sql.first(
                 "SELECT sort_date FROM task WHERE repo = ? AND state = ? AND undated = 0 AND sort_date < ?" +
-                    "${filterSql("")}${bookmarkedSql("")} ORDER BY sort_date DESC LIMIT 1",
+                    "${filterSql("")}${bookmarkedSql("")}${archiveSql(stateId, "")} ORDER BY sort_date DESC LIMIT 1",
                 *params(repo.value, stateId.value, ceiling),
             ) { it.getLong(0) } ?: break
 
@@ -199,8 +257,8 @@ internal class SqlitePager(
         config.priorities
             .sortedByDescending { it.order }
             .mapNotNull { priority ->
-                val n = buckets
-                    .filter { it.rank == priority.order }
+                val n = bucketsOf(stateId)
+                    .filter { it.rank == null || it.rank == priority.order }
                     .sumOf { bucket -> countBucket(stateId, bucket, GroupKey.OfPriority(priority.id)) }
                 if (n > 0) GroupOutline(GroupKey.OfPriority(priority.id), n) else null
             }
@@ -215,14 +273,14 @@ internal class SqlitePager(
      */
     private fun tagOutline(stateId: StateId): List<GroupOutline> {
         val tagged = sql.rows(
-            "SELECT tag, count(*) FROM tag WHERE repo = ? AND state = ?${filterSql("")}${bookmarkedSql("")} " +
-                "GROUP BY tag",
+            "SELECT tag, count(*) FROM tag WHERE repo = ? AND state = ?${filterSql("")}${bookmarkedSql("")}" +
+                "${archiveSql(stateId, "")} GROUP BY tag",
             *params(repo.value, stateId.value),
         ) { GroupOutline(GroupKey.OfTag(it.getString(0).orEmpty()), it.getInt(1)) }
 
         val untagged = sql.count(
             "SELECT count(*) FROM task WHERE repo = ? AND state = ? AND has_tag = 0" +
-                "${filterSql("")}${bookmarkedSql("")}",
+                "${filterSql("")}${bookmarkedSql("")}${archiveSql(stateId, "")}",
             *params(repo.value, stateId.value),
         )
 
@@ -262,6 +320,7 @@ internal class SqlitePager(
             Window(key?.bucket ?: 0, key)
         }
 
+        val buckets = bucketsOf(query.stateId)
         val items = synchronized(window) {
             while (window.rows.size < query.limit && !window.exhausted) {
                 if (window.bucket >= buckets.size) {
@@ -308,6 +367,7 @@ internal class SqlitePager(
      * del orden de su última fila.
      */
     override fun each(query: PageQuery, chunk: Int, block: (List<Task>) -> Unit) {
+        val buckets = bucketsOf(query.stateId)
         for (index in buckets.indices) {
             var from: Key? = null
             while (true) {
@@ -339,7 +399,7 @@ internal class SqlitePager(
         val sql = open()
         try {
             return sql.transaction {
-                block(SqlitePager(sql, repo, config, filter, now, zone, today, detach = null))
+                block(SqlitePager(sql, repo, config, filter, now, zone, today, detach = null, archivedBefore))
             }
         } finally {
             sql.close()
@@ -355,11 +415,19 @@ internal class SqlitePager(
             id.value,
             repo.value,
             stateId.value,
-        ) { Located(TaskRows.read(it), it.getLong(13), it.getInt(14), it.getInt(15) != 0) } ?: return null
+        ) {
+            val read = TaskRows.read(it)
+            // A mano, lo que ordena es `ord`: es lo que el cursor tiene que llevar.
+            val key = if (isManual(stateId)) read.order else it.getLong(13)
+            Located(read, key, it.getInt(14), it.getInt(15) != 0, it.getLong(13))
+        } ?: return null
         if (!filter.accepts(task.task, now)) return null
+        if (isArchived(stateId, task.task)) return null
 
         val group = groupOf(stateId, task)
-        val bucket = buckets.indexOf(Bucket(if (task.task.bookmarked) 1 else 0, task.rank))
+        val buckets = bucketsOf(stateId)
+        val rankOf = if (isManual(stateId)) null else task.rank
+        val bucket = buckets.indexOf(Bucket(if (task.task.bookmarked) 1 else 0, rankOf))
         if (bucket < 0) return null
 
         // Cuántas filas tiene por encima: los cubos enteros que van antes, más lo que
@@ -384,7 +452,11 @@ internal class SqlitePager(
 
     // ---------------------------------------------------------------------- privado
 
-    private class Located(val task: Task, val sortDate: Long, val rank: Int, val undated: Boolean)
+    /**
+     * [sortDate] es la clave del orden —la fecha, o `ord` a mano— y [date] la fecha de
+     * verdad, que es la que dice en qué grupo de fecha cae.
+     */
+    private class Located(val task: Task, val sortDate: Long, val rank: Int, val undated: Boolean, val date: Long = sortDate)
 
     /** En qué cabecera cae una tarea, según cómo agrupe su estado. */
     private fun groupOf(stateId: StateId, located: Located): GroupKey? {
@@ -393,7 +465,7 @@ internal class SqlitePager(
             Grouping.NONE -> null
             Grouping.BY_DATE -> GroupKey.OfDate(
                 if (located.undated) DateGroup.Undated
-                else DateGrouper.groupOf(Instant.ofEpochMilli(located.sortDate), today, zone),
+                else DateGrouper.groupOf(Instant.ofEpochMilli(located.date), today, zone),
             )
 
             Grouping.BY_PRIORITY -> GroupKey.OfPriority(config.priorityOrDefault(located.task.priorityId).id)
@@ -416,7 +488,15 @@ internal class SqlitePager(
      * divergirían sería «contar una cosa y enseñar otra», que es justo el fallo que
      * `VisibleTasks` existe para evitar del otro lado.
      */
-    private class Clause(val source: String, val alias: String, val where: String, val params: List<Any>)
+    private class Clause(
+        val source: String,
+        val alias: String,
+        val where: String,
+        val params: List<Any>,
+        /** Lo que ordena y lo que desempata. Ver [sortOf]. */
+        val sort: String,
+        val tie: String,
+    )
 
     private fun clause(stateId: StateId, bucket: Bucket, group: GroupKey?): Clause? {
         val tag = (group as? GroupKey.OfTag)?.name
@@ -425,13 +505,14 @@ internal class SqlitePager(
         val source = if (tag != null) "tag g JOIN task t ON t.id = g.task_id" else "task t"
         val alias = if (tag != null) "g" else "t"
         val params = ArrayList<Any>()
-        val where = StringBuilder(
-            "$alias.repo = ? AND $alias.state = ? AND $alias.bookmarked = ? AND $alias.priority_rank = ?",
-        )
+        val where = StringBuilder("$alias.repo = ? AND $alias.state = ? AND $alias.bookmarked = ?")
         params += repo.value
         params += stateId.value
         params += bucket.bookmarked
-        params += bucket.rank
+        bucket.rank?.let {
+            where.append(" AND $alias.priority_rank = ?")
+            params += it
+        }
 
         if (tag != null) {
             where.append(" AND g.tag = ?")
@@ -465,7 +546,9 @@ internal class SqlitePager(
 
         where.append(filterSql(alias))
         params.addAll(filterParams())
-        return Clause(source, alias, where.toString(), params)
+        where.append(archiveSql(stateId, alias))
+        val (sort, tie) = sortOf(stateId, alias)
+        return Clause(source, alias, where.toString(), params, sort, tie)
     }
 
     /**
@@ -478,15 +561,15 @@ internal class SqlitePager(
         val params = ArrayList(clause.params)
         val where = StringBuilder(clause.where)
         if (from != null) {
-            where.append(" AND (${clause.alias}.sort_date, ${tie(clause.alias)}) < (?, ?)")
+            where.append(" AND (${clause.sort}, ${clause.tie}) < (?, ?)")
             params += from.sortDate
             params += from.id
         }
         params += limit
 
         return sql.rows(
-            "SELECT ${TaskRows.columns("t")}, ${clause.alias}.sort_date FROM ${clause.source} WHERE $where " +
-                "ORDER BY ${clause.alias}.sort_date DESC, ${tie(clause.alias)} DESC LIMIT ?",
+            "SELECT ${TaskRows.columns("t")}, ${clause.sort} FROM ${clause.source} WHERE $where " +
+                "ORDER BY ${clause.sort} DESC, ${clause.tie} DESC LIMIT ?",
             *params.toTypedArray(),
         ) { Row(TaskRows.read(it), it.getLong(13)) }
     }
@@ -503,6 +586,7 @@ internal class SqlitePager(
         var cursor: Key = from
         var walked = 0
 
+        val buckets = bucketsOf(query.stateId)
         while (want > 0 && bucket >= 0) {
             val found = above(query.stateId, buckets[bucket], query.group, if (bucket == from.bucket) from else null, want)
             if (found.isNotEmpty()) {
@@ -522,15 +606,15 @@ internal class SqlitePager(
         val params = ArrayList(clause.params)
         val where = StringBuilder(clause.where)
         if (from != null) {
-            where.append(" AND (${clause.alias}.sort_date, ${tie(clause.alias)}) > (?, ?)")
+            where.append(" AND (${clause.sort}, ${clause.tie}) > (?, ?)")
             params += from.sortDate
             params += from.id
         }
         params += limit
 
         return sql.rows(
-            "SELECT ${TaskRows.columns("t")}, ${clause.alias}.sort_date FROM ${clause.source} WHERE $where " +
-                "ORDER BY ${clause.alias}.sort_date ASC, ${tie(clause.alias)} ASC LIMIT ?",
+            "SELECT ${TaskRows.columns("t")}, ${clause.sort} FROM ${clause.source} WHERE $where " +
+                "ORDER BY ${clause.sort} ASC, ${clause.tie} ASC LIMIT ?",
             *params.toTypedArray(),
         ) { Row(TaskRows.read(it), it.getLong(13)) }
     }
@@ -541,7 +625,7 @@ internal class SqlitePager(
         val params = ArrayList(clause.params)
         val where = StringBuilder(clause.where)
         if (above != null) {
-            where.append(" AND (${clause.alias}.sort_date, ${tie(clause.alias)}) > (?, ?)")
+            where.append(" AND (${clause.sort}, ${clause.tie}) > (?, ?)")
             params += above.sortDate
             params += above.task.id.value
         }
@@ -550,13 +634,13 @@ internal class SqlitePager(
 
     private fun countRange(stateId: StateId, from: Long, until: Long): Int = sql.count(
         "SELECT count(*) FROM task WHERE repo = ? AND state = ? AND undated = 0 " +
-            "AND sort_date >= ? AND sort_date <= ?${filterSql("")}${bookmarkedSql("")}",
+            "AND sort_date >= ? AND sort_date <= ?${filterSql("")}${bookmarkedSql("")}${archiveSql(stateId, "")}",
         *params(repo.value, stateId.value, from, until),
     )
 
     private fun countUndated(stateId: StateId): Int = sql.count(
         "SELECT count(*) FROM task WHERE repo = ? AND state = ? AND undated = 1" +
-            "${filterSql("")}${bookmarkedSql("")}",
+            "${filterSql("")}${bookmarkedSql("")}${archiveSql(stateId, "")}",
         *params(repo.value, stateId.value),
     )
 
@@ -566,7 +650,7 @@ internal class SqlitePager(
     private fun sizeOf(stateId: StateId, group: GroupKey?): Int =
         sizes.computeIfAbsent(stateId to group) {
             if (group == null) counts()[stateId] ?: 0
-            else buckets.sumOf { countBucket(stateId, it, group) }
+            else bucketsOf(stateId).sumOf { countBucket(stateId, it, group) }
         }
 
     private fun hydrate(tasks: List<Task>): List<Task> = TaskStore.hydrate(sql, tasks)
@@ -601,6 +685,32 @@ internal class SqlitePager(
 
     private fun filterParams(): List<Any> =
         if (filter == TaskFilter.OVERDUE) listOf(now.toEpochMilli()) else emptyList()
+
+    // ------------------------------------------------------------------ archivo
+
+    private fun isArchiving(stateId: StateId): Boolean =
+        archivedBefore != null && config.state(stateId)?.terminal == true
+
+    private fun isArchived(stateId: StateId, task: Task): Boolean {
+        val cutoff = archivedBefore ?: return false
+        val closed = task.completedAt ?: return false
+        return isArchiving(stateId) && closed.isBefore(cutoff)
+    }
+
+    /**
+     * El archivo, en SQL: en un estado terminal, sólo lo cerrado desde [archivedBefore]
+     * —o sin fecha de cierre—.
+     *
+     * Va **escrito** en la consulta y no como parámetro, a diferencia del filtro: es un
+     * número, no texto del usuario, y así no hay que colocar su `?` en el sitio justo de
+     * las siete consultas que lo llevan. `completed_at` está en la cola de los tres
+     * índices de la lista, así que se resuelve sin saltar a la tabla.
+     */
+    private fun archiveSql(stateId: StateId, alias: String): String {
+        if (!isArchiving(stateId)) return ""
+        val p = if (alias.isEmpty()) "" else "$alias."
+        return " AND (${p}completed_at = ${TaskSchema.NO_DATE} OR ${p}completed_at >= ${archivedBefore!!.toEpochMilli()})"
+    }
 
     /** Las consultas que no van por cubos tienen que aplicar «marcadas» a mano. */
     private fun bookmarkedSql(alias: String): String {

@@ -51,6 +51,9 @@ internal object TasklaneIcons {
     @JvmField
     val FormatNumbered: Icon = format("numbered")
 
+    @JvmField
+    val FormatChecklist: Icon = format("checklist")
+
     /**
      * El desplegable de «agrupar por» de la barra.
      *

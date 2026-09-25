@@ -9,7 +9,9 @@ import com.tasklane.code.CodeAnchors
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.text.TaskCopyText
+import com.tasklane.domain.command.TaskCommand
 import com.tasklane.service.AttachmentService
+import com.tasklane.service.TaskService
 import com.tasklane.ui.common.ImagePreviewPopup
 import com.tasklane.ui.common.ImageTooltip
 import java.awt.Cursor
@@ -40,6 +42,14 @@ internal object RowClicks {
         val mouse = object : MouseAdapter() {
 
             override fun mouseMoved(e: MouseEvent) {
+                // El asa de una pestaña a mano va primero: es el único sitio donde
+                // arrastrar reordena en vez de seleccionar texto (2.11.0).
+                if (renderer.isOnHandle(tree, e.point)) {
+                    tree.cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
+                    tree.toolTipText = TasklaneBundle.message("toolwindow.row.reorder.tooltip")
+                    shots.over(null)
+                    return
+                }
                 val hotspot = renderer.hotspotAt(tree, e.point)
                 tree.cursor = when {
                     hotspot != null -> Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
@@ -78,6 +88,8 @@ internal object RowClicks {
 
                     is TaskTreeRenderer.Hotspot.Copy ->
                         TasklaneBundle.message("toolwindow.row.copy.tooltip")
+
+                    is TaskTreeRenderer.Hotspot.Check -> null
 
                     null -> null
                 }
@@ -120,6 +132,16 @@ internal object RowClicks {
                     is TaskTreeRenderer.Hotspot.Copy -> {
                         e.consume()
                         CardTextSelection.copy(TaskCopyText.plain(hotspot.task))
+                    }
+
+                    // La casilla escribe su `x` en el cuerpo (2.11.0). En un repositorio en
+                    // solo lectura el servicio no aplica el comando y la casilla se queda
+                    // como estaba, igual que la de completar.
+                    is TaskTreeRenderer.Hotspot.Check -> {
+                        e.consume()
+                        TaskService.getInstance(project).apply(
+                            TaskCommand.ToggleCheck(hotspot.task.repo, hotspot.task.id, hotspot.offset),
+                        )
                     }
 
                     null -> Unit

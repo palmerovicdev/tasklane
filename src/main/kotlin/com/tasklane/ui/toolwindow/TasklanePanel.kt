@@ -9,6 +9,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.actionSystem.ShortcutSet
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
@@ -25,7 +26,10 @@ import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SearchTextField
+import com.intellij.ui.components.ActionLink
+import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.tree.TreeUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneConfigService
@@ -63,6 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Point
 import java.awt.Toolkit
 import java.awt.event.InputEvent
@@ -112,6 +117,9 @@ internal class TasklanePanel(
     private val metrics = TasklaneMetrics.getInstance(project)
     private val renderer = TaskTreeRenderer()
     private val root = CheckedTreeNode("tasklane")
+
+    /** El arrastre por la franja en una pestaña a mano (2.11.0). Ver [CardReorder]. */
+    private var reorder: CardReorder? = null
 
     private val tree = object : CheckboxTree(
         renderer,
@@ -167,6 +175,12 @@ internal class TasklanePanel(
          * lista de tarjetas tampoco llevaría a ningún sitio.
          */
         override fun getScrollableTracksViewportWidth(): Boolean = true
+
+        /** La línea de soltar de un arrastre, encima de las tarjetas. */
+        override fun paint(g: java.awt.Graphics) {
+            super.paint(g)
+            reorder?.paint(g)
+        }
 
         /** El ancho con el que se midieron las filas que hay guardadas. */
         private var measuredWidth = -1
@@ -263,7 +277,35 @@ internal class TasklanePanel(
         val filter: TaskFilter,
         val query: String,
         val repo: RepoKey,
+        val archive: ViewService.Archive,
     )
+
+    private data class ViewInput(
+        val snapshot: TasklaneSnapshot,
+        val found: SearchResults,
+        val filter: TaskFilter,
+        val archive: ViewService.Archive,
+    )
+
+    private class Built(
+        val pager: TaskPager,
+        val outline: List<GroupOutline>,
+        val counts: Map<StateId, Int>,
+        val archived: Int,
+    )
+
+    /**
+     * El pie de la lista en un estado terminal con archivo (2.10.0): cuántas se esconden
+     * y un enlace para verlas, o —viéndolas— para volver a esconderlas. Sin él, lo
+     * archivado sería indistinguible de lo perdido.
+     */
+    private val archiveText = JBLabel().apply { foreground = UIUtil.getContextHelpForeground() }
+    private val archiveLink = ActionLink("") { view.showArchived(!view.archive.value.showingAll) }
+    private val archiveFooter = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), JBUI.scale(3))).apply {
+        isVisible = false
+        add(archiveText)
+        add(archiveLink)
+    }
 
     private var listKey: ViewKey? = null
 
@@ -352,29 +394,35 @@ internal class TasklanePanel(
 
         installSearchField()
         installShortcuts()
+        reorder = CardReorder(tree, renderer) { task, above, below ->
+            service.apply(TaskCommand.Move(task.repo, task.id, above, below))
+        }.also { it.install() }
         RowClicks.install(tree, renderer, project)
         TaskRowActions.install(tree, renderer, this)
         CardTextSelection.install(tree, renderer)
 
         uiScope.launch {
-            combine(service.snapshot, search.results, view.filter, ::Triple).collect { (snap, found, filter) ->
+            combine(service.snapshot, search.results, view.filter, view.archive, ::ViewInput).collect { input ->
+                val (snap, found, filter, archive) = input
                 // Filtrar, ordenar, agrupar y contar fuera del EDT: es el trabajo que
                 // crece con el número de tareas. Un solo «ahora» para los dos, o el
                 // contador y la lista podrían discrepar en lo que está vencido.
                 val now = Instant.now()
-                val (pager, outline, counts) = metrics.time(TasklaneMetrics.Op.SECTIONS) {
-                    val pager = service.pager(found, filter, now)
+                val cutoff = archive.cutoff(LocalDate.now(ZoneId.systemDefault()), ZoneId.systemDefault())
+                val built = metrics.time(TasklaneMetrics.Op.SECTIONS) {
+                    val pager = service.pager(found, filter, now, cutoff)
                     // Se calientan aquí a propósito: es donde vive el O(n log n) de
                     // ordenar y agrupar. Lo que el EDT pida después son sublistas de
                     // algo ya ordenado y una cuenta ya hecha.
-                    Triple(pager, pager.outline(stateId), pager.counts())
+                    Built(pager, pager.outline(stateId), pager.counts(), pager.archived(stateId))
                 }
                 withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
                     // RENDER va aparte de SECTIONS porque es lo unico de los dos que
                     // ocurre en el EDT, y por tanto lo unico que tiene un techo duro
                     // de 16 ms. Mezclarlos daria una cifra que no se puede juzgar.
                     metrics.time(TasklaneMetrics.Op.RENDER) {
-                        render(snap, found, filter, pager, outline, counts)
+                        render(snap, found, filter, built.pager, built.outline, built.counts)
+                        updateArchiveFooter(snap, found, archive, built.archived)
                     }
                 }
             }
@@ -438,6 +486,7 @@ internal class TasklanePanel(
         }
         add(header, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
+        add(archiveFooter, BorderLayout.SOUTH)
     }
 
     private fun buildToolbar(): JComponent {
@@ -544,11 +593,41 @@ internal class TasklanePanel(
         localShortcut(ACTION_SELECT_NEXT_STATE, altArrow(KeyEvent.VK_RIGHT), tree) { selectNeighbourState(1) }
         localShortcut(ACTION_MOVE_PREV_STATE, altArrow(KeyEvent.VK_LEFT, shift = true), tree) { moveSelected(-1) }
         localShortcut(ACTION_MOVE_NEXT_STATE, altArrow(KeyEvent.VK_RIGHT, shift = true), tree) { moveSelected(1) }
+        // Subir y bajar a mano (2.11.0), con las teclas de *Move Line Up/Down* del IDE.
+        localShortcut(ACTION_MOVE_UP, metaShiftArrow(KeyEvent.VK_UP), tree) { moveSelectedBy(-1) }
+        localShortcut(ACTION_MOVE_DOWN, metaShiftArrow(KeyEvent.VK_DOWN), tree) { moveSelectedBy(1) }
 
         installDoubleClick()
         installGroupToggle()
         installTextSelection()
+        installUndoDelete()
     }
+
+    /**
+     * `⌘Z` en la lista devuelve lo último que se borró (2.9.0), lo mismo que el *Undo*
+     * del aviso.
+     *
+     * Toma el atajo de *Undo* del keymap, y se **apaga** cuando no hay nada que devolver:
+     * una acción deshabilitada no se queda con la pulsación, así que sin un borrado
+     * pendiente `⌘Z` sigue siendo de quien fuera. Lo mismo que `⌘C` en
+     * [installTextSelection].
+     */
+    private fun installUndoDelete() {
+        object : DumbAwareAction() {
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = service.canUndoDelete()
+            }
+
+            override fun actionPerformed(e: AnActionEvent) = service.undoDelete()
+        }.registerCustomShortcutSet(undoShortcut(), tree, this)
+    }
+
+    private fun undoShortcut(): ShortcutSet =
+        ActionManager.getInstance().getAction(IdeActions.ACTION_UNDO)?.shortcutSet
+            ?.takeIf { it.shortcuts.isNotEmpty() }
+            ?: CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_Z, Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx))
 
     /**
      * `⌘C` copia el texto marcado dentro de una tarjeta, y `Escape` lo desmarca.
@@ -678,6 +757,11 @@ internal class TasklanePanel(
      * (`docs/plan-rediseno.md`, R3). Al ser locales no le quitan `Alt+←/→` a nadie
      * fuera de esta lista.
      */
+    private fun metaShiftArrow(keyCode: Int): ShortcutSet {
+        val menuMask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
+        return CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, menuMask or InputEvent.SHIFT_DOWN_MASK))
+    }
+
     private fun altArrow(keyCode: Int, shift: Boolean = false): ShortcutSet {
         val modifiers = InputEvent.ALT_DOWN_MASK or if (shift) InputEvent.SHIFT_DOWN_MASK else 0
         return CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, modifiers))
@@ -730,13 +814,14 @@ internal class TasklanePanel(
         renderer.highlighter = found.highlighter
         renderer.activeRepo = snap.activeRepo
         renderer.repoNames = snap.repositories.associate { it.key to it.displayName }
+        renderer.reorderable = snap.config.state(stateId)?.manualOrder == true && !found.active
 
         updateEmptyText(found, filter)
 
         // Otra lista es otra ventana, y se empieza por el principio. Cambiar de
         // agrupación cambia además la identidad de los grupos, así que lo que el
         // usuario abrió o cerró deja de referirse a nada.
-        val key = ViewKey(grouping, filter, found.raw, snap.activeRepo)
+        val key = ViewKey(grouping, filter, found.raw, snap.activeRepo, view.archive.value)
         if (listKey != key) {
             if (listKey?.grouping != key.grouping) list.forgetGroups()
             list.rewind()
@@ -751,6 +836,27 @@ internal class TasklanePanel(
             val pending = pendingReveal
             pendingReveal = emptySet()
             reveal(pending, retry = false)
+        }
+    }
+
+    private fun updateArchiveFooter(snap: TasklaneSnapshot, found: SearchResults, archive: ViewService.Archive, hidden: Int) {
+        val terminal = snap.config.state(stateId)?.terminal == true
+        when {
+            !terminal || found.active || archive.days <= 0 -> archiveFooter.isVisible = false
+
+            archive.showingAll -> {
+                archiveText.text = TasklaneBundle.message("archive.showing", archive.days)
+                archiveLink.text = TasklaneBundle.message("archive.hide")
+                archiveFooter.isVisible = true
+            }
+
+            hidden > 0 -> {
+                archiveText.text = TasklaneBundle.message("archive.hidden", hidden, archive.days)
+                archiveLink.text = TasklaneBundle.message("archive.show")
+                archiveFooter.isVisible = true
+            }
+
+            else -> archiveFooter.isVisible = false
         }
     }
 
@@ -886,6 +992,8 @@ internal class TasklanePanel(
 
         if (view.filter.value != TaskFilter.ALL) view.setFilter(TaskFilter.ALL)
         if (search.rawQuery.value.isNotEmpty()) search.clear()
+        // Una tarea archivada tampoco se ve: se enseña lo archivado, como con el filtro.
+        if (view.archive.value.active) view.showArchived(true)
     }
 
     private fun taskNodes(): Sequence<TaskNode> =
@@ -1027,6 +1135,49 @@ internal class TasklanePanel(
         )
     }
 
+    // ------------------------------------------------------ orden manual (2.11.0)
+
+    /** Si esta pestaña va a mano. Lo consulta el desplegable *Group By*. */
+    val manualOrder: Boolean get() = snapshot.config.state(stateId)?.manualOrder == true
+
+    /**
+     * Pasa la pestaña a orden manual, o la devuelve al automático. Al pasar a mano se
+     * siembra antes el orden con el que se está viendo —ver `TaskCommand.SeedManualOrder`—,
+     * para que la lista no se mueva: lo único que cambia es que ahora se puede arrastrar.
+     */
+    fun setManualOrder(on: Boolean) {
+        if (on == manualOrder) return
+        if (on) service.apply(TaskCommand.SeedManualOrder(stateId))
+        val configService = TasklaneConfigService.getInstance(project)
+        val config = configService.config.value
+        configService.update(
+            config.copy(states = config.states.map { if (it.id != stateId) it else it.copy(manualOrder = on) }),
+        )
+    }
+
+    /** Si `⌘⇧↑/↓` tiene algo que mover: una sola tarea, a mano y sin buscar. */
+    fun canMoveSelected(): Boolean =
+        renderer.reorderable && isSelectionEditable() && selectedTasks().size == 1
+
+    /**
+     * Sube o baja la tarea seleccionada un puesto dentro de su grupo: `⌘⇧↑/↓`, lo mismo
+     * que arrastrarla por la franja. La selección se queda con ella, porque se restaura
+     * por id al repintar.
+     */
+    fun moveSelectedBy(delta: Int) {
+        if (!canMoveSelected()) return
+        val node = tree.selectionPath?.lastPathComponent as? TaskNode ?: return
+        val parent = node.parent as? javax.swing.tree.DefaultMutableTreeNode ?: return
+        val siblings = CardReorder.tasksOf(parent)
+        val index = siblings.indexOf(node)
+        val (above, below) = when {
+            delta < 0 && index > 0 -> siblings.getOrNull(index - 2) to siblings[index - 1]
+            delta > 0 && index in 0 until siblings.lastIndex -> siblings[index + 1] to siblings.getOrNull(index + 2)
+            else -> return
+        }
+        service.apply(TaskCommand.Move(node.task.repo, node.task.id, above?.task?.id, below?.task?.id))
+    }
+
     /** Manda el cursor a la lista. Lo usa [TasklaneWindow] al cambiar de estado. */
     fun focusTree() {
         tree.requestFocusInWindow()
@@ -1161,14 +1312,13 @@ internal class TasklanePanel(
     }
 
     /**
-     * Un `Delete` por fila y no uno por repositorio con todos los ids: así el lote cuenta
-     * **filas**, que es lo que decide si cabe en el gesto o va en segundo plano. Un único
-     * `Delete` con cinco mil ids sería un comando suelto que se aplicaría en el acto.
+     * Borra la selección —o el grupo señalado— sin preguntar, y con *Undo* en el aviso
+     * que sale y `⌘Z` en la lista. Ver [TaskService.delete].
      */
     fun deleteSelected() {
         val tasks = selectedTasks()
         if (tasks.isNotEmpty()) {
-            service.applyAll(tasks.map { TaskCommand.Delete(it.repo, listOf(it.id)) })
+            service.delete(tasks)
             return
         }
 
@@ -1251,6 +1401,8 @@ internal class TasklanePanel(
         private const val ACTION_SELECT_NEXT_STATE = "Tasklane.SelectNextState"
         private const val ACTION_MOVE_PREV_STATE = "Tasklane.MoveToPreviousState"
         private const val ACTION_MOVE_NEXT_STATE = "Tasklane.MoveToNextState"
+        private const val ACTION_MOVE_UP = "Tasklane.MoveUp"
+        private const val ACTION_MOVE_DOWN = "Tasklane.MoveDown"
 
         /** Clave del historial del campo de búsqueda en `PropertiesComponent`. */
         private const val HISTORY_PROPERTY = "Tasklane.Search"

@@ -1,5 +1,6 @@
 package com.tasklane.domain.model
 
+import com.tasklane.domain.text.Checklist
 import com.tasklane.domain.text.CodeFence
 import com.tasklane.domain.text.ImageRefParser
 import java.time.Instant
@@ -175,7 +176,7 @@ data class Task(
                     if (!isTitleLine) {
                         val stripped = if (refs.isEmpty()) raw else ImageRefParser.strip(raw)
                         val line = stripped.trim()
-                        if (line.isNotBlank()) add(DetailBlock.Text(line, linksOfLine(index, eol, refs, stripped, line)))
+                        if (line.isNotBlank()) add(textBlock(line, linksOfLine(index, eol, refs, stripped, line), raw, index))
                     }
                     // Detrás del texto de su línea, como el inlay del diálogo.
                     for (ref in refs) add(DetailBlock.Image(ref.id))
@@ -185,6 +186,37 @@ data class Task(
             }
         }
     }
+
+    /**
+     * Una línea de texto del detalle; si es una casilla (2.11.0), sin la marca delante y
+     * con dónde está su `x` dentro del cuerpo, que es lo que escribe pulsarla.
+     */
+    private fun textBlock(line: String, links: List<TaskLink>, raw: String, start: Int): DetailBlock.Text {
+        val item = Checklist.parse(raw) ?: return DetailBlock.Text(line, links)
+        val lead = raw.indexOfFirst { !it.isWhitespace() }
+        val cut = (item.text - lead).coerceIn(0, line.length)
+        val shifted = links.mapNotNull { link ->
+            if (link.range.first < cut) null else link.copy(range = (link.range.first - cut)..(link.range.last - cut))
+        }
+        return DetailBlock.Text(line.substring(cut), shifted, CheckBox(item.checked, start + item.box))
+    }
+
+    /**
+     * La casilla del título, si el título es una (2.11.0): una tarea cuyo cuerpo **es** la
+     * lista la tiene en su primera línea. Es lo que hizo quitar las casillas en la `1.0.0`
+     * —el título enseñaba `- [ ]` en crudo— y lo que ahora la tarjeta pinta como casilla.
+     * [CheckBox.text] es dónde empieza el título sin la marca.
+     */
+    val titleCheck: CheckBox? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val range = titleRange
+        if (range.isEmpty()) return@lazy null
+        val line = body.substring(range.first, range.last + 1)
+        val item = Checklist.parse(line) ?: return@lazy null
+        CheckBox(item.checked, range.first + item.box, item.text)
+    }
+
+    /** Casillas marcadas y totales del cuerpo, para el distintivo de la tarjeta. */
+    val checklist: Pair<Int, Int> by lazy(LazyThreadSafetyMode.PUBLICATION) { Checklist.progress(body) }
 
     /**
      * Las líneas del cuerpo que no son el título y dicen algo: ni vacías, ni
@@ -265,7 +297,12 @@ sealed interface DetailBlock {
      * Ya sin las referencias a imágenes y sin los espacios de los extremos. [links] son
      * los enlaces de la línea con el rango en coordenadas de [text].
      */
-    class Text(val text: String, val links: List<TaskLink> = emptyList()) : DetailBlock
+    class Text(
+        val text: String,
+        val links: List<TaskLink> = emptyList(),
+        /** La casilla de la línea, si es una (2.11.0). [text] ya va sin la marca. */
+        val check: CheckBox? = null,
+    ) : DetailBlock
 
     class Image(val id: AttachmentId) : DetailBlock
 
@@ -276,6 +313,13 @@ sealed interface DetailBlock {
      */
     class Code(val lines: List<String>, val language: String = "") : DetailBlock
 }
+
+/**
+ * Una casilla de lista de comprobación (2.11.0). [offset] es la posición **en el cuerpo**
+ * del carácter entre corchetes, que es lo que cambia al marcarla; [text] sólo lo usa el
+ * título, y dice dónde empieza su texto sin la marca.
+ */
+data class CheckBox(val checked: Boolean, val offset: Int, val text: Int = 0)
 
 /**
  * Un enlace ya extraído del cuerpo.

@@ -34,6 +34,7 @@ class StateBean {
     @Attribute var anchor: String = DateAnchor.UPDATED.name
     @Attribute var terminal: Boolean = false
     @Attribute var default: Boolean = false
+    @Attribute var manualOrder: Boolean = false
 }
 
 @Tag("priority")
@@ -90,6 +91,7 @@ private fun StateBean.toDomain(index: Int): TaskState? {
         anchor = enumOrDefault(anchor, DateAnchor.UPDATED),
         terminal = terminal,
         isDefault = default,
+        manualOrder = manualOrder,
     )
 }
 
@@ -115,6 +117,7 @@ fun TasklaneConfig.toState(): TasklaneConfigState = TasklaneConfigState().also {
             anchor = s.anchor.name
             terminal = s.terminal
             default = s.isDefault
+            manualOrder = s.manualOrder
         }
     }
     state.priorities = priorities.mapTo(mutableListOf()) { p ->

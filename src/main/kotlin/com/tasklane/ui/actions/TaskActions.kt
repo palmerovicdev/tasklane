@@ -4,11 +4,13 @@ import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.DumbAwareToggleAction
+import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.Grouping
 import com.tasklane.service.SearchService
 import com.tasklane.ui.settings.TasklaneConfigurable
@@ -143,7 +145,8 @@ internal class GroupingActionGroup : ActionGroup(), DumbAware {
      * lista sí se reagrupaba; el visto seguía en la agrupación anterior.
      */
     private val children: Array<AnAction> =
-        Grouping.entries.map<Grouping, AnAction>(::SelectGroupingAction).toTypedArray()
+        (Grouping.entries.map<Grouping, AnAction>(::SelectGroupingAction) + Separator.getInstance() + ManualOrderAction())
+            .toTypedArray()
 
     init {
         isPopup = true
@@ -211,5 +214,28 @@ internal class TasklaneSettingsAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         ShowSettingsUtil.getInstance().showSettingsDialog(project, TasklaneConfigurable::class.java)
+    }
+}
+
+/**
+ * El orden de la pestaña, debajo de las agrupaciones (2.11.0): a mano o automático. Va en
+ * el mismo desplegable porque las dos cosas responden a «cómo se lista este estado», y
+ * como la agrupación es del estado y se guarda en la configuración del proyecto.
+ */
+private class ManualOrderAction :
+    ToggleAction(
+        TasklaneBundle.message("toolwindow.order.manual"),
+        TasklaneBundle.message("toolwindow.order.manual.description"),
+        null,
+    ),
+    DumbAware {
+
+    override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+    override fun isSelected(e: AnActionEvent): Boolean =
+        TasklaneDataKeys.PANEL.getData(e.dataContext)?.manualOrder == true
+
+    override fun setSelected(e: AnActionEvent, state: Boolean) {
+        TasklaneDataKeys.PANEL.getData(e.dataContext)?.setManualOrder(state)
     }
 }
