@@ -68,6 +68,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
 | **El código enseña sus tareas** | Una marca en el margen o una pastilla en la línea, con el color de la prioridad, un tooltip con la tarea y un clic que la abre |
 | **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas, un selector, y búsqueda en todos a la vez |
+| **Tareas para agentes de IA** | Con el servidor MCP del IDE encendido, Claude Code, Junie o cualquier cliente MCP leen la lista, abren una tarea con sus anclas en la línea de hoy, apuntan lo que dejan pendiente, marcan la checklist y la cierran al terminar |
 | **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
 | **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo —como parte del día— o sólo la selección |
 | **Guardar y vaciar un repositorio** | Todas sus tareas a un CSV, un Markdown o un texto plano; y, por separado, borrarlas todas |
@@ -90,7 +91,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.11.2.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.12.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -450,6 +451,47 @@ estuviera cerrada o archivada. Con la consulta vacía no enseña nada.
 lista enseña los **200 mejores**. Sin texto libre —sólo operadores— manda el orden de
 siempre. Todo ocurre fuera del hilo de interfaz y detrás de un *debounce* de 120 ms.
 
+## Agentes de IA (MCP)
+
+Desde la `2.12.0` las tareas son también herramientas del **servidor MCP que trae el
+IDE**. Un agente conectado a él —Claude Code, Junie, AI Assistant, Cursor o cualquier
+cliente MCP— puede recibir «haz la tarea de Tasklane sobre el login», leer la nota con sus
+anclas, trabajar, ir marcando la lista de comprobación y cerrarla al terminar; o apuntar
+en Tasklane lo que deja pendiente en vez de sembrar `// TODO` por el código.
+
+**Cómo se enciende.** *Settings → Tools → MCP Server → Enable MCP Server*, y conectar el
+agente desde esa misma página (el IDE configura solo los clientes que conoce). Tasklane
+no abre ningún puerto ni tiene ajuste propio: sin el plugin *MCP Server* activo no se
+carga nada de esto. Las herramientas pueden apagarse una a una desde los ajustes del
+servidor.
+
+| Herramienta | Qué hace |
+|---|---|
+| `tasklane_list_repositories` | Los repositorios con sus tareas abiertas, y los estados y prioridades configurados |
+| `tasklane_list_tasks` | Sin consulta, lo abierto estado por estado y en el orden de la lista; con consulta, los aciertos por relevancia, con [la misma sintaxis](#búsqueda) que el buscador. `repository: "all"` busca en todos |
+| `tasklane_get_task` | Una tarea entera: cuerpo Markdown, casillas numeradas, enlaces y anclas **en la línea de hoy** —`anchoredAtLine` si se movió, `missing` si el fichero ya no está— |
+| `tasklane_create_task` | Crea una tarea, con estado, prioridad, etiquetas, vencimiento y anclas escritas como `src/Auth.kt:42` |
+| `tasklane_update_task` | Cambia sólo lo que se le pasa; `dueDate: "none"` quita el vencimiento |
+| `tasklane_complete_task` | La lleva al estado cerrado. Repetirla no la reabre |
+| `tasklane_set_checklist_item` | Marca o desmarca la casilla N. Repetirla no la alterna |
+
+Detalles que importan:
+
+- **No hay herramienta de borrar**, a propósito. Un error completando se deshace
+  reabriendo; uno borrando, no —los datos no van al VCS—. Borrar sigue siendo cosa de quien
+  mira la lista, con su *Undo*.
+- **Todo pasa por el mismo camino que la ventana**: lo que hace el agente aparece en la
+  lista en el acto, y una base que se está recuperando o importando se niega a escribir
+  con un error que lo dice.
+- **Los nombres se escriben como se leen**: `doing`, `High`, `backend` —sin mayúsculas ni
+  acentos, o un prefijo que encaje con uno solo—. Si no encajan, el error dice cuáles hay,
+  para que el agente se corrija en la llamada siguiente.
+- **Las anclas leen el disco, no la memoria del IDE.** Un agente edita los ficheros desde
+  fuera y pregunta enseguida; antes de responder se refresca ese fichero, así que la línea
+  que devuelve es la de después de su edición.
+- Sin `repository`, el repositorio es el activo en la ventana. Con varios proyectos
+  abiertos, el propio servidor pide al agente que diga cuál.
+
 ## Enlaces
 
 Las URLs del cuerpo se extraen **al escribir** y se guardan derivadas en la tarea, así
@@ -710,7 +752,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.11.2.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.12.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

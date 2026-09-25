@@ -9,6 +9,34 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.12.0]
+
+Menor sin cambio de formato: Tasklane para agentes de IA. Es la P16 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Las tareas, como herramientas MCP.** Con el servidor MCP del IDE encendido
+  (*Settings → Tools → MCP Server*), un agente —Claude Code, Junie, AI Assistant o
+  cualquier cliente MCP— tiene siete herramientas, todas con el prefijo `tasklane_`:
+  `list_repositories`, `list_tasks`, `get_task`, `create_task`, `update_task`,
+  `complete_task` y `set_checklist_item`.
+  - `list_tasks` sin consulta devuelve lo abierto estado por estado y en el orden de la
+    lista; con consulta, lo mismo que el buscador, operadores incluidos. `repository:
+    "all"` busca en todos.
+  - `get_task` da el cuerpo entero, las casillas numeradas y las anclas **en la línea de
+    hoy**, con `anchoredAtLine` si el código se movió y `missing` si el fichero ya no está.
+  - `complete_task` y `set_checklist_item` son **idempotentes**: un agente que repite la
+    llamada no reabre ni desmarca lo que ya hizo.
+  - Los nombres de estado, prioridad y repositorio se aceptan como en el buscador —sin
+    mayúsculas ni acentos, por id o por un prefijo único—, y un nombre que no existe falla
+    diciendo cuáles hay.
+  - **No hay herramienta de borrar**, a propósito: borrar se queda con el usuario y su
+    *Undo*.
+  - Antes de leer o crear un ancla se refresca **ese fichero** desde disco: un agente edita
+    desde fuera del IDE y pregunta enseguida, y el vigilante de disco tarda unos segundos.
+- Dependencia **opcional** del plugin *MCP Server* (`tasklane-mcp.xml`), como la de Git:
+  sin él no se carga nada y Tasklane no abre ningún puerto.
+
 ## [2.11.2]
 
 Sin cambio de formato: el asa de reordenar, mejor colocada.

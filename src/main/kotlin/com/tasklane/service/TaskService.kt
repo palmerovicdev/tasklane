@@ -608,6 +608,24 @@ class TaskService(
      */
     fun dueBy(repo: RepoKey, until: Instant): List<Task> = store?.overdue(repo, until).orEmpty()
 
+    /**
+     * Las primeras [limit] tareas de [stateId] en [repo], en el orden en que las pinta la
+     * lista —marcadas arriba, luego prioridad y fecha, o el orden manual—, y cuántas hay en
+     * total en ese estado.
+     *
+     * Es lo que piden las herramientas MCP (2.12.0): un agente que pregunta «qué hay por
+     * hacer» tiene que ver lo mismo que el usuario ve arriba de su lista, y de cualquier
+     * repositorio, no sólo del que está abierto en la ventana. Sin archivo ni filtro de
+     * vista: son preferencias de la ventana, no de los datos.
+     */
+    internal fun listed(repo: RepoKey, stateId: StateId, limit: Int, now: Instant): Pair<List<Task>, Int> {
+        val db = db ?: return emptyList<Task>() to 0
+        val pager = SqlitePager(db.reader, repo, _snapshot.value.config, TaskFilter.ALL, now)
+        val total = pager.counts()[stateId] ?: 0
+        if (total == 0 || limit <= 0) return emptyList<Task>() to total
+        return pager.page(PageQuery(stateId, limit = limit)).items.take(limit) to total
+    }
+
     /** Una tarea por id. La pide la ventana para saber si una petición de enseñar es suya. */
     fun task(id: TaskId): Task? = store?.task(id)
 

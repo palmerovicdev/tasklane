@@ -148,6 +148,17 @@ class SearchService(
         return index.search(query, searchScope).map { it.task }
     }
 
+    /**
+     * Como [find], pero con el alcance explícito y no el de la ventana: lo usan las
+     * herramientas MCP (2.12.0), que dicen ellas mismas en qué repositorio buscan.
+     */
+    internal fun find(query: TaskQuery, scope: SearchScope): List<com.tasklane.domain.model.Task> {
+        if (query.isEmpty) return emptyList()
+        val snapshot = tasks.snapshot.value
+        index.setCorpus(SearchCorpus(snapshot.config, snapshot.repositories))
+        return index.search(query, scope).map { it.task }
+    }
+
     private fun compute(input: Input): SearchResults {
         val query = QueryParser.parse(input.raw)
         if (query.isEmpty) return SearchResults.NONE

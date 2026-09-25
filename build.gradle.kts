@@ -70,6 +70,9 @@ dependencies {
         // esos modulos de la plataforma no entran solos en el classpath.
         bundledModule("intellij.platform.vcs.dvcs")
         bundledModule("intellij.platform.vcs.dvcs.impl")
+        // Igual que Git4Idea: opcional en plugin.xml, obligatorio para compilar las
+        // herramientas MCP de com.tasklane.mcp (2.12.0).
+        bundledPlugin("com.intellij.mcpServer")
 
         if (localIde != null) {
             // Descarga cero: se compila contra el IDE ya instalado.
@@ -118,6 +121,23 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.12.0 &mdash; Tasklane for AI agents</h3>
+            <ul>
+              <li><b>Your tasks are now tools of the IDE's MCP server.</b> Turn it on in
+                  <i>Settings &#9656; Tools &#9656; MCP Server</i> and an agent such as Claude
+                  Code, Junie or AI Assistant can list your tasks, read one with its code anchors
+                  at the line where the code is <i>now</i>, write down the work it leaves pending
+                  instead of adding <code>// TODO</code> comments, tick checklist items as it goes
+                  and complete the task when it is done. Seven tools, all prefixed
+                  <code>tasklane_</code>.</li>
+              <li><b>Safe by design:</b> there is no delete tool, completing twice never reopens a
+                  task, unknown state or priority names fail listing the valid ones, and a
+                  database that is being repaired refuses to write.</li>
+              <li>Nothing changes unless the MCP Server plugin is enabled; Tasklane opens no port
+                  of its own.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.11.2 &mdash; the reorder grip, better placed</h3>
             <p>The grip of a manually ordered card now sits halfway down the space below the
                bookmark and menu, slightly in from the right edge, so it reads as part of the

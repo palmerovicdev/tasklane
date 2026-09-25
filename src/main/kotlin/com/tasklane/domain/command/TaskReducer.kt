@@ -123,7 +123,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 upsert(
                     config,
                     Task(
-                        id = TaskId.random(),
+                        id = command.id ?: TaskId.random(),
                         repo = command.repo,
                         body = body,
                         links = LinkExtractor.extract(body),

@@ -11,6 +11,7 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.AnchorReference
@@ -123,6 +124,23 @@ object CodeAnchors {
         }
         val length = document.getLineEndOffset(line) - document.getLineStartOffset(line)
         line to anchor.column.coerceIn(0, length)
+    }
+
+    /**
+     * En qué línea (0-based) está **hoy** lo anclado, o `null` si el fichero ya no está.
+     *
+     * Lo que ve el usuario al pulsar el ancla, sin abrir nada: lo piden las herramientas
+     * MCP (2.12.0), que le dan al agente el sitio actual y no el que se guardó. Un agente
+     * que abre `Auth.kt:42` cuando lo anclado ya bajó a la 57 lee otra cosa.
+     */
+    fun currentLine(project: Project, anchor: CodeAnchor): Int? {
+        val file = find(project, anchor)?.takeUnless { it.isDirectory } ?: return null
+        // Un agente edita el fichero **desde fuera** del IDE y pregunta enseguida: el
+        // vigilante de disco tarda unos segundos en avisar, y hasta entonces el
+        // `Document` es el de antes de la edición. Refrescar este fichero, y sólo éste,
+        // es lo que hace que la respuesta hable del disco. Síncrono y fuera del EDT.
+        VfsUtil.markDirtyAndRefresh(false, false, false, file)
+        return if (file.isValid) positionOf(anchor, file).first else null
     }
 
     /**

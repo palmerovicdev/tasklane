@@ -1,0 +1,7 @@
+<idea-plugin>
+    <!-- Las herramientas de Tasklane para agentes de IA (2.12.0). Este descriptor sólo se
+         carga si el plugin MCP Server del IDE está instalado y activo; ver com.tasklane.mcp. -->
+    <extensions defaultExtensionNs="com.intellij">
+        <mcpServer.mcpToolset implementation="com.tasklane.mcp.TasklaneToolset"/>
+    </extensions>
+</idea-plugin>

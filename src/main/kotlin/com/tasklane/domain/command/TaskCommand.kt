@@ -39,6 +39,12 @@ sealed interface TaskCommand {
         val tags: List<String> = emptyList(),
         val dueDate: Instant? = null,
         val anchors: List<CodeAnchor> = emptyList(),
+        /**
+         * El id de la tarea nueva, cuando quien la crea necesita saberlo: las
+         * herramientas MCP (2.12.0) le devuelven al agente la tarea que acaba de crear.
+         * `null` == uno nuevo, que es lo que quiere todo lo demás.
+         */
+        val id: TaskId? = null,
     ) : RepoScoped
 
     /**

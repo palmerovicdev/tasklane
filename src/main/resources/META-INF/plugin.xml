@@ -175,6 +175,19 @@
             <li><code>Escape</code> closes the dialog even with the caret inside the body.</li>
         </ul>
 
+        <h3>For AI agents (MCP)</h3>
+        <ul>
+            <li><b>Your tasks become tools of the IDE's MCP server.</b> With <i>Settings &#9656;
+                Tools &#9656; MCP Server</i> enabled, Claude Code, Junie, AI Assistant or any MCP
+                client can list tasks, read one with its code anchors at the line where the code
+                is <i>now</i>, create tasks for the work it leaves pending instead of writing
+                <code>// TODO</code>, tick checklist items as it goes and complete the task when
+                it is done.</li>
+            <li><b>No delete tool</b>, on purpose: deleting stays with you and its Undo. Nothing
+                is loaded unless the MCP Server plugin is enabled, and Tasklane opens no port of
+                its own.</li>
+        </ul>
+
         <h3>Search</h3>
         <ul>
             <li><b>It reads the whole body</b>, not just the title, and ignores case and accents in
@@ -366,6 +379,10 @@
          proyecto como pseudo-repositorio. Todo lo que toca git4idea vive en el
          descriptor, que no se carga si el plugin Git esta desactivado. -->
     <depends optional="true" config-file="tasklane-git.xml">Git4Idea</depends>
+
+    <!-- Opcional igual que Git: las herramientas para agentes de IA (2.12.0) sólo existen
+         si el IDE trae su servidor MCP. Sin él no se carga nada de com.tasklane.mcp. -->
+    <depends optional="true" config-file="tasklane-mcp.xml">com.intellij.mcpServer</depends>
 
     <resource-bundle>messages.TasklaneBundle</resource-bundle>
 
