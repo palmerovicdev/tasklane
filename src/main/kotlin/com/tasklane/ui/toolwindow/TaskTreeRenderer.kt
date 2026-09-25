@@ -1,6 +1,7 @@
 package com.tasklane.ui.toolwindow
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.openapi.util.IconLoader
 import com.intellij.psi.codeStyle.MinusculeMatcher
 import com.intellij.ui.CheckboxTree
@@ -326,7 +327,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         while (extraLines.size < count) {
             val index = extraLines.size
             val extra = line { tree, selected ->
-                appendRuns(tree, this, pendingCard.getOrNull(index + 1).orEmpty(), selected)
+                val runs = pendingCard.getOrNull(index + 1).orEmpty()
+                useCodeFont(this, runs.any { it.code })
+                appendRuns(tree, this, runs, selected)
             }
             // Detrás de la primera línea y de las que ya hay, delante de las
             // imágenes y de los distintivos.
@@ -566,22 +569,31 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      */
     private fun bodyLines(task: Task, available: Int, room: Int, open: Boolean): TitleWrap.Fit {
         val gray = SimpleTextAttributes.GRAYED_ATTRIBUTES
-        val texts = task.detailTexts
+        val blocks = task.detailBlocks.filterNot { it is DetailBlock.Image }
         if (!open) {
-            val first = texts.firstOrNull() ?: return TitleWrap.Fit(emptyList(), false)
-            val one = ellipsize(bodyRuns(first, gray), available)
-            return TitleWrap.Fit(one.lines, one.clipped || texts.size > 1)
+            val first = blocks.firstOrNull() ?: return TitleWrap.Fit(emptyList(), false)
+            val one = when (first) {
+                is DetailBlock.Code -> codeLines(first, available, 1)
+                else -> ellipsize(bodyRuns(first as DetailBlock.Text, gray), available)
+            }
+            return TitleWrap.Fit(one.lines, one.clipped || blocks.size > 1)
         }
 
         val out = mutableListOf<List<Run>>()
         var clipped = false
-        for (paragraph in texts) {
+        for (block in blocks) {
             val budget = room - out.size
             if (budget <= 0) {
                 clipped = true
                 break
             }
-            val runs = bodyRuns(paragraph, gray)
+            if (block is DetailBlock.Code) {
+                val fit = codeLines(block, available, budget)
+                out += fit.lines
+                clipped = clipped || fit.clipped
+                continue
+            }
+            val runs = bodyRuns(block as DetailBlock.Text, gray)
             // Con una línea de margen no hay nada que envolver: lo que no quepa se
             // recorta, que es lo que hace `wrap` cuando se queda sin líneas.
             val fit = if (budget == 1) ellipsize(runs, available) else TitleWrap.fit(runs, available, budget, ::measure)
@@ -589,6 +601,36 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             clipped = clipped || fit.clipped
         }
         return TitleWrap.Fit(out, clipped)
+    }
+
+    /**
+     * Un bloque de código entre vallas, una línea de tarjeta por línea de código
+     * (2.8.0).
+     *
+     * **No se envuelve**, se recorta: partir una línea de código por la mitad la
+     * convierte en dos líneas que no existen, y lo que se busca en un bloque es su
+     * forma. Todas las líneas se rellenan con espacios hasta el ancho de la más larga
+     * —o hasta lo que quepa—, y como la fuente es monoespaciada el fondo de código de
+     * cada una se junta con el de las demás en un recuadro, que es como se ve un bloque
+     * en cualquier visor de Markdown.
+     */
+    private fun codeLines(block: DetailBlock.Code, available: Int, budget: Int): TitleWrap.Fit {
+        val background = codeColor
+        val style = if (background == null) {
+            SimpleTextAttributes.REGULAR_ATTRIBUTES
+        } else {
+            SimpleTextAttributes(background, null, null, SimpleTextAttributes.STYLE_PLAIN or SimpleTextAttributes.STYLE_OPAQUE)
+        }
+        val columns = if (available > 0) (available / measureCode("m").coerceAtLeast(1)).coerceAtLeast(MIN_CODE_COLUMNS) else Int.MAX_VALUE
+        // Una columna de aire a la derecha de la línea más larga: sin ella el recuadro
+        // acaba pegado a la última letra.
+        val width = minOf(block.lines.maxOf { it.length } + 1, columns)
+        val shown = block.lines.take(budget)
+        val lines = shown.map { line ->
+            val text = if (line.length >= width) line.take(width - 1) + TitleWrap.ELLIPSIS else line.padEnd(width)
+            listOf(Run(text, style, code = true))
+        }
+        return TitleWrap.Fit(lines, block.lines.size > budget || shown.any { it.length >= width })
     }
 
     /**
@@ -801,7 +843,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 continue
             }
             if (from > 0) out += run.withText(text.substring(0, from))
-            out += Run(text.substring(from, to), selectedStyle(run.style, background), run.link)
+            out += Run(text.substring(from, to), selectedStyle(run.style, background), run.link, code = run.code)
             if (to < text.length) out += run.withText(text.substring(to))
         }
         return out
@@ -1183,6 +1225,46 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         return textRenderer.getFontMetrics(font).stringWidth(text)
     }
 
+    /** Lo mismo para un tramo: los de código se miden con la fuente con que se pintan. */
+    private fun widthOf(run: Run, text: String): Int =
+        if (run.code) measureCode(text) else measure(text, run.style)
+
+    private fun measureCode(text: String): Int {
+        val base = textRenderer.font ?: return 0
+        return textRenderer.getFontMetrics(codeFontFor(base)).stringWidth(text)
+    }
+
+    /**
+     * La fuente del editor al tamaño de la de la lista. La del editor y no una
+     * `Monospaced` cualquiera porque es la que el usuario eligió para leer código, y a
+     * su tamaño porque un bloque que sale más grande que el texto de al lado grita.
+     */
+    private fun codeFontFor(plain: Font): Font {
+        codeFont?.takeIf { it.size2D == plain.size2D }?.let { return it }
+        val editor = runCatching { EditorFontType.getGlobalPlainFont() }.getOrNull()
+            ?: Font(Font.MONOSPACED, Font.PLAIN, plain.size)
+        return editor.deriveFont(plain.size2D).also { codeFont = it }
+    }
+
+    private var codeFont: Font? = null
+
+    /** La fuente de cada línea antes de pasarla a la de código, para devolvérsela. */
+    private val plainFonts = IdentityHashMap<SimpleColoredComponent, Font>()
+
+    /**
+     * Pone o quita la fuente de código de una línea del pozo. Las líneas se reutilizan
+     * de una tarjeta a otra, así que la que hoy pinta código mañana pinta prosa y tiene
+     * que volver a su fuente.
+     */
+    private fun useCodeFont(line: SimpleColoredComponent, code: Boolean) {
+        if (code) {
+            val plain = plainFonts.getOrPut(line) { line.font }
+            line.font = codeFontFor(plain)
+        } else {
+            plainFonts.remove(line)?.let { line.font = it }
+        }
+    }
+
     /**
      * Recorta con puntos suspensivos lo que no quepa en una línea.
      *
@@ -1441,7 +1523,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
         val bounds = paintedRowBounds(tree, row) ?: return emptyList()
         prepare(tree, node, row, bounds)
-        return pendingCard.map { runs -> runs.joinToString("") { it.text } }
+        // El relleno de las líneas de código es para el recuadro, no parte del código.
+        return pendingCard.map { runs ->
+            val text = runs.joinToString("") { it.text }
+            if (runs.any { it.code }) text.trimEnd() else text
+        }
     }
 
     /** Deja el renderer montado y medido para la fila [row], que es el único estado que tiene. */
@@ -1476,7 +1562,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         var consumed = 0
         var offset = 0
         for (run in runs) {
-            val width = measure(run.text, run.style)
+            val width = widthOf(run, run.text)
             if (target > consumed + width) {
                 consumed += width
                 offset += run.text.length
@@ -1491,7 +1577,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private fun nearestChar(run: Run, x: Int): Int {
         var previous = 0
         for (index in 1..run.text.length) {
-            val width = measure(run.text.substring(0, index), run.style)
+            val width = widthOf(run, run.text.substring(0, index))
             if (width >= x) return if (x - previous <= width - x) index - 1 else index
             previous = width
         }
@@ -1606,6 +1692,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         /** Cuántas líneas puede ocupar el título antes de recortarse. */
         const val MAX_TITLE_LINES = 3
+
+        /** Lo mínimo que se enseña de una línea de código, aunque haya que desbordar. */
+        const val MIN_CODE_COLUMNS = 12
 
         /**
          * Tope de líneas de una tarjeta desplegada. No es un límite de diseño sino un

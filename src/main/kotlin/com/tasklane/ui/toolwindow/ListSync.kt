@@ -85,6 +85,25 @@ internal class ListSync(private val tree: JTree, private val stateId: StateId) {
     private val closed = mutableSetOf<GroupKey>()
 
     /**
+     * Los grupos que abrió el presupuesto y siguen abiertos.
+     *
+     * El presupuesto es del **primer** pintado: reparte las filas que da tiempo a medir
+     * cuando no hay nada puesto (ver [GroupBudget]). Pasado ese momento, lo que ya está
+     * en el árbol ya está medido y volver a cerrarlo no ahorra nada — y cuesta: cerrar
+     * un grupo suelta sus filas, la lista encoge de golpe y el hueco visible se queda
+     * mirando a otro sitio.
+     *
+     * Y se cerraban solos. El presupuesto descuenta lo que cada grupo lleva cargado, así
+     * que traer una página más en el grupo por el que uno se está desplazando lo gasta y
+     * **cierra los de abajo**: dos «cargar más» bastaban (150 filas de presupuesto, 50 por
+     * página). El usuario veía desaparecer media lista por haber seguido bajando.
+     *
+     * Así que lo que el presupuesto abre se recuerda aquí y a partir de entonces cuenta
+     * como abierto. Cerrarlo sigue siendo cosa del usuario: [toggled] lo saca.
+     */
+    private val budgeted = mutableSetOf<GroupKey>()
+
+    /**
      * Otra lista empieza por el principio. Lo pide la pestaña cuando cambia la
      * consulta, el filtro, la agrupación o el repositorio: sin esto, teclear en el
      * buscador obligaría a rehacer las dos mil filas que el usuario hubiera ido
@@ -99,6 +118,7 @@ internal class ListSync(private val tree: JTree, private val stateId: StateId) {
     fun forgetGroups() {
         open.clear()
         closed.clear()
+        budgeted.clear()
     }
 
     /** El usuario abrió o cerró una cabecera. */
@@ -109,6 +129,7 @@ internal class ListSync(private val tree: JTree, private val stateId: StateId) {
         } else {
             closed += key
             open -= key
+            budgeted -= key
         }
     }
 
@@ -153,7 +174,8 @@ internal class ListSync(private val tree: JTree, private val stateId: StateId) {
         var touched = TreeSync.sync(model, root, rows)
         expandRoot()
 
-        val opened = GroupBudget.open(shown, open, closed, rows.size) { windows[it]?.size ?: TaskPager.PAGE }
+        val opened = GroupBudget.open(shown, open + budgeted, closed, rows.size) { windows[it]?.size ?: TaskPager.PAGE }
+        budgeted += opened
         for (node in groupNodes()) {
             val path = TreePath(node.path)
             if (node.key in opened) {

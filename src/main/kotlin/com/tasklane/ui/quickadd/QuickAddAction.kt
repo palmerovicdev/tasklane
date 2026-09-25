@@ -53,7 +53,15 @@ internal class QuickAddAction : DumbAwareAction() {
         val dialog = TaskEditDialog(project, snapshot.config, repo)
         if (!dialog.showAndGet()) return
         service.apply(
-            TaskCommand.Create(repo, dialog.body, dialog.stateId, dialog.priorityId, dialog.tags, dialog.dueDate),
+            TaskCommand.Create(
+                repo,
+                dialog.body,
+                dialog.stateId,
+                dialog.priorityId,
+                dialog.tags,
+                dialog.dueDate,
+                anchors = dialog.anchors,
+            ),
         )
     }
 }

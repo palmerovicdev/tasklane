@@ -118,6 +118,71 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.8.0 &mdash; typed anchors, TODO comments and code blocks</h3>
+            <ul>
+              <li><b>Anchor a task by typing where it points.</b> In the task dialog, write
+                  <code>plans/deploy.md:28</code> &mdash; a path relative to the project and
+                  a line &mdash; in the <i>Code</i> row and press Enter. You get the same
+                  anchor as creating the task from the editor: the gutter mark, the tooltip
+                  and the click back to the line, which is found again if the file
+                  changes.</li>
+              <li>Also accepts <code>path:line:column</code>, a bare path,
+                  <code>path#L28</code> as copied from GitHub, and <code>path(28)</code>.
+                  A path that does not exist, a folder or a line past the end of the file
+                  stops the dialog and says why.</li>
+              <li>Files written by another program a moment ago are found too, and the
+                  field <b>autocompletes project paths</b> as you type.</li>
+              <li><b>Fenced code blocks.</b> Text between <code>```</code> lines is drawn on
+                  the card as a code block, in the editor font and taken literally. The
+                  code button of the dialog fences a multi-line selection.</li>
+              <li><b>Alt+Enter on a TODO comment &rarr; Move TODO to Tasklane.</b> The TODO
+                  becomes an anchored task and the comment is removed from the code
+                  (undo brings it back). Comments that say more than the TODO are kept.</li>
+              <li><b>Import TODO Comments&hellip;</b> turns every TODO of the project into an
+                  anchored task in one go, without touching the code and without
+                  duplicating the ones already imported.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.6.3 and 2.8.0 open each other&rsquo;s
+               projects.</p>
+
+            <h3>2.6.3 &mdash; scrolling and rendering fixes in the task list</h3>
+            <p>A bug fix release: scrolling the task list could jump, and cards could be
+               drawn at the wrong height.</p>
+            <ul>
+              <li><b>The list no longer jumps while you scroll.</b> Loading more tasks,
+                  expanding a group or a screenshot finishing loading could shift every
+                  card and move the list out from under you. The task you are reading now
+                  stays where it is.</li>
+              <li><b>Cards are drawn at their correct height.</b> After the tool window
+                  changed width &mdash; including when the scrollbar appears on its own
+                  &mdash; cards were briefly laid out for the previous width, so a wrapped
+                  title could lose its last line and push the priority, due date and tag
+                  row out of the card.</li>
+              <li><b>The end of the list is reachable again.</b> The list could report
+                  itself shorter than it is, leaving the last card clipped against the
+                  bottom edge with no way to scroll further.</li>
+              <li><b>Scrolling through a large group no longer collapses the groups below
+                  it.</b> Loading a second page of tasks could silently fold away the rest
+                  of the list.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.6.2 and 2.6.3 open each other&rsquo;s
+               projects.</p>
+
+            <h3>2.6.2 &mdash; copying tells you the truth</h3>
+            <ul>
+              <li><b>&ldquo;N task(s) copied&rdquo; now means the text really is on the
+                  clipboard.</b> When the clipboard was busy &mdash; a history manager, a
+                  menu closing &mdash; the copy could fail silently and the notification
+                  claimed a copy that never happened, so pasting returned the previous
+                  content. Tasklane now verifies the clipboard, retries, and reports an
+                  error if the text cannot be written.</li>
+              <li><b>&ldquo;Export and Remove&rdquo; no longer deletes tasks after a copy
+                  it could not verify.</b> If the clipboard rejects the export, the
+                  repository is left untouched.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.6.1 and 2.6.2 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.6.1 &mdash; pin an image while you code</h3>
             <ul>
               <li><b>An enlarged screenshot can be pinned.</b> The pin in its header keeps

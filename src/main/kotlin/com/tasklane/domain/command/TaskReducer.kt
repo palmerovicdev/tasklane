@@ -140,6 +140,20 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
 
             is TaskCommand.Batch -> batch(subject, command)
 
+            is TaskCommand.CreateMany -> {
+                // Un orden por tarea, seguidos y en el orden en que llegan: pedirle al
+                // almacén el siguiente para cada una devolvería siempre el mismo, porque
+                // nada se escribe hasta el final del plan.
+                var order = subject.nextOrder()
+                val created = command.tasks.flatMap { create ->
+                    val one = Subject(config, emptyList()) { order.also { order += CREATE_STEP } }
+                    plan(one, create.copy(repo = command.repo)).mutations
+                        .filterIsInstance<Mutation.Upsert>()
+                        .flatMap { it.tasks }
+                }
+                if (created.isEmpty()) nothing(config) else Plan(listOf(Mutation.Upsert(created)), config)
+            }
+
             is TaskCommand.Delete -> {
                 // Sólo las que existían. Antes esto se notaba en que borrar un id
                 // inexistente reconstruía la lista igualmente: un repintado y un volcado
@@ -413,6 +427,13 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
     }
 
     companion object {
+        /**
+         * El hueco entre dos tareas nuevas de un [TaskCommand.CreateMany]. Es el mismo
+         * que deja el almacén al pedir el siguiente orden —`TaskStore.ORDER_GAP`, que el
+         * dominio no puede nombrar— y una prueba fija que no se separen.
+         */
+        const val CREATE_STEP = 1000L
+
         const val ORIG_STATE = "origStateId"
         const val ORIG_PRIORITY = "origPriorityId"
 

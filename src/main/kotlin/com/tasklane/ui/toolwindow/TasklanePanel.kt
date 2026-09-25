@@ -63,9 +63,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.Point
 import java.awt.Toolkit
-import java.awt.event.ComponentAdapter
-import java.awt.event.ComponentEvent
 import java.awt.event.InputEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -82,6 +81,7 @@ import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
 import javax.swing.event.TreeExpansionEvent
 import javax.swing.event.TreeExpansionListener
+import javax.swing.plaf.TreeUI
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
@@ -162,12 +162,53 @@ internal class TasklanePanel(
          * distintivos.
          *
          * Con esto el ancho del árbol y el del viewport son el mismo número: aparecer
-         * la barra de desplazamiento vertical lo estrecha, estrecharlo dispara su
-         * `componentResized` —ver el `init`—, y ahí se tiran las medidas viejas y se
-         * vuelve a envolver contra lo que hay. Nunca hay barra horizontal, que en una
+         * la barra de desplazamiento vertical lo estrecha, y estrecharlo tira las
+         * medidas viejas —ver [setBounds]—. Nunca hay barra horizontal, que en una
          * lista de tarjetas tampoco llevaría a ningún sitio.
          */
         override fun getScrollableTracksViewportWidth(): Boolean = true
+
+        /** El ancho con el que se midieron las filas que hay guardadas. */
+        private var measuredWidth = -1
+
+        /**
+         * Cambiar de ancho tira las medidas **aquí mismo**, y no en un
+         * `componentResized`.
+         *
+         * Hasta la 2.6.2 esto era un `ComponentListener`, y llegaba tarde por dos
+         * motivos distintos:
+         *
+         * 1. **Un evento de AWT no es una llamada.** `setBounds` no invoca a los
+         *    oyentes: encola un `COMPONENT_RESIZED` en la cola de eventos. Entre
+         *    encolarlo y atenderlo, Swing termina de repartir el sitio y **pinta**, así
+         *    que la primera pasada salía con el ancho nuevo y las alturas viejas: es lo
+         *    que dejaba tarjetas a las que les falta el último renglón —ver el KDoc de
+         *    [RowStack]—. Y antes de pintar, el `JScrollPane` decide con esas mismas
+         *    alturas viejas si hace falta barra y hasta dónde llega: con ellas la lista
+         *    parecía más corta de lo que es y el final no se alcanzaba.
+         * 2. **Avisaba también de lo que no importa.** `componentResized` llega
+         *    igualmente cuando lo que cambia es el **alto** del árbol, que es lo que
+         *    pasa cada vez que entra una página, se despliega un grupo o llega una
+         *    captura. Remedir entonces las filas de arriba las mueve bajo el hueco que
+         *    se está mirando, y la lista da un salto justo mientras se desplaza.
+         *
+         * Comparar contra [measuredWidth] y no contra `getWidth()` porque lo que
+         * decide si las medidas valen es el ancho con el que se hicieron, no el que
+         * había en el `setBounds` anterior.
+         */
+        override fun setBounds(x: Int, y: Int, width: Int, height: Int) {
+            super.setBounds(x, y, width, height)
+            if (width == measuredWidth) return
+            measuredWidth = width
+            // Y con la caché se va la selección de texto: sus posiciones son líneas
+            // pintadas, y otro ancho son otras líneas. Mantenerla sería dejar marcado
+            // un tramo que ya no es el que se marcó.
+            renderer.selection = null
+            // El molde: `JComponent.getUI` devuelve `ComponentUI` y el de `JTree` lo
+            // estrecha a `TreeUI`, pero desde dentro de la clase Kotlin resuelve el
+            // de arriba.
+            TreeUtil.invalidateCacheAndRepaint(ui as TreeUI)
+        }
     }
 
     /**
@@ -175,7 +216,7 @@ internal class TasklanePanel(
      * porque cuando una imagen termina de cargarse hay que **rehacer alturas**, y la
      * altura de una fila es cosa del árbol: el renderer no tiene a quién avisar.
      */
-    private val cardImages = CardImages(project) { TreeUtil.invalidateCacheAndRepaint(tree.ui) }
+    private val cardImages = CardImages(project) { remeasureRows() }
 
     /**
      * El hueco por el que se mira la lista. Es campo y no una variable local de
@@ -275,19 +316,10 @@ internal class TasklanePanel(
         // trabajo, y mejor —entiende operadores y busca en el cuerpo, no sólo en la
         // fila—. Con los dos vivos, teclear sobre el árbol abriría un buscador
         // flotante con otras reglas que el que está justo encima.
-        // El título se envuelve contra el ancho visible, así que al estrechar o
-        // ensanchar la tool window cambia el número de líneas de cada fila. El árbol
-        // cachea las alturas y no tiene por qué enterarse de que el renderer mide
-        // distinto, así que hay que tirarle la caché a la cara.
-        tree.addComponentListener(object : ComponentAdapter() {
-            override fun componentResized(event: ComponentEvent) {
-                // Y con la caché se va la selección de texto: sus posiciones son
-                // líneas pintadas, y otro ancho son otras líneas. Mantenerla sería
-                // dejar marcado un tramo que ya no es el que se marcó.
-                renderer.selection = null
-                TreeUtil.invalidateCacheAndRepaint(tree.ui)
-            }
-        })
+        //
+        // (Cambiar de ancho reenvuelve los títulos y cambia el alto de las filas. De
+        // tirarle al árbol las alturas viejas se encarga él mismo, en su `setBounds`.)
+        //
         // Un grupo nace **sin hijos** y aun así tiene que poder desplegarse: es al
         // desplegarlo cuando se le pide su primera página. `CheckboxTree` monta un
         // `DefaultTreeModel` de fábrica, que tomaría esa cabecera por una hoja. Ver
@@ -1020,7 +1052,15 @@ internal class TasklanePanel(
         val dialog = TaskEditDialog(project, snapshot.config, repo, initialState = target)
         if (!dialog.showAndGet()) return
         service.apply(
-            TaskCommand.Create(repo, dialog.body, dialog.stateId, dialog.priorityId, dialog.tags, dialog.dueDate),
+            TaskCommand.Create(
+                repo,
+                dialog.body,
+                dialog.stateId,
+                dialog.priorityId,
+                dialog.tags,
+                dialog.dueDate,
+                anchors = dialog.anchors,
+            ),
         )
     }
 
@@ -1067,8 +1107,40 @@ internal class TasklanePanel(
      */
     fun toggleExpanded(task: Task) {
         renderer.toggleExpanded(task)
+        remeasureRows()
+    }
+
+    /**
+     * Vuelve a medir **todas** las filas sin mover de sitio lo que se está mirando.
+     *
+     * Remedir es tirar la caché de alturas entera: el árbol la rehace fila a fila
+     * invocando al renderer, y cualquiera de las que quedan por encima del hueco
+     * visible puede salir con otra altura —una captura que llega, una tarjeta que se
+     * despliega, un ancho nuevo—. El `JViewport` guarda su posición en **píxeles**, no
+     * en filas, así que todo lo que cambie ahí arriba desplaza lo de abajo esa misma
+     * cantidad: la lista da un salto y quien estaba leyendo se pierde.
+     *
+     * Así que se apunta qué fila está asomando arriba del todo y por dónde va cortada,
+     * y después de remedir se vuelve a poner el hueco donde esa fila siga estando. Lo
+     * que se mira se queda quieto; lo que se mueve es lo que ya no se veía.
+     *
+     * No lo usa el cambio de ancho —ver el `setBounds` del árbol—: ahí se remide en
+     * mitad del reparto de sitio, y mover el viewport desde dentro sería pedirle al
+     * `JScrollPane` que se coloque otra vez mientras se está colocando.
+     */
+    private fun remeasureRows() {
+        val viewport = scroll.viewport
+        val top = viewport.viewPosition
+        val row = tree.getClosestRowForLocation(0, top.y)
+        val offset = if (row >= 0) tree.getRowBounds(row)?.let { top.y - it.y } else null
+
         renderer.selection = null
         TreeUtil.invalidateCacheAndRepaint(tree.ui)
+
+        if (offset == null) return
+        val bounds = tree.getRowBounds(row) ?: return
+        val last = (tree.preferredSize.height - viewport.height).coerceAtLeast(0)
+        viewport.viewPosition = Point(top.x, (bounds.y + offset).coerceIn(0, last))
     }
 
     /** Marcar desde la fila, sin pasar por la selección: lo usa [TaskRowActions]. */

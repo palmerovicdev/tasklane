@@ -10,14 +10,18 @@ import com.tasklane.domain.model.TaskLink
  * [matched] distingue lo que pasa por el resaltado de la búsqueda de lo que se añade
  * tal cual. La metainformación —fecha, repositorio, estado— no es parte de lo que se
  * buscó, y resaltarla dentro sería señalar una coincidencia que no existe.
+ *
+ * [code] marca una línea de un bloque de código entre vallas (2.8.0): se pinta y se
+ * mide con la fuente monoespaciada del editor, no con la de la lista.
  */
 internal class Run(
     val text: String,
     val style: SimpleTextAttributes,
     val link: TaskLink? = null,
     val matched: Boolean = false,
+    val code: Boolean = false,
 ) {
-    fun withText(text: String): Run = Run(text, style, link, matched)
+    fun withText(text: String): Run = Run(text, style, link, matched, code)
 }
 
 /**

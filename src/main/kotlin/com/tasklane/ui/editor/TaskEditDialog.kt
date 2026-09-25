@@ -115,14 +115,11 @@ internal class TaskEditDialog(
     /** Las etiquetas, como fichas. Ver [TagChipsField]. */
     private val tagsField = TagChipsField(initialTags)
 
-    /** Los sitios del código de los que habla la tarea. Ver [AnchorChipsField]. */
-    private val anchorsField = AnchorChipsField(initialAnchors) { syncAnchorsLabel() }
-
     /**
-     * La etiqueta de esa fila. `lazy` porque [label] la asocia al campo y el campo se
-     * declara justo arriba: sin el retraso, la referencia sería circular.
+     * Los sitios del código de los que habla la tarea: los que trae y los que se
+     * escriban a mano. Ver [AnchorChipsField].
      */
-    private val anchorsLabel by lazy { label("dialog.task.code", anchorsField) }
+    private val anchorsField = AnchorChipsField(project, initialAnchors, disposable)
 
     init {
         title = TasklaneBundle.message(if (isNew) "dialog.task.new.title" else "dialog.task.edit.title")
@@ -205,16 +202,10 @@ internal class TaskEditDialog(
         add(dueCombo, at(2, 1, 1.0))
         add(label("dialog.task.tags", tagsField), at(0, 2, 1.0, width = 3))
         add(tagsField, at(0, 3, 1.0, width = 3))
-        // La fila entera se va cuando no hay anclas, etiqueta incluida: ver
-        // [AnchorChipsField]. Se añade igualmente para que el orden de la rejilla no
-        // dependa de con qué se abrió el diálogo.
-        syncAnchorsLabel()
-        add(anchorsLabel, at(0, 4, 1.0, width = 3))
+        // Siempre a la vista desde la 2.8.0: además de enseñar las anclas que trae,
+        // es donde se escribe una nueva. Ver [AnchorChipsField].
+        add(label("dialog.task.code", anchorsField), at(0, 4, 1.0, width = 3))
         add(anchorsField, at(0, 5, 1.0, width = 3))
-    }
-
-    private fun syncAnchorsLabel() {
-        anchorsLabel.isVisible = !anchorsField.isEmpty
     }
 
     /**
@@ -234,12 +225,17 @@ internal class TaskEditDialog(
     /**
      * Una tarea sin texto no es una tarea: se bloquea el OK en vez de crear ruido. Se
      * mide sobre el cuerpo **sin el trigger**, o `!!!` a secas pasaría por tarea.
+     *
+     * Y una ruta escrita en el campo de código sin confirmar se confirma aquí: o entra
+     * como ancla, o para el diálogo con el motivo. Ver [AnchorChipsField.commitPending].
+     * Es la única validación con efecto, y puede tenerlo porque el diálogo sólo valida
+     * al aceptar —no llama a `initValidation`—.
      */
     override fun doValidate(): ValidationInfo? =
         if (stripTrigger(bodyField.text).isBlank()) {
             ValidationInfo(TasklaneBundle.message("dialog.task.empty"), bodyField.component)
         } else {
-            null
+            anchorsField.commitPending()
         }
 
     val body: String get() = stripTrigger(bodyField.text).trim()

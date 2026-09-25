@@ -15,24 +15,43 @@ object TaskCopyText {
         val body = task.body
         if (body.isEmpty()) return ""
 
-        val plain = stripMarkup(task)
-        val sourceLines = body.lines()
-        val plainLines = plain.lines()
-
-        return plainLines
-            .mapIndexedNotNull { index, line ->
-                val source = sourceLines.getOrNull(index).orEmpty()
-                // Una referencia de imagen sola no deja una línea vacía en la copia.
-                if (source.isNotBlank() && line.isBlank()) null else line.trimEnd()
+        // El código entre vallas se copia literal y sin las vallas (2.8.0): quitarle el
+        // «Markdown» se comería los `*` de un puntero o las `` ` `` de una plantilla.
+        // Lo demás se copia por tramos de prosa, como antes.
+        val lines = body.lines()
+        val roles = CodeFence.roles(lines)
+        val out = mutableListOf<String>()
+        var start = 0
+        while (start < lines.size) {
+            val role = roles[start]
+            var end = start + 1
+            while (end < lines.size && roles[end] == role) end++
+            val chunk = lines.subList(start, end)
+            when (role) {
+                CodeFence.Role.PROSE -> out += plainProse(chunk.joinToString("\n"))
+                CodeFence.Role.CODE -> out += chunk.map(String::trimEnd)
+                CodeFence.Role.FENCE -> Unit
             }
+            start = end
+        }
+        return out
             .dropWhile(String::isEmpty)
             .dropLastWhile(String::isEmpty)
             .joinToString("\n")
     }
 
+    private fun plainProse(prose: String): List<String> {
+        val plain = stripMarkup(prose)
+        val sourceLines = prose.lines()
+        return plain.lines().mapIndexedNotNull { index, line ->
+            val source = sourceLines.getOrNull(index).orEmpty()
+            // Una referencia de imagen sola no deja una línea vacía en la copia.
+            if (source.isNotBlank() && line.isBlank()) null else line.trimEnd()
+        }
+    }
+
     /** Sustituye enlaces Markdown y referencias de imagen antes de quitar el énfasis. */
-    private fun stripMarkup(task: Task): String {
-        val body = task.body
+    private fun stripMarkup(body: String): String {
         val replacements = buildList {
             ImageRefParser.parse(body).forEach { add(Replacement(it.range, "")) }
             LinkExtractor.extract(body)

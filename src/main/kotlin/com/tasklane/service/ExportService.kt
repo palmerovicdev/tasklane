@@ -32,6 +32,9 @@ import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.ui.toolwindow.TasklanePanel
+import java.awt.Toolkit
+import java.awt.datatransfer.Clipboard
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.io.FileOutputStream
 import java.io.OutputStreamWriter
@@ -120,22 +123,74 @@ class ExportService(private val project: Project) {
             object : ProgressTask.Backgroundable(project, TasklaneBundle.message("export.progress", request.size), true) {
                 private val text = StringBuilder()
                 private var written = 0
+                private var copied = false
 
                 override fun run(indicator: ProgressIndicator) {
                     written = write(request, TaskExporter.Stream(text, config, format), indicator)
+                    if (written > 0) copied = putOnClipboard(text.toString())
                 }
 
-                override fun onSuccess() {
-                    if (written == 0) {
-                        notify(TasklaneBundle.message("export.empty"), NotificationType.INFORMATION)
-                        return
-                    }
-                    CopyPasteManager.getInstance().setContents(StringSelection(text.toString()))
-                    notify(TasklaneBundle.message("export.copied", written), NotificationType.INFORMATION)
+                /** Lo que se dice al final es lo que pasó, no lo que se pidió. Ver [putOnClipboard]. */
+                override fun onSuccess() = when {
+                    written == 0 -> notify(TasklaneBundle.message("export.empty"), NotificationType.INFORMATION)
+                    copied -> notify(TasklaneBundle.message("export.copied", written), NotificationType.INFORMATION)
+                    else -> notify(TasklaneBundle.message("export.clipboard.failed", written), NotificationType.ERROR)
+                }
+
+                override fun onThrowable(error: Throwable) {
+                    thisLogger().warn("Tasklane: no se pudo copiar al portapapeles", error)
+                    notify(TasklaneBundle.message("export.file.failed", error.message.orEmpty()), NotificationType.ERROR)
                 }
             },
         )
     }
+
+    /**
+     * Deja [content] en el portapapeles y **comprueba que llegó**. Devuelve si lo hizo.
+     *
+     * Existe porque copiar puede fallar **en silencio**. `CopyPasteManager` acaba en
+     * `ClipboardSynchronizer`, y ahí un portapapeles ocupado —otra aplicación lo tiene
+     * tomado: un gestor de historial, un menú que se está cerrando— sale por un
+     * `IllegalStateException` que la plataforma **intenta una sola vez** —su
+     * `getRetries()` devuelve 1—, manda a `LOG.debug` y se traga: la llamada vuelve como
+     * si nada. Hasta la 2.6.1 lo siguiente que hacía esto era anunciar «N tareas
+     * copiadas», así que el aviso salía, el portapapeles seguía con lo de antes y no
+     * quedaba rastro de por qué. Un aviso que miente es peor que un fallo, porque quien
+     * copia cierra la ventana creyendo que tiene el texto a salvo.
+     *
+     * Así que se escribe, se **relee del portapapeles del sistema** —no del propio
+     * `CopyPasteManager`, que devuelve lo que él mismo se apuntó y diría que sí aunque la
+     * escritura no hubiera salido— y, si no está, se reintenta: primero por el camino del
+     * IDE, que es el que además alimenta el historial de `⌘⇧V`, y después contra el
+     * portapapeles del sistema a pelo. Entre intento e intento se espera, que es lo único
+     * que arregla a quien lo tenía tomado un instante.
+     *
+     * Se llama **desde el hilo de fondo** y no desde `onSuccess` a propósito: al EDT sólo
+     * salta la escritura, y con [ModalityState.any] —igual que en «Exportar y quitar»—
+     * para que ni un diálogo ni un menú abierto la dejen esperando en la cola. La
+     * relectura se queda en el hilo de fondo: son diez mil tareas como mucho, pero son
+     * hasta ~20 MB, y eso no se le pone delante al hilo de interfaz por comprobar.
+     */
+    private fun putOnClipboard(content: String): Boolean {
+        if (content.isEmpty()) return false
+        repeat(CLIPBOARD_TRIES) { round ->
+            if (round > 0) runCatching { Thread.sleep(CLIPBOARD_RETRY_MS) }
+            // El camino del IDE primero: es el que además alimenta el historial de `⌘⇧V`.
+            if (attempt(content) { CopyPasteManager.getInstance().setContents(StringSelection(content)) }) return true
+            if (attempt(content) { systemClipboard()?.setContents(StringSelection(content), null) }) return true
+        }
+        thisLogger().warn("Tasklane: el portapapeles no admitió ${content.length} caracteres")
+        return false
+    }
+
+    /** Un intento: escribir en el EDT y releer aquí. Lo que no llegó al sistema no está copiado. */
+    private fun attempt(content: String, put: () -> Unit): Boolean = runCatching {
+        ApplicationManager.getApplication().invokeAndWait(put, ModalityState.any())
+        systemClipboard()?.getData(DataFlavor.stringFlavor) == content
+    }.getOrDefault(false)
+
+    private fun systemClipboard(): Clipboard? =
+        runCatching { Toolkit.getDefaultToolkit().systemClipboard }.getOrNull()
 
     private fun toFile(request: TasklanePanel.ExportRequest, target: Path) {
         val config = TaskService.getInstance(project).snapshot.value.config
@@ -344,12 +399,12 @@ class ExportService(private val project: Project) {
                     }
                     written = if (target != null) writeAtomically(target, write = export) else export(text!!)
 
-                    // 2. Dejar lo exportado a salvo ANTES de borrar nada.
-                    if (text != null && text.isNotEmpty()) {
-                        ApplicationManager.getApplication().invokeAndWait(
-                            { CopyPasteManager.getInstance().setContents(StringSelection(text.toString())) },
-                            ModalityState.any(),
-                        )
+                    // 2. Dejar lo exportado a salvo ANTES de borrar nada, y comprobar que
+                    //    está ahí: el portapapeles puede rechazar el texto sin decirlo —ver
+                    //    `putOnClipboard`—, y aquí eso sería borrar las tareas después de
+                    //    haber perdido la única copia. Si no llega, no se borra nada.
+                    if (text != null && text.isNotEmpty() && !putOnClipboard(text.toString())) {
+                        throw ClipboardRefused(written)
                     }
 
                     // 3. Borrar. Ya no se cancela: ver `TaskService.removeRepo`.
@@ -391,6 +446,7 @@ class ExportService(private val project: Project) {
                     val message = when (error) {
                         is IncompleteExport ->
                             TasklaneBundle.message("export.remove.incomplete", ref.displayName, error.written, error.expected)
+                        is ClipboardRefused -> TasklaneBundle.message("export.clipboard.failed", error.written)
                         else -> TasklaneBundle.message("export.file.failed", error.message.orEmpty())
                     }
                     thisLogger().warn("Tasklane: «Exportar y quitar» no terminó para $repo", error)
@@ -403,6 +459,10 @@ class ExportService(private val project: Project) {
     /** Lo exportado no cuadra con lo que la foto contaba: no se borra nada. */
     private class IncompleteExport(val written: Int, val expected: Int) :
         IllegalStateException("exportadas $written de $expected")
+
+    /** El portapapeles no admitió lo exportado: tampoco se borra nada. */
+    private class ClipboardRefused(val written: Int) :
+        IllegalStateException("el portapapeles rechazó $written tareas")
 
     /**
      * Las tareas de una foto de repositorio, **estado a estado** en el orden de las
@@ -642,6 +702,16 @@ class ExportService(private val project: Project) {
          * un fichero.
          */
         const val CLIPBOARD_LIMIT = 10_000
+
+        /**
+         * Cuántas veces se intenta dejar el texto en el portapapeles, y cuánto se espera
+         * entre intentos. Quien lo tiene tomado —un gestor de historial, un menú que se
+         * cierra— lo suelta en cuanto termina lo suyo: tres intentos con una décima de
+         * segundo por medio cubren eso sin que nadie note la espera, y lo que no entre en
+         * ese margen no es un tropiezo sino un fallo, y se dice. Ver [putOnClipboard].
+         */
+        const val CLIPBOARD_TRIES = 3
+        const val CLIPBOARD_RETRY_MS = 120L
 
         fun getInstance(project: Project): ExportService = project.service()
     }

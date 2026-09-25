@@ -40,6 +40,20 @@ sealed interface TaskCommand {
         val anchors: List<CodeAnchor> = emptyList(),
     ) : RepoScoped
 
+    /**
+     * Varias tareas nuevas **de una vez**: una transacción y un snapshot (2.8.0).
+     *
+     * Lo pide importar los comentarios TODO de un proyecto, que son decenas o cientos
+     * de golpe. Mandar un [Create] por cada uno serían otras tantas transacciones y
+     * repintados, que es la lección de [Batch] aplicada a crear. No cabe dentro de
+     * [Batch] porque aquél compone comandos sobre tareas que ya existen, y aquí no hay
+     * ninguna que leer antes.
+     *
+     * Cada [tasks] se planifica como su [Create] suelto —mismas normalizaciones—, en su
+     * orden, y todas en [repo]: el de cada una se ignora.
+     */
+    data class CreateMany(override val repo: RepoKey, val tasks: List<Create>) : RepoScoped
+
     data class UpdateBody(override val repo: RepoKey, val id: TaskId, val body: String) : RepoScoped
 
     /**

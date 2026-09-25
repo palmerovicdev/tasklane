@@ -1,0 +1,4 @@
+fun login(user: User) {
+    <spot>// TODO: retry when the token has expired</spot>
+    api.authenticate(user)
+}

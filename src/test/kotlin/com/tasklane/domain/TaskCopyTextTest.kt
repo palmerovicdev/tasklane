@@ -43,4 +43,11 @@ class TaskCopyTextTest {
 
         assertEquals("Visita https://ejemplo.com/a\n\nListo", TaskCopyText.plain(task(body)))
     }
+
+    @Test
+    fun `el codigo entre vallas se copia literal y sin las vallas`() {
+        val body = "Probar **esto**\n```sh\nls *.kt | grep `x`\n```\nY ya"
+
+        assertEquals("Probar esto\nls *.kt | grep `x`\nY ya", TaskCopyText.plain(task(body)))
+    }
 }

@@ -111,6 +111,33 @@ internal class MarkdownField(
     }
 
     /**
+     * El botón de código: `` ` `` alrededor de lo seleccionado si es un trozo de una
+     * línea, y un bloque ```` ``` ```` alrededor de las líneas enteras si la selección
+     * cruza alguna (2.8.0). Rodear tres líneas de comillas sueltas sería código en
+     * línea que la tarjeta no sabe pintar como bloque.
+     */
+    fun toggleCode() {
+        val editor = component.editor ?: return
+        val caret = editor.caretModel.currentCaret
+        val document = editor.document
+        val first = document.getLineNumber(caret.selectionStart)
+        // Una selección que acaba justo al principio de una línea no la incluye.
+        val last = document.getLineNumber(caret.selectionEnd).let { line ->
+            if (line > first && caret.selectionEnd == document.getLineStartOffset(line)) line - 1 else line
+        }
+        if (first == last) return wrapSelection("`")
+        edit(editor) {
+            val end = document.getLineEndOffset(last)
+            val start = document.getLineStartOffset(first)
+            document.insertString(end, "\n```")
+            document.insertString(start, "```\n")
+            // El cursor tras la valla de apertura: es donde se escribe el lenguaje.
+            caret.removeSelection()
+            caret.moveToOffset(start + 3)
+        }
+    }
+
+    /**
      * Antepone [marker] a cada línea tocada por la selección. [numbered] renumera
      * desde uno en vez de repetir el mismo marcador, que es lo que distingue una
      * lista ordenada de una de puntos.

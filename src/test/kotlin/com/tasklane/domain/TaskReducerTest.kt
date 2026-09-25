@@ -1,5 +1,6 @@
 package com.tasklane.domain
 
+import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
 import com.tasklane.domain.model.AttachmentId
@@ -372,5 +373,32 @@ class TaskReducerTest {
     fun `el texto bajo la imagen si cuenta como detalle`() {
         val task = create("Arreglar el login\n![](tasklane:$sha)\nPasa con Safari").activeTasks.single()
         assertTrue(task.hasDetail)
+    }
+
+    @Test
+    fun `crear muchas es crear cada una, en orden y con ordenes seguidos`() {
+        val repo = RepoKey.ROOT
+        val empty = Model()
+        val model = reducer.step(
+            empty,
+            TaskCommand.CreateMany(
+                repo,
+                listOf(
+                    TaskCommand.Create(repo, "  Primera  ", tags = listOf("todo")),
+                    TaskCommand.Create(repo, "   "),
+                    TaskCommand.Create(repo, "Segunda"),
+                ),
+            ),
+        )
+
+        val tasks = model.tasksOf(repo).sortedBy { it.order }
+        assertEquals(listOf("Primera", "Segunda"), tasks.map { it.body })
+        assertEquals(listOf("todo"), tasks.first().tags)
+        assertEquals(TaskStore.ORDER_GAP, tasks[1].order - tasks[0].order)
+    }
+
+    @Test
+    fun `el hueco de crear muchas es el del almacen`() {
+        assertEquals(TaskStore.ORDER_GAP, TaskReducer.CREATE_STEP)
     }
 }

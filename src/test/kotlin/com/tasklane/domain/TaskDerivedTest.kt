@@ -92,6 +92,7 @@ class TaskDerivedTest {
     private fun describe(block: DetailBlock): String = when (block) {
         is DetailBlock.Text -> "t:" + block.text
         is DetailBlock.Image -> "i:" + block.id.value
+        is DetailBlock.Code -> "c:" + block.lines.joinToString("/")
     }
 
     @Test
@@ -113,6 +114,36 @@ class TaskDerivedTest {
         val sha = "a".repeat(64)
         val task = task("Bug del boton\n![](tasklane:$sha)\nPasa en dark mode")
         assertEquals("Pasa en dark mode", task.description)
+    }
+
+    @Test
+    fun `un bloque entre vallas sale como codigo literal y sin las vallas`() {
+        val task = task("Arreglar el parser\n```kotlin\n  val *p = 1\n  if (a) b()\n```\nDespués **esto**")
+
+        assertEquals("Arreglar el parser", task.title)
+        val blocks = task.detailBlocks
+        assertEquals(2, blocks.size)
+        val code = blocks[0] as DetailBlock.Code
+        assertEquals(listOf("val *p = 1", "if (a) b()"), code.lines)
+        assertEquals("kotlin", code.language)
+        assertEquals("Después **esto**", (blocks[1] as DetailBlock.Text).text)
+        assertTrue(task.hasDetail)
+    }
+
+    @Test
+    fun `el titulo no es una valla`() {
+        val task = task("```\nnpm run build\n```\nFalla en CI")
+
+        assertEquals("Falla en CI", task.title)
+        assertEquals(listOf("npm run build"), (task.detailBlocks.single() as DetailBlock.Code).lines)
+    }
+
+    @Test
+    fun `un cuerpo que es solo codigo toma su primera linea de titulo`() {
+        val task = task("```\nuno\ndos\n```")
+
+        assertEquals("uno", task.title)
+        assertEquals(listOf("dos"), (task.detailBlocks.single() as DetailBlock.Code).lines)
     }
 
     @Test

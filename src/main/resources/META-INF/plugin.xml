@@ -374,6 +374,14 @@
 
         <!-- Los servicios de configuracion son light services (@Service + @State),
              asi que no se declaran aqui: la plataforma los descubre al usarlos. -->
+        <!-- Alt+Enter sobre un TODO: pasarlo a Tasklane (2.8.0). Sin <language>: vale
+             en cualquier fichero en el que el IDE reconozca un TODO. -->
+        <intentionAction>
+            <className>com.tasklane.code.TodoToTaskIntention</className>
+            <bundleName>messages.TasklaneBundle</bundleName>
+            <categoryKey>intention.todo.category</categoryKey>
+        </intentionAction>
+
         <projectConfigurable
             id="com.tasklane.settings"
             parentId="tools"
@@ -407,6 +415,14 @@
                 class="com.tasklane.ui.quickadd.NewTaskFromCodeAction"
                 icon="AllIcons.General.Add">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!-- Los TODO del codigo a Tasklane, de una vez (2.8.0). En Tools y en el menu
+             Export de la ventana, que es donde viven las demas entradas y salidas. -->
+        <action id="Tasklane.ImportTodos"
+                class="com.tasklane.ui.quickadd.ImportTodosAction"
+                icon="AllIcons.General.TodoDefault">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
 
@@ -533,6 +549,7 @@
             <separator/>
             <reference ref="Tasklane.SaveRepo"/>
             <reference ref="Tasklane.ExportXml"/>
+            <reference ref="Tasklane.ImportTodos"/>
             <separator/>
             <reference ref="Tasklane.ClearRepo"/>
             <reference ref="Tasklane.ExportAndRemoveRepo"/>

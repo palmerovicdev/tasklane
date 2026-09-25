@@ -46,7 +46,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 |---|---|
 | **Estados como pestañas** | Con su recuento en vivo, que respeta la búsqueda y el filtro. Cada pestaña recuerda su selección y sus grupos plegados, y la última abierta vuelve al reabrir |
 | **Una tarjeta por tarea** | Franja de prioridad, casilla para completar, título en hasta tres líneas, una línea del cuerpo y distintivos: prioridad, anclas de código, vencimiento, etiquetas, enlaces e imágenes, y fecha |
-| **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas; las tareas cerradas salen tachadas |
+| **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas, y bloques de código entre vallas con la fuente del editor; las tareas cerradas salen tachadas |
 | **Enlaces de un clic** | En el título y en cualquier línea del cuerpo, también en la gris. Acortados al pintarse, enteros al abrirse; el contador los lista todos |
 | **Desplegar la tarjeta** | Para leer el cuerpo entero y ver sus capturas sin salir de la lista; un clic en una captura la amplía |
 | **Ver una captura mientras programas** | La ventana de una captura ampliada se **fija** con la chincheta de su cabecera: se queda encima del editor y deja de cerrarse al pulsar fuera |
@@ -61,7 +61,8 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo. Etiquetas como fichas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
-| **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, y la tarjeta lleva de vuelta con un clic |
+| **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic |
+| **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
 | **El código enseña sus tareas** | Una marca en el margen o una pastilla en la línea, con el color de la prioridad, un tooltip con la tarea y un clic que la abre |
 | **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas, un selector, y búsqueda en todos a la vez |
 | **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
@@ -86,7 +87,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.6.1.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.8.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -521,10 +522,17 @@ es un cuelgue del IDE y de donde se pegue. Exportar va siempre en segundo plano,
 barra y cancelable, y lo que sale es la pestaña **en el momento de pulsar**, aunque se
 siga editando mientras se escribe.
 
+**«N tareas copiadas» significa que están ahí.** El portapapeles puede rechazar el texto
+—otra aplicación lo tiene tomado un instante: un gestor de historial, un menú que se
+cierra—, y la plataforma lo intenta una sola vez y se lo calla. Así que Tasklane escribe,
+**vuelve a leer el portapapeles del sistema**, reintenta, y si aun así no entró lo dice
+con un aviso de error en vez de cantar una copia que no existe.
+
 **Exportar y quitar.** Un repositorio marcado como ausente —su carpeta ya no está en
 disco— es el único que se puede quitar de la lista, y sólo por esta vía: se confirma,
 sus tareas salen al portapapeles —o a un fichero, si son más de 10.000—, se comprueba que
-salieron **todas**, y sólo entonces se borran sus datos. Mientras dura, el repositorio
+salieron **todas** y que el portapapeles **las admitió**, y sólo entonces se borran sus
+datos. Mientras dura, el repositorio
 queda en solo lectura: lo que se borra es exactamente lo que se exportó. Es la salida que
 hace honesto el trato con los repositorios ausentes, que nunca ocultan ni borran nada por
 su cuenta.
@@ -646,7 +654,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.5.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.8.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -692,9 +700,17 @@ su nombre a un lector de pantalla.
 
 **Una fase cerrada subía la versión media:** la fase N dejaba el plugin en `0.N.0`, y
 la `1.0.0` quedaba para cuando estuvieran las ocho. Ya están: la `1.0.0` cierra la
-Fase 7 y con ella el plan. De aquí en adelante manda **semver** sobre lo publicado —
-*patch* para correcciones, *minor* para funcionalidad nueva compatible, *major* para lo
-que rompa el formato de fichero o el mínimo de plataforma—.
+Fase 7 y con ella el plan.
+
+De aquí en adelante, cada número de la versión `X.Y.Z` dice qué trae:
+
+| Número | Sube con | Ejemplo |
+|---|---|---|
+| **Primero** (`X`) | Una funcionalidad **grande** | `2.0.0`: las tareas pasan a una base SQLite por proyecto |
+| **Segundo** (`Y`) | Una funcionalidad **pequeña** | `2.8.0`: un ancla de código se puede escribir en el diálogo |
+| **Tercero** (`Z`) | Una **corrección de fallos**, sin nada nuevo | `2.6.3`: el desplazamiento y el alto de las tarjetas |
+
+Al subir un número, los de su derecha vuelven a cero.
 
 | | | | |
 |---|---|---|---|
@@ -834,7 +850,7 @@ workflow [`release.yml`](.github/workflows/release.yml) comprueba que la etiquet
 3. [`CHANGELOG.md`](CHANGELOG.md)
 
 ```bash
-git tag v2.6.1 && git push origin v2.6.1
+git tag v2.6.3 && git push origin v2.6.3
 ```
 
 **Secretos del repositorio.** Los cuatro van como *secrets* de GitHub Actions y no

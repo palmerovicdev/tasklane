@@ -269,6 +269,52 @@ class ListSyncTest {
         assertTrue("y pulsarlo trae más", rows().filterIsInstance<GroupNode>().size > 50)
     }
 
+    /**
+     * Bajar por un grupo no puede cerrar los de debajo.
+     *
+     * El presupuesto de [GroupBudget] descuenta lo que cada grupo lleva **cargado**, así
+     * que pedir páginas en el primero lo agota; hasta la 2.6.2 eso volvía a plegar a los
+     * demás en el siguiente repintado, y la lista se vaciaba por debajo justo mientras el
+     * usuario se desplazaba. Lo que el presupuesto abrió una vez se queda abierto: ya
+     * está medido, y cerrarlo sólo sirve para dar el salto.
+     */
+    @Test
+    fun `pedir mas paginas no cierra los grupos de abajo`() {
+        val paginas = GroupBudget.FIRST_PAINT_ROWS / TaskPager.PAGE + 1
+        val grande = many(TaskPager.PAGE * (paginas + 1), tags = listOf("aaa"))
+        val pequeno = many(3).map { it.copy(id = TaskId("z${it.id.value}"), tags = listOf("zzz")) }
+        val sync = list(grande + pequeno, Grouping.BY_TAG)
+        sync.sync()
+
+        val ultima = rows().filterIsInstance<GroupNode>().last()
+        assertTrue("el grupo de abajo empieza abierto", tree.isExpanded(TreePath(ultima.path)))
+
+        // Desplazarse por el grupo de arriba hasta gastar el presupuesto entero.
+        repeat(paginas) {
+            val sentinel = rows().filterIsInstance<MoreNode>()
+                .first { it.direction == MoreNode.Direction.AFTER }
+            sync.loadMore(sentinel)
+        }
+
+        assertTrue("y sigue abierto después de bajar", tree.isExpanded(TreePath(ultima.path)))
+        assertEquals("con sus filas puestas", pequeno.size, ultima.childCount)
+    }
+
+    /** Pero cerrarlo a mano sigue mandando, y el siguiente repintado no lo reabre. */
+    @Test
+    fun `cerrar a mano manda sobre el presupuesto`() {
+        val sync = list(many(6, tags = listOf("api")), Grouping.BY_TAG)
+        sync.sync()
+        val header = rows().first() as GroupNode
+
+        sync.toggled(header.key, expanded = false)
+        sync.sync()
+        sync.sync()
+
+        assertFalse(tree.isExpanded(TreePath(header.path)))
+        assertEquals(0, header.childCount)
+    }
+
     // ------------------------------------------------------------------ enseñar
 
     @Test

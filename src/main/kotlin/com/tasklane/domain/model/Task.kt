@@ -1,5 +1,6 @@
 package com.tasklane.domain.model
 
+import com.tasklane.domain.text.CodeFence
 import com.tasklane.domain.text.ImageRefParser
 import java.time.Instant
 
@@ -60,20 +61,28 @@ data class Task(
      * el cursor—, y sin esta regla la fila del árbol mostraría 64 caracteres de SHA en
      * vez de lo que el usuario escribió. Si no hay ninguna otra línea, se cae a la
      * primera no vacía: una tarea siempre tiene que enseñar algo.
+     *
+     * **Tampoco lo es una valla de código ni lo que va dentro** (2.8.0): una tarea que
+     * empieza por ```` ```kotlin ```` tendría ese texto por título. Se busca la primera
+     * línea de prosa; si el cuerpo es sólo un bloque, su primera línea de código.
      */
     val titleRange: IntRange by lazy(LazyThreadSafetyMode.PUBLICATION) {
         run {
             var fallback = IntRange.EMPTY
+            val fence = CodeFence()
             var index = 0
             while (index < body.length) {
                 val eol = body.indexOf('\n', index).takeIf { it >= 0 } ?: body.length
+                val role = fence.next(body.substring(index, eol))
                 var from = index
                 var to = eol
                 while (from < to && body[from].isWhitespace()) from++
                 while (to > from && body[to - 1].isWhitespace()) to--
-                if (from < to) {
+                if (from < to && role != CodeFence.Role.FENCE) {
                     val range = from until to
-                    if (ImageRefParser.strip(body.substring(from, to)).isNotBlank()) return@run range
+                    if (role == CodeFence.Role.PROSE && ImageRefParser.strip(body.substring(from, to)).isNotBlank()) {
+                        return@run range
+                    }
                     if (fallback.isEmpty()) fallback = range
                 }
                 index = eol + 1
@@ -95,7 +104,9 @@ data class Task(
      * cuentan: de ésas ya avisa el indicador de la fila, y un «…» que al abrir la
      * tarea no enseña ni una palabra más es una promesa incumplida.
      */
-    val hasDetail: Boolean by lazy(LazyThreadSafetyMode.PUBLICATION) { detailLines.isNotEmpty() }
+    val hasDetail: Boolean by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        detailBlocks.any { it !is DetailBlock.Image }
+    }
 
     /**
      * El cuerpo bajo el título en el orden en que se lee: los párrafos de texto y las
@@ -116,6 +127,9 @@ data class Task(
      * Las imágenes de la **línea del título** también salen aquí. El título es esa
      * línea *sin* sus imágenes —ver [titleRange]—, así que si no se recogieran en este
      * punto no se pintarían en ningún sitio.
+     *
+     * Lo que va entre vallas ```` ``` ```` sale como **un** [DetailBlock.Code] con sus
+     * líneas tal cual (2.8.0): ni Markdown, ni enlaces, ni capturas dentro.
      */
     val detailBlocks: List<DetailBlock> by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val title = titleRange
@@ -123,11 +137,40 @@ data class Task(
             emptyList()
         } else {
             buildList {
+                val fence = CodeFence()
+                var code: MutableList<String>? = null
+                var language = ""
+                fun closeCode() {
+                    val lines = code ?: return
+                    code = null
+                    val dedented = CodeFence.dedent(lines).dropWhile(String::isEmpty).dropLastWhile(String::isEmpty)
+                    if (dedented.isNotEmpty()) add(DetailBlock.Code(dedented, language))
+                }
                 var index = 0
                 while (index < body.length) {
                     val eol = body.indexOf('\n', index).takeIf { it >= 0 } ?: body.length
                     val raw = body.substring(index, eol)
                     val isTitleLine = title.first >= index && title.last < eol
+                    when (fence.next(raw)) {
+                        CodeFence.Role.FENCE -> {
+                            if (code == null) {
+                                code = mutableListOf()
+                                language = fence.language
+                            } else {
+                                closeCode()
+                            }
+                            index = eol + 1
+                            continue
+                        }
+                        CodeFence.Role.CODE -> {
+                            // La línea del título ya se pinta arriba: sólo pasa cuando
+                            // el cuerpo es un bloque y nada más. Ver [titleRange].
+                            if (!isTitleLine) (code ?: mutableListOf<String>().also { code = it }) += raw
+                            index = eol + 1
+                            continue
+                        }
+                        CodeFence.Role.PROSE -> Unit
+                    }
                     val refs = ImageRefParser.parse(raw)
                     if (!isTitleLine) {
                         val stripped = if (refs.isEmpty()) raw else ImageRefParser.strip(raw)
@@ -138,6 +181,7 @@ data class Task(
                     for (ref in refs) add(DetailBlock.Image(ref.id))
                     index = eol + 1
                 }
+                closeCode()
             }
         }
     }
@@ -224,6 +268,13 @@ sealed interface DetailBlock {
     class Text(val text: String, val links: List<TaskLink> = emptyList()) : DetailBlock
 
     class Image(val id: AttachmentId) : DetailBlock
+
+    /**
+     * Un bloque de código entre vallas, con sus líneas **literales**: sin la sangría
+     * común y con los tabuladores hechos espacios, pero sin tocar nada más. [language]
+     * es lo que seguía a la valla de apertura, o vacío.
+     */
+    class Code(val lines: List<String>, val language: String = "") : DetailBlock
 }
 
 /**

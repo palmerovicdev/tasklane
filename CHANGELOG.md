@@ -9,6 +9,118 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.8.0]
+
+Menor sin cambio de formato: un ancla de código se puede escribir, los TODO del código
+pasan a Tasklane y el cuerpo entiende bloques de código.
+
+### Añadido
+- **Bloques de código entre vallas.** Lo que va entre dos líneas ```` ``` ```` se pinta
+  en la tarjeta como un bloque: con la fuente del editor, sobre el mismo fondo que el
+  `código` en línea, una línea de tarjeta por línea de código y **sin interpretar
+  nada** de dentro —un `*` de un puntero ya no abre una cursiva—. Las líneas largas se
+  recortan en vez de partirse, porque partir una línea de código inventa dos que no
+  existen. Una valla sin cerrar llega hasta el final, como en CommonMark, y el título
+  de la tarea nunca es una valla.
+- En el diálogo, el botón de **código** envuelve en una valla las líneas enteras cuando
+  la selección cruza más de una; con un trozo de una línea sigue poniendo `` ` ``.
+- Copiar una tarea copia el código entre vallas **literal** y sin las vallas.
+- **`Alt+Enter` sobre un comentario TODO → *Move TODO to Tasklane*.** Abre el diálogo
+  de tarea nueva con el texto del TODO, su palabra clave como etiqueta (`#todo`,
+  `#fixme`) y el ancla en esa línea; al crear, **quita el comentario** del código y la
+  marca de la tarea ocupa su sitio. `⌘Z` en el editor lo devuelve. Si el comentario
+  lleva algo más que el TODO —un KDoc con una línea de TODO dentro—, la entrada se
+  llama *Create Tasklane task from TODO* y el comentario se queda. Usa los patrones de
+  TODO del propio IDE (*Settings | Editor | TODO*).
+- ***Import TODO Comments…*** (menú *Tools* y menú *Export* de la ventana): todos los
+  TODO del proyecto en una lista para elegir, y cada uno pasa a ser una tarea anclada a
+  su línea, en una sola operación. No toca el código. Los que ya tienen su tarea salen
+  desmarcados, así que importar dos veces no duplica.
+- **Autocompletado de rutas** en el campo *Code*: se escribe `deploy` y ofrece
+  `plans/website_deployment_live_activity_implementation.md`; luego se añade `:28`.
+- **El diálogo de la tarea acepta un sitio del código escrito a mano.** En la fila
+  *Code* se escribe `plans/website_deployment_live_activity_implementation.md:28` —la
+  ruta relativa a la carpeta del proyecto y la línea— y `Intro` la convierte en la
+  misma ancla que saldría de crear la tarea desde el editor con el cursor ahí: con su
+  marca en el margen, su tooltip, su clic de vuelta y el texto de la línea guardado
+  para reencontrarla cuando el fichero cambie. Sirve para el caso en que el sitio ya
+  viene escrito —una traza, un chat, el plan que acaba de dejar un agente— y abrir el
+  fichero sólo para volver a señalarlo era un rodeo.
+- Acepta también `ruta:línea:columna`, `ruta` a secas (el fichero por su principio),
+  `ruta#L28` como se copia de GitHub y `ruta(28)` como lo escriben algunas trazas; una
+  ruta absoluta de dentro del proyecto se guarda relativa.
+- Una ruta escrita y sin confirmar **cuenta** al aceptar el diálogo, como las
+  etiquetas. Si no existe, es una carpeta o la línea se sale del fichero, el diálogo se
+  para y lo dice junto al campo, en vez de guardar un ancla rota.
+- El fichero se busca refrescando el disco: un fichero que otro programa acaba de
+  escribir y el IDE aún no ha visto se encuentra igual.
+
+### Cambiado
+- `TaskCommand.CreateMany`: varias tareas nuevas en una transacción y un repintado. Lo
+  estrena la importación de TODO.
+- **La fila *Code* se ve siempre**, también sin anclas: además de enseñarlas, ahora es
+  donde se escriben.
+
+### Corregido
+- **Crear una tarea desde la tool window o con `⌘⌥R` ya no pierde sus anclas.** Esos
+  dos caminos no pasaban las anclas del diálogo al crear; hasta ahora no importaba
+  porque ahí no se podía poner ninguna.
+
+## [2.6.3]
+
+Parche sin cambio de formato: el desplazamiento de la lista y el alto de las tarjetas.
+
+### Corregido
+- **La lista ya no se dibuja con las alturas del ancho anterior.** El árbol guarda la
+  altura de cada fila y el renderer envuelve el título contra el ancho que hay en ese
+  momento; al cambiar de ancho había que tirarle las medidas viejas, y eso se hacía
+  desde un `componentResized`, que **no es una llamada sino un evento encolado**. Entre
+  encolarlo y atenderlo, Swing termina de repartir el sitio y pinta: esa pasada salía
+  con el ancho nuevo y las alturas viejas —tarjetas a las que les falta el último
+  renglón— y, peor, el `JScrollPane` decidía con esas mismas alturas si hacía falta
+  barra y hasta dónde llega la lista, así que la lista se anunciaba más corta de lo que
+  es y la última tarjeta se quedaba cortada contra el borde sin forma de bajar más.
+  Ahora las medidas se tiran en el `setBounds` del propio árbol, dentro del reparto de
+  sitio y antes de pintar. Y el ancho cambia solo, sin tocar la tool window: el árbol
+  mide exactamente lo que se ve, así que **aparecer la barra de desplazamiento ya lo
+  estrecha**.
+- **Desplazarse ya no remide la lista entera.** Aquel `componentResized` también
+  saltaba cuando lo que cambiaba era el **alto** del árbol, que es lo que pasa cada vez
+  que entra una página, se despliega un grupo o llega una captura. Remedir mueve las
+  filas de arriba, y el hueco visible se guarda en píxeles: la lista daba un salto justo
+  mientras se bajaba por ella. Ahora sólo el ancho remide, y cuando hay que remedir por
+  otra cosa —una captura que llega, una tarjeta que se despliega— se apunta qué fila
+  está asomando y se vuelve a dejar donde estaba.
+- **Bajar por un grupo ya no cierra los de abajo.** El presupuesto de filas del primer
+  pintado descuenta lo que cada grupo lleva cargado, así que pedir páginas en el grupo
+  por el que uno se desplaza lo agotaba y plegaba a los demás en el siguiente
+  repintado: dos «cargar más» bastaban, y media lista desaparecía por debajo. Lo que el
+  presupuesto abre se queda abierto; cerrarlo sigue siendo cosa de quien lo pulsa.
+
+## [2.6.2]
+
+Parche sin cambio de formato: copiar deja de mentir.
+
+### Corregido
+- **«N tareas copiadas» ya sólo se dice cuando el texto está de verdad en el
+  portapapeles.** Copiar acababa en `CopyPasteManager`, y ahí un portapapeles ocupado
+  —un gestor de historial, un menú cerrándose— sale por un `IllegalStateException` que
+  la plataforma **intenta una sola vez**, manda a `LOG.debug` y se traga: la llamada
+  vuelve como si nada. Hasta la 2.6.1 lo siguiente era anunciar la copia, así que el
+  aviso salía, el portapapeles seguía con lo de antes y no quedaba rastro de por qué.
+  Ahora se escribe, **se relee del portapapeles del sistema** —no del propio
+  `CopyPasteManager`, que devuelve lo que él mismo se apuntó—, se reintenta con una
+  pausa por medio y, si aun así no entra, se dice con un aviso de error en vez de
+  cantar una copia que no existe. Vale para las tres copias de la pestaña: el estado,
+  el grupo de fecha y la selección.
+- **«Exportar y quitar» ya no borra un repositorio cuya copia no ha podido comprobar.**
+  Era el mismo fallo con la peor consecuencia posible: el texto se daba por copiado y
+  las tareas se borraban detrás. Si el portapapeles rechaza lo exportado, el
+  repositorio se queda donde estaba.
+- **Una copia que se rompe a mitad ahora se explica.** Ese camino no tenía
+  `onThrowable`, así que un error leyendo las tareas se quedaba en el log del IDE y en
+  la ventana no pasaba nada.
+
 ## [2.6.1]
 
 Menor sin cambio de formato: mirar una captura deja de ser un vistazo y pasa a poder

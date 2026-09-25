@@ -31,7 +31,7 @@ internal object MarkdownToolbar {
         val group = DefaultActionGroup(
             button("bold", TasklaneIcons.FormatBold) { field.wrapSelection("**") },
             button("italic", TasklaneIcons.FormatItalic) { field.wrapSelection("*") },
-            button("code", TasklaneIcons.FormatCode) { field.wrapSelection("`") },
+            button("code", TasklaneIcons.FormatCode) { field.toggleCode() },
             Separator.getInstance(),
             // El cursor queda entre los corchetes, que es donde se escribe el texto
             // del enlace; la URL va detrás, ya seleccionable de un doble clic.

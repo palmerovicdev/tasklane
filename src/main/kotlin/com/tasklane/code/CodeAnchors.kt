@@ -13,6 +13,7 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.tasklane.TasklaneBundle
+import com.tasklane.domain.model.AnchorReference
 import com.tasklane.domain.model.AnchorResolver
 import com.tasklane.domain.model.CodeAnchor
 
@@ -140,7 +141,65 @@ object CodeAnchors {
         return if (path.startsWith("$base/")) path.substring(base.length + 1) else path
     }
 
+    /** Lo que sale de [fromReference]: el ancla, o por qué no la hay. */
+    sealed interface Lookup {
+        data class Found(val anchor: CodeAnchor) : Lookup
+        data class Missing(val path: String) : Lookup
+        data class Folder(val path: String) : Lookup
+        data class OutOfRange(val path: String, val lines: Int) : Lookup
+    }
+
+    /**
+     * Convierte una ruta escrita a mano en el mismo ancla que habría salido de poner el
+     * cursor ahí: ruta relativa al proyecto, línea, columna **y el texto de la línea**.
+     * Lo último es lo que importa: sin él, [AnchorResolver] no puede reencontrar la
+     * línea cuando el fichero cambie, y el ancla escrita envejecería peor que la
+     * capturada.
+     *
+     * Busca **refrescando** el sistema de ficheros virtual. El caso para el que existe
+     * es un fichero que otro programa acaba de escribir —un plan que deja un agente, un
+     * informe de un test— y que el IDE todavía no ha visto: sin refrescar, diría que no
+     * existe un fichero que el usuario tiene delante en el Finder. Por eso se llama
+     * desde el EDT y **fuera** de una read action, que un refresco síncrono no admite.
+     *
+     * Una línea más allá del final es un error y no se acota: quien escribe `:280` en
+     * un fichero de 28 líneas se ha equivocado de fichero o de número, y colocar el
+     * ancla en la última línea en silencio escondería el error hasta que alguien la
+     * pulsara.
+     */
+    fun fromReference(project: Project, reference: AnchorReference): Lookup {
+        val fs = LocalFileSystem.getInstance()
+        val base = project.basePath?.trimEnd('/')
+        val absolute = reference.path.startsWith("/") || WINDOWS_ROOT.containsMatchIn(reference.path)
+        val file = if (absolute) {
+            fs.refreshAndFindFileByPath(reference.path)
+        } else {
+            base?.let { fs.refreshAndFindFileByPath("$it/${reference.path}") }
+        } ?: return Lookup.Missing(reference.path)
+        if (file.isDirectory) return Lookup.Folder(reference.path)
+
+        val path = pathOf(project, file)
+        return ReadAction.computeBlocking<Lookup, RuntimeException> {
+            // Sin `Document` —binario o enorme— no hay líneas que contar: vale apuntar
+            // al fichero, pero no a una línea que no se puede comprobar.
+            val document = FileDocumentManager.getInstance().getDocument(file)
+                ?: return@computeBlocking if (reference.line == 0) {
+                    Lookup.Found(CodeAnchor.of(path, 0))
+                } else {
+                    Lookup.OutOfRange(path, 0)
+                }
+            val lines = maxOf(document.lineCount, 1)
+            if (reference.line >= lines) return@computeBlocking Lookup.OutOfRange(path, lines)
+            val text = if (document.lineCount == 0) "" else document.getText(
+                TextRange(document.getLineStartOffset(reference.line), document.getLineEndOffset(reference.line)),
+            )
+            Lookup.Found(CodeAnchor.of(path, reference.line, reference.column.coerceAtMost(text.length), text))
+        }
+    }
+
     // ------------------------------------------------------------------ internos
+
+    private val WINDOWS_ROOT = Regex("""^[A-Za-z]:/""")
 
     private fun lineText(editor: Editor, line: Int): String {
         val document = editor.document
