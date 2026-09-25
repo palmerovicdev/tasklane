@@ -12,13 +12,14 @@ import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 
 /**
- * Reordenar arrastrando la tarjeta por su franja (2.11.0), en una pestaña con orden manual.
+ * Reordenar arrastrando la tarjeta por su asa (2.11.0), en una pestaña con orden manual.
  *
- * **Por la franja y no por toda la tarjeta**, que es lo que parecería natural: arrastrar
+ * **Por el asa y no por toda la tarjeta**, que es lo que parecería natural: arrastrar
  * sobre la tarjeta ya selecciona su texto —ver [CardTextSelection]—, y un mismo gesto no
- * puede significar dos cosas. La franja de prioridad es el borde izquierdo de todas las
- * tarjetas, no tiene nada que pulsar, y el cursor de mover la anuncia al pasar por encima.
- * El mismo cambio se hace con `⌘⇧↑/↓` desde el teclado.
+ * puede significar dos cosas. El asa (⋮⋮) vive abajo a la derecha, en el hueco que la
+ * columna de controles deja libre, y sale bajo el ratón como el menú (2.11.1; en la 2.11.0
+ * era la franja de prioridad, ocho píxeles a los que costaba atinar). El mismo cambio se
+ * hace con `⌘⇧↑/↓` desde el teclado.
  *
  * **Dentro de su grupo.** Soltar en otro grupo —otro día, otra etiqueta— no puede
  * significar «ponla ahí»: el grupo sale de la tarea, no de dónde está. Así que fuera del

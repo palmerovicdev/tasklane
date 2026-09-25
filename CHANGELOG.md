@@ -9,6 +9,31 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.11.2]
+
+Sin cambio de formato: el asa de reordenar, mejor colocada.
+
+### Cambiado
+- **El asa ⋮⋮ va a media altura** del hueco que dejan el marcador y el menú, y **separada
+  4 px del borde derecho**. En la 2.11.1 iba pegada abajo y al borde, a la altura de la
+  línea de distintivos, y se leía como uno más de ellos.
+
+## [2.11.1]
+
+Sin cambio de formato: un asa para reordenar y casillas más grandes.
+
+### Cambiado
+- **El asa de reordenar pasa a la esquina de abajo a la derecha de la tarjeta**, bajo el
+  marcador y el menú: un hueco que la columna de controles dejaba siempre en blanco. Es el
+  mismo icono ⋮⋮ del arrastre de filas de *Settings*, sale bajo el ratón como el menú, y
+  el cursor de mover lo anuncia. No hace crecer ninguna tarjeta: la columna sigue midiendo
+  lo que miden sus controles. Sustituye al arrastre por la franja de prioridad de la
+  2.11.0, que eran ocho píxeles sin nada que dijera que se podían arrastrar.
+- **Las casillas de las listas de comprobación son más grandes.** Hasta ahora eran el
+  glifo `☐` de la fuente, que en macOS sale bastante más pequeño que una letra; ahora se
+  dibujan (`CheckBoxIcon`, 12 px), y las marcadas van rellenas en azul con su visto, como
+  las casillas del IDE. Al copiar la línea siguen saliendo como `☐` / `☑`.
+
 ## [2.11.0]
 
 Menor sin cambio de formato: orden manual por estado, y vuelven las listas de

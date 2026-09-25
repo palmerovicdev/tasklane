@@ -157,23 +157,19 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /**
      * Si la lista se puede reordenar arrastrando (2.11.0): la pestaña va a mano y no se
      * está buscando —buscando manda la relevancia, y soltar entre dos aciertos no diría
-     * nada del orden de verdad—. Lo pone la pestaña en cada repintado.
+     * nada del orden de verdad—. Lo pone la pestaña en cada repintado, y es lo que
+     * enciende el asa de [grip].
      */
     var reorderable: Boolean = false
 
     /**
-     * Si [point] cae sobre el asa de una tarjeta: la franja de prioridad y el margen hasta
-     * la casilla. Es por donde se arrastra para reordenar; el resto de la tarjeta se
-     * arrastra para seleccionar texto, y los dos gestos no pueden compartir sitio.
+     * Si [point] cae sobre el asa de una tarjeta. Es por donde se arrastra para reordenar;
+     * el resto de la tarjeta se arrastra para seleccionar texto, y los dos gestos no pueden
+     * compartir sitio. Hasta la 2.11.0 el asa era la franja de prioridad, de ocho píxeles:
+     * cuesta atinarle, y nada en ella decía que se pudiera arrastrar.
      */
-    fun isOnHandle(tree: JTree, point: Point): Boolean {
-        if (!reorderable) return false
-        val row = rowAtHeight(tree, point.y)
-        if (row < 0 || tree.getPathForRow(row)?.lastPathComponent !is TaskNode) return false
-        val bounds = paintedRowBounds(tree, row) ?: return false
-        val x = point.x - bounds.x
-        return x >= 0 && x < JBUI.scale(STRIPE + STRIPE_GAP)
-    }
+    fun isOnHandle(tree: JTree, point: Point): Boolean =
+        reorderable && targetAt(tree, point) == RowTarget.GRIP
 
     /**
      * El texto seleccionado a mano, o `null`. Lo mantiene [CardTextSelection]; aquí
@@ -284,6 +280,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Lo que responde al clic sobre un gemelo de sólo icono. Ver [priorityChip]. */
     private val iconTags = IdentityHashMap<SimpleColoredComponent, Any>()
 
+    /** La casilla que lleva cada línea como icono, para resolver su clic. Ver [checkRun]. */
+    private val lineChecks = IdentityHashMap<SimpleColoredComponent, Any>()
+
     /** Copiar el cuerpo completo de la tarea, sin metadatos ni Markdown. */
     private val copyButton = icon()
 
@@ -298,6 +297,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Desplegar y volver a plegar la tarjeta. Ver [showExpandIcon]. */
     private val expand = icon()
 
+    /**
+     * El asa de arrastrar para reordenar (2.11.1), en el hueco que la columna de controles
+     * deja siempre libre debajo del marcador y el menú. Sólo en una pestaña a mano, y
+     * como el menú, sólo se ve bajo el ratón. Ver [isOnHandle].
+     */
+    private val grip = icon()
+    private var gripActive = false
+
     /** Si cada control se puede pulsar ahora mismo. Ver [renderActions]. */
     private var bookmarkActive = false
     private var menuActive = false
@@ -309,6 +316,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * grupo, y de paso le devuelven al título el ancho de dos huecos (2.3.0).
      */
     private val actions = JPanel(ChipRow(gap = 0)).apply { isOpaque = false }
+
+    /**
+     * La columna de la derecha: los controles arriba y el asa abajo, en la esquina. No
+     * pide más alto que los controles —ver [EastColumn]—, así que el asa no hace crecer
+     * ninguna tarjeta: ocupa un hueco que ya estaba.
+     */
+    private val east = JPanel(EastColumn()).apply { isOpaque = false }
 
     private val meta = JPanel(ChipRow()).apply { isOpaque = false }
 
@@ -335,7 +349,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         actions.add(expand)
         actions.add(bookmark)
         actions.add(more)
-        add(actions, BorderLayout.EAST)
+        east.add(actions)
+        east.add(grip)
+        add(east, BorderLayout.EAST)
     }
 
     /**
@@ -438,6 +454,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         chips.forEach { it.isVisible = false }
         meta.isVisible = false
         actions.isVisible = false
+        grip.isVisible = false
     }
 
     /**
@@ -677,14 +694,18 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /**
      * La casilla de una línea de lista de comprobación (2.11.0), como un tramo más que se
      * pulsa: su etiqueta es la casilla, y quien atiende el clic —[RowClicks]— escribe o
-     * quita la `x` en el cuerpo. Un glifo y no un icono porque un `SimpleColoredComponent`
-     * lleva un solo icono, y ese sitio es de los distintivos.
+     * quita la `x` en el cuerpo.
+     *
+     * Desde la 2.11.1 el tramo es sólo un **sitio**: su texto no se pinta, [appendRuns] lo
+     * convierte en el icono de la línea —[CheckBoxIcon], del tamaño que haga falta y no
+     * del que dé la fuente— y [measure] le da el ancho del icono. Sigue siendo un tramo
+     * para que envolver, seleccionar y copiar cuenten con él sin saber que es un icono;
+     * sale siempre el primero de su línea, que es el único sitio donde cabe un icono.
      */
     private fun checkRun(check: CheckBox): Run {
         val task = pendingTask
         val tag = if (task == null) null else CheckTag(task, check.offset)
-        val style = if (check.checked) SimpleTextAttributes.GRAYED_ATTRIBUTES else SimpleTextAttributes.REGULAR_ATTRIBUTES
-        return Run(if (check.checked) CHECKED else UNCHECKED, style, tag = tag)
+        return Run(if (check.checked) CHECKED else UNCHECKED, CHECK_STYLE, tag = tag)
     }
 
     /** Lo marcado se tacha y se apaga, como una tarea cerrada: está hecho. */
@@ -815,8 +836,16 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     private fun appendRuns(tree: JTree, target: SimpleColoredComponent, runs: List<Run>, selected: Boolean) {
+        // Sólo se llama con líneas de tarjeta, así que el icono de la línea es de la
+        // casilla o de nadie.
+        target.icon = null
+        lineChecks.remove(target)
         for (run in runs) {
             when {
+                run.style === CHECK_STYLE -> {
+                    target.icon = if (run.text == CHECKED) CheckBoxIcon.CHECKED else CheckBoxIcon.UNCHECKED
+                    run.tag?.let { lineChecks[target] = it }
+                }
                 run.link != null -> target.append(run.text, run.style, run.link)
                 run.tag != null -> target.append(run.text, run.style, run.tag)
                 // El subrayado de coincidencias lo pone la plataforma, que es la única
@@ -891,6 +920,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         var at = 0
         for (run in runs) {
             val text = run.text
+            // La casilla es un icono: no se parte ni se le pone fondo.
+            if (run.style === CHECK_STYLE) {
+                at += text.length
+                out += run
+                continue
+            }
             val from = (start - at).coerceIn(0, text.length)
             val to = (end - at).coerceIn(0, text.length)
             at += text.length
@@ -1071,6 +1106,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             else -> EmptyIcon.ICON_16
         }
         more.icon = if (hovered) AllIcons.Actions.More else EmptyIcon.ICON_16
+        gripActive = reorderable
+        grip.icon = if (reorderable && hovered) AllIcons.General.Drag else EmptyIcon.ICON_16
+        grip.isVisible = reorderable
         // El hueco del desplegable se reserva ya, aunque quién lo enciende sea
         // [showExpandIcon] más tarde: el ancho que le queda al texto se mide con esta
         // fila puesta, y decidirlo después de envolver cambiaría el resultado de la
@@ -1281,6 +1319,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * líneas donde no toca en cuanto la fila mezcla tamaños.
      */
     private fun measure(text: String, style: SimpleTextAttributes): Int {
+        if (style === CHECK_STYLE) return CheckBoxIcon.UNCHECKED.iconWidth + textRenderer.iconTextGap
         val base = textRenderer.font ?: return 0
         val size = if (style.isSmaller) UIUtil.getFontSize(UIUtil.FontSize.SMALL) else base.size.toFloat()
         val font = base.deriveFont(style.fontStyle and (Font.BOLD or Font.ITALIC), size)
@@ -1460,6 +1499,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // color **es** la prioridad, y el indicador de enlaces es icono y contador.
         // Dejarlo fuera dejaba medio control sin responder.
         if (target.findFragmentAt(local) == SimpleColoredComponent.FRAGMENT_ICON) {
+            lineChecks[target]?.let { return it }
             return if (target === detail) detailIconTag() else target.firstTag()
         }
         return target.getFragmentTagAt(local)
@@ -1492,9 +1532,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         setBounds(0, 0, bounds.width, bounds.height)
         doLayout()
         if (!actions.isVisible) return null
+        east.doLayout()
         actions.doLayout()
 
-        val child = childAt(actions, point.x - bounds.x - actions.x, point.y - bounds.y - actions.y)
+        val x = point.x - bounds.x - east.x
+        val y = point.y - bounds.y - east.y
+        if (gripActive && grip.isVisible && grip.bounds.contains(x, y)) return RowTarget.GRIP
+        val child = childAt(actions, x - actions.x, y - actions.y)
         return when {
             child === expand && expandActive -> RowTarget.EXPAND
             child === bookmark && bookmarkActive -> RowTarget.BOOKMARK
@@ -1630,6 +1674,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         var consumed = 0
         var offset = 0
         for (run in runs) {
+            // El icono ya lo descuenta [textInset], que mide dónde empieza el texto.
+            if (run.style === CHECK_STYLE) {
+                offset += run.text.length
+                continue
+            }
             val width = widthOf(run, run.text)
             if (target > consumed + width) {
                 consumed += width
@@ -1664,10 +1713,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * texto, y esos no cambian en la vida de la fila.
      */
     private fun textInset(component: SimpleColoredComponent): Int {
-        insets[component]?.let { return it }
+        // Con la casilla de icono el texto empieza más a la derecha: otra cifra, que
+        // también se guarda, porque el icono mide siempre lo mismo.
+        val cache = if (component.icon != null) iconInsets else insets
+        cache[component]?.let { return it }
         for (x in 0..MAX_TEXT_INSET) {
             if (component.findFragmentAt(x) == 0) {
-                insets[component] = x
+                cache[component] = x
                 return x
             }
         }
@@ -1675,6 +1727,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     private val insets = IdentityHashMap<SimpleColoredComponent, Int>()
+    private val iconInsets = IdentityHashMap<SimpleColoredComponent, Int>()
 
     private fun childAt(parent: Container, x: Int, y: Int): java.awt.Component? =
         parent.components.firstOrNull {
@@ -1712,12 +1765,18 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     /** Los controles de una fila, para quien resuelve el clic. */
-    enum class RowTarget { EXPAND, BOOKMARK, MENU }
+    enum class RowTarget { EXPAND, BOOKMARK, MENU, GRIP }
 
     private companion object {
-        /** Las casillas de una lista de comprobación, con el hueco que las separa del texto. */
+        /**
+         * El texto de la casilla. No se pinta —la pinta [CheckBoxIcon]—, pero es lo que
+         * sale al copiar la línea, y lo que distingue marcada de sin marcar.
+         */
         const val UNCHECKED = "\u2610 "
         const val CHECKED = "\u2611 "
+
+        /** El estilo que identifica el tramo de la casilla. Se compara por identidad. */
+        val CHECK_STYLE = SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, null)
 
         /**
          * Cuántas tarjetas desplegadas se recuerdan. Desplegar es un gesto suelto de

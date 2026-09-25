@@ -61,7 +61,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Archivar lo terminado** | Esconder lo cerrado hace más de N días, con el pie de la lista diciendo cuántas y un enlace para verlas |
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
-| **Orden manual** | Por estado: arrastrar por la franja o `⌘⇧↑/↓` |
+| **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
 | **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic |
@@ -90,7 +90,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.11.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.11.2.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -232,7 +232,7 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
 - **Entrar en un estado terminal** —*Done* de fábrica— apunta la fecha de cierre, que es
   la que usa *Done* para agrupar por fecha.
 - **Listas de comprobación.** Una línea `- [ ] algo` en el cuerpo se pinta en la tarjeta
-  como una casilla —también si es el título—, y **un clic la marca**: escribe la `x` en el
+  como una casilla de verdad, del tamaño de una letra y azul al marcarla, —también si es el título—, y **un clic la marca**: escribe la `x` en el
   cuerpo, y lo marcado sale tachado. La línea de distintivos cuenta cuántas van
   (`☑ 2/5`), porque plegada la tarjeta sólo enseña la primera. En el diálogo, el botón
   *Checklist* convierte en casillas las líneas seleccionadas.
@@ -242,8 +242,10 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
 Cada estado puede ir **a mano**: *Group By ▸ Manual Order*. Entonces la lista deja de
 ordenarse por prioridad y fecha y sigue el orden que se le dé:
 
-- **Arrastrando la tarjeta por su franja de color** —el cursor cambia al pasar por
-  encima—. El resto de la tarjeta sigue sirviendo para seleccionar texto.
+- **Arrastrando la tarjeta por su asa** (⋮⋮), que sale al pasar el ratón a la derecha,
+  a media altura bajo el marcador y el menú —un hueco que la tarjeta siempre
+  dejaba libre, así que no le quita sitio a nada—. El resto de la tarjeta sigue sirviendo
+  para seleccionar texto.
 - **Con `⌘⇧↑/↓`**, las teclas de *Move Line Up/Down*, o *Move Up* / *Move Down* del menú
   contextual.
 - Al pasar a mano **la lista no se mueve**: su orden empieza siendo el que se veía.
@@ -708,7 +710,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.11.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.11.2.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

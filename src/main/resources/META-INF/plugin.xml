@@ -70,7 +70,8 @@
                 &mdash; and never silently: the list says how many are hidden, with a link to
                 show them.</li>
             <li><b>Manual order</b>, per state: <i>Group By &#9656; Manual Order</i>, then drag a
-                card by its colour stripe or press <code>&#8984;&#8679;&uarr;/&darr;</code>. The
+                card by the grip that appears on its right, below the bookmark and menu, or press
+                <code>&#8984;&#8679;&uarr;/&darr;</code>. The
                 list does not jump when you switch: it starts from the order you were
                 seeing.</li>
             <li><b>Checklists</b>: <code>- [ ] item</code> lines are drawn as checkboxes on the

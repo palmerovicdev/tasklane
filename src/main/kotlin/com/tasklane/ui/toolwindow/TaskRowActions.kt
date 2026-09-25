@@ -60,6 +60,9 @@ internal object TaskRowActions {
                         showMenu(tree, e.point)
                     }
 
+                    // El asa no se pulsa: se arrastra, y eso lo atiende `CardReorder`.
+                    TaskTreeRenderer.RowTarget.GRIP -> e.consume()
+
                     null -> Unit
                 }
             }

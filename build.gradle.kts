@@ -118,6 +118,24 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.11.2 &mdash; the reorder grip, better placed</h3>
+            <p>The grip of a manually ordered card now sits halfway down the space below the
+               bookmark and menu, slightly in from the right edge, so it reads as part of the
+               card rather than of the badge row. No format change.</p>
+
+            <h3>2.11.1 &mdash; a grip to reorder, and bigger checkboxes</h3>
+            <ul>
+              <li><b>Drag cards by a grip.</b> In a manually ordered state, a grip appears in
+                  the bottom-right corner of the card under the mouse &mdash; the space below the
+                  bookmark and menu that was always empty. It replaces dragging by the colour
+                  stripe, which was eight pixels wide and gave no hint it could be dragged.</li>
+              <li><b>Bigger checklist boxes.</b> The boxes are now drawn instead of taken from
+                  the font, so they are the size of a letter, and ticked ones are filled in
+                  blue like the IDE's own checkboxes.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change; 2.11.0 and 2.11.1 open each other&rsquo;s
+               projects.</p>
+
             <h3>2.11.0 &mdash; manual order and checklists</h3>
             <ul>
               <li><b>Order a state by hand.</b> <i>Group By &#9656; Manual Order</i>, then drag a

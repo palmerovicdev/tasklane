@@ -118,7 +118,7 @@ internal class TasklanePanel(
     private val renderer = TaskTreeRenderer()
     private val root = CheckedTreeNode("tasklane")
 
-    /** El arrastre por la franja en una pestaña a mano (2.11.0). Ver [CardReorder]. */
+    /** El arrastre por el asa en una pestaña a mano (2.11.0). Ver [CardReorder]. */
     private var reorder: CardReorder? = null
 
     private val tree = object : CheckboxTree(
@@ -1161,7 +1161,7 @@ internal class TasklanePanel(
 
     /**
      * Sube o baja la tarea seleccionada un puesto dentro de su grupo: `⌘⇧↑/↓`, lo mismo
-     * que arrastrarla por la franja. La selección se queda con ella, porque se restaura
+     * que arrastrarla por el asa. La selección se queda con ella, porque se restaura
      * por id al repintar.
      */
     fun moveSelectedBy(delta: Int) {
