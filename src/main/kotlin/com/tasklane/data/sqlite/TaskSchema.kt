@@ -85,9 +85,17 @@ internal object TaskSchema {
      *
      * Las migraciones, suban versión o no, sólo pueden ser **aditivas**: el
      * `CREATE TABLE IF NOT EXISTS` de [DDL] pone las tablas nuevas al abrir, sin una línea
-     * de migración. El día que haga falta **una columna nueva en una tabla que ya
-     * existe**, esto se acaba: `IF NOT EXISTS` no la añade, y habrá que escribir el
-     * `ALTER TABLE ... DEFAULT` correspondiente aquí al lado.
+     * de migración, y una columna nueva en una tabla que ya existe va en [COLUMNS], que es
+     * su `ALTER TABLE ... DEFAULT`.
+     *
+     * **La 2.15.0 tampoco la sube**, y es el primer caso que roza la regla: `anchor.span`
+     * es dato del usuario —cuántas líneas abarca el ancla— y una versión anterior que
+     * reescriba esa tarea lo pierde, porque inserta las anclas sin la columna y el valor
+     * por defecto es cero. Lo que queda es el ancla de siempre, en la primera línea del
+     * bloque. Se pesó igual que en la Fase 4: subirla dejaría **todo** el proyecto en solo
+     * lectura para esa versión, o sea bloquearía editar todas las tareas para que un rango
+     * no se quedara en su primera línea. Y quien vuelve a una versión anterior es, casi
+     * siempre, quien no sabía que existían los rangos.
      */
     const val VERSION = 1
 
@@ -283,6 +291,7 @@ internal object TaskSchema {
           line    INTEGER NOT NULL,
           col     INTEGER NOT NULL,
           text    TEXT    NOT NULL,
+          span    INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (task_id, pos)
         )
         """,
@@ -402,6 +411,19 @@ internal object TaskSchema {
           tokenize = "unicode61 remove_diacritics 2"
         )
         """,
+    )
+
+    /**
+     * Las columnas que se añadieron a una tabla **después** de crearla, con su
+     * `ALTER TABLE`: tabla, columna y la sentencia. [DDL] ya las trae para una base nueva;
+     * esto es para las que se crearon antes, y se aplica al abrir sólo si la columna falta.
+     *
+     * `NOT NULL DEFAULT` siempre: una versión anterior del plugin inserta filas sin
+     * nombrar la columna, y tiene que poder seguir haciéndolo. Ver la nota de [VERSION].
+     */
+    val COLUMNS: List<Triple<String, String, String>> = listOf(
+        // 2.15.0: anclas que abarcan un bloque de líneas. Cero es el ancla de una línea.
+        Triple("anchor", "span", "ALTER TABLE anchor ADD COLUMN span INTEGER NOT NULL DEFAULT 0"),
     )
 
     /**

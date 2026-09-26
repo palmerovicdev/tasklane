@@ -17,6 +17,13 @@ import com.tasklane.ui.editor.TaskEditDialog
  * tarea. Lo segundo es lo que evita tener que describir con palabras el trozo que se
  * está mirando.
  *
+ * **Una selección de varias líneas es un bloque** (2.15.0): el ancla lo abarca entero y
+ * el cuerpo empieza vacío. Hasta entonces el código seleccionado se copiaba al cuerpo, y
+ * su primera línea acababa siendo el título de la tarea; ahora la tarjeta desplegada
+ * enseña el bloque desde el fichero —tal como esté hoy, no como estaba al anotarlo—, y
+ * lo que queda por escribir es la nota. Dentro de una línea sigue siendo lo de antes: un
+ * trozo de texto que se ofrece como título.
+ *
  * La tarea nace en el **repositorio activo**, igual que [QuickAddAction] y que *New
  * Task*. El ancla no lo cambia: su ruta es relativa al proyecto, no al repositorio, así
  * que una tarea de un repositorio puede apuntar perfectamente a un fichero de otro —y
@@ -52,7 +59,7 @@ internal class NewTaskFromCodeAction : DumbAwareAction() {
             project,
             snapshot.config,
             repo,
-            initialBody = CodeAnchors.selection(e),
+            initialBody = if (anchor.isRange) "" else CodeAnchors.selection(e),
             initialAnchors = listOf(anchor),
             isNew = true,
         )

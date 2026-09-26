@@ -151,6 +151,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     var images: CardPreviews? = null
 
     /**
+     * De dónde sale el código de los bloques anclados (2.15.0). Lo pone [TasklanePanel] con
+     * un [CardSnippets]; sin él la tarjeta desplegada no los pinta, igual que sin [images]
+     * no pinta capturas.
+     */
+    var snippets: CodeSnippets? = null
+
+    /**
      * La fila bajo el ratón, o `-1`. La mantiene [TaskRowActions] y decide si se ven
      * el marcador y el menú: enseñarlos en todas las filas llenaría la lista de
      * controles que casi nunca se usan.
@@ -533,8 +540,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val room = if (open) MAX_CARD_LINES else MAX_TITLE_LINES
         val title = TitleWrap.fit(titleRuns(task, titleStyle), available, room, ::measure)
         val body = bodyLines(task, available, room - title.lines.size, open)
+        val blocks = if (open) anchorLines(task, available, room - title.lines.size - body.lines.size) else NOTHING
 
-        pendingCard = highlighted(tree, task, title.lines + body.lines, selected)
+        pendingCard = highlighted(tree, task, title.lines + body.lines + blocks.lines, selected)
         ensureLines(pendingCard.size - 1)
         extraLines.forEachIndexed { index, extra -> extra.isVisible = index < pendingCard.size - 1 }
         appendRuns(tree, textRenderer, pendingCard.firstOrNull().orEmpty(), selected)
@@ -546,8 +554,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         showExpandIcon(
             open,
             // Una captura que sólo se ve desplegando la tarjeta es tanto «hay algo
-            // escondido» como una frase que no cupo.
-            hidden = title.clipped || body.clipped || task.attachments.isNotEmpty(),
+            // escondido» como una frase que no cupo. Y un bloque anclado, lo mismo.
+            hidden = title.clipped || body.clipped || blocks.clipped || task.attachments.isNotEmpty() ||
+                task.anchors.any { it.isRange && it.path !in brokenAnchors },
             hovered = pendingHovered,
         )
     }
@@ -673,6 +682,40 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             listOf(Run(text, style, code = true))
         }
         return TitleWrap.Fit(lines, block.lines.size > budget || shown.any { it.length >= width })
+    }
+
+    /**
+     * Los bloques anclados de la tarjeta desplegada (2.15.0), detrás del cuerpo: por cada
+     * ancla de varias líneas, su ficha —`Auth.kt:42-58`, que se pulsa y lleva al código
+     * como la de la línea de distintivos— y debajo el código **de hoy**, con el recuadro de
+     * un bloque entre vallas del cuerpo. Si el bloque es más largo de lo que se lee, una
+     * línea gris dice cuánto queda.
+     *
+     * Un ancla de una línea no pinta nada aquí: su línea cabe en el tooltip de la ficha. Y
+     * un bloque que aún se está leyendo tampoco —ni un hueco—: llega enseguida y
+     * [CardSnippets] avisa para rehacer la altura.
+     */
+    private fun anchorLines(task: Task, available: Int, room: Int): TitleWrap.Fit {
+        val source = snippets ?: return NOTHING
+        val out = mutableListOf<List<Run>>()
+        var clipped = false
+        for (anchor in task.anchors) {
+            if (!anchor.isRange || anchor.path in brokenAnchors) continue
+            val snippet = source.snippetOf(anchor)?.takeIf { it.lines.isNotEmpty() } ?: continue
+            // La ficha y al menos una línea de código, o no merece la pena empezar.
+            if (room - out.size < 2) {
+                clipped = true
+                break
+            }
+            out += ellipsize(listOf(Run(anchor.label, ANCHOR_STYLE, tag = BlockCaption(anchor))), available).lines
+            val code = codeLines(DetailBlock.Code(snippet.lines), available, room - out.size)
+            out += code.lines
+            clipped = clipped || code.clipped
+            if (snippet.hidden > 0 && room - out.size > 0) {
+                out += listOf(Run(TasklaneBundle.message("toolwindow.row.anchor.more", snippet.hidden), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES))
+            }
+        }
+        return TitleWrap.Fit(out, clipped)
     }
 
     /**
@@ -1431,6 +1474,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             LINKS -> Hotspot.Links(task.links)
             is TaskLink -> Hotspot.Links(listOf(tag))
             is CodeAnchor -> Hotspot.Anchor(tag)
+            is BlockCaption -> Hotspot.Anchor(tag.anchor, caption = true)
             is TaskPriority -> Hotspot.Priority(task)
             IMAGES -> task.attachments.map { it.id }.distinct()
                 .takeIf { it.isNotEmpty() }
@@ -1446,7 +1490,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Lo pulsable de una fila. Ver [hotspotAt]. */
     sealed interface Hotspot {
         class Links(val links: List<TaskLink>) : Hotspot
-        class Anchor(val anchor: CodeAnchor) : Hotspot
+        /**
+         * [caption]: es la ficha que encabeza un bloque en la tarjeta desplegada (2.15.0), que
+         * ya tiene el código debajo y no lo repite en el tooltip.
+         */
+        class Anchor(val anchor: CodeAnchor, val caption: Boolean = false) : Hotspot
         class Priority(val task: Task) : Hotspot
         class Image(val repo: RepoKey, val id: AttachmentId) : Hotspot
 
@@ -1459,6 +1507,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     private class CopyTask(val task: Task)
+
+    /** La ficha encima de un bloque anclado. Ver [anchorLines]. */
+    private class BlockCaption(val anchor: CodeAnchor)
 
     private class CheckTag(val task: Task, val offset: Int)
 
@@ -1778,6 +1829,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     enum class RowTarget { EXPAND, BOOKMARK, MENU, GRIP }
 
     private companion object {
+        /** Lo que no pinta ninguna línea. */
+        val NOTHING = TitleWrap.Fit(emptyList(), false)
+
         /**
          * El texto de la casilla. No se pinta —la pinta [CheckBoxIcon]—, pero es lo que
          * sale al copiar la línea, y lo que distingue marcada de sin marcar.

@@ -16,6 +16,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.AnchorReference
 import com.tasklane.domain.model.AnchorResolver
+import com.tasklane.domain.model.AnchorSnippet
 import com.tasklane.domain.model.CodeAnchor
 
 /**
@@ -35,10 +36,25 @@ object CodeAnchors {
      * seleccionado —el árbol del proyecto—, el fichero por su principio: apuntar a un
      * fichero entero también es apuntar a algo. Un directorio no, y un fichero sin
      * respaldo en disco tampoco.
+     *
+     * **Con una selección de varias líneas, el bloque entero** (2.15.0): de la primera
+     * línea seleccionada a la última, y la columna donde empieza la selección. Ver
+     * [selectedLines].
      */
     fun capture(project: Project, e: AnActionEvent): CodeAnchor? {
         val file = anchorableFile(e) ?: return null
         val editor = e.getData(CommonDataKeys.EDITOR)
+        val block = editor?.let(::selectedLines)
+        if (editor != null && block != null) {
+            val start = editor.offsetToLogicalPosition(editor.selectionModel.selectionStart)
+            return CodeAnchor.of(
+                path = pathOf(project, file),
+                line = block.first,
+                column = start.column,
+                text = lineText(editor, block.first),
+                span = block.last - block.first,
+            )
+        }
         // La posición *lógica* y no el offset: la columna que interesa es la que se ve,
         // que es en la que se dibuja después la marca dentro del texto.
         val caret = editor?.caretModel?.logicalPosition
@@ -49,6 +65,23 @@ object CodeAnchors {
             column = caret?.column ?: 0,
             text = editor?.let { lineText(it, line) }.orEmpty(),
         )
+    }
+
+    /**
+     * Las líneas que cubre la selección del editor, si abarca **más de una** (2.15.0).
+     *
+     * Una selección que acaba justo al principio de una línea no la cuenta: es lo que deja
+     * seleccionar líneas enteras con `⇧↓` o arrastrando por el margen, y nadie piensa en
+     * esa línea al hacerlo —está ahí porque la selección llega hasta su borde—.
+     */
+    fun selectedLines(editor: Editor): IntRange? {
+        val selection = editor.selectionModel
+        if (!selection.hasSelection()) return null
+        val document = editor.document
+        val first = document.getLineNumber(selection.selectionStart)
+        var last = document.getLineNumber(selection.selectionEnd)
+        if (last > first && selection.selectionEnd == document.getLineStartOffset(last)) last--
+        return if (last > first) first..last else null
     }
 
     /**
@@ -68,6 +101,9 @@ object CodeAnchors {
      * Lo que hay seleccionado en el editor, que es lo que se ofrece como cuerpo de la
      * tarea. Se recorta la sangría común: pegada dentro de una nota, la sangría
      * original del fichero sólo empuja el texto hacia la derecha.
+     *
+     * Desde la 2.15.0 sólo lo usa una selección **dentro de una línea**: la de varias es
+     * un bloque de código, se ancla entero y la tarjeta ya lo enseña. Ver [capture].
      */
     fun selection(e: AnActionEvent): String {
         val text = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: return ""
@@ -144,6 +180,25 @@ object CodeAnchors {
     }
 
     /**
+     * El código del ancla tal como está ahora (2.15.0), o `null` si el fichero ya no está
+     * o no tiene texto —un binario, uno enorme—. Del `Document` por lo mismo que
+     * [positionOf]: con cambios sin guardar, es lo que el usuario tiene delante.
+     *
+     * **Bloqueante, y nunca desde el EDT**: el `Document` de un fichero que no está abierto
+     * se lee del disco al pedirlo. Lo llama `CardSnippets` desde su hilo de fondo.
+     */
+    fun snippetOf(project: Project, anchor: CodeAnchor): AnchorSnippet? {
+        val file = find(project, anchor)?.takeUnless { it.isDirectory } ?: return null
+        return ReadAction.computeBlocking<AnchorSnippet?, RuntimeException> {
+            if (!file.isValid) return@computeBlocking null
+            val document = FileDocumentManager.getInstance().getDocument(file) ?: return@computeBlocking null
+            AnchorSnippet.of(anchor, document.lineCount) { index ->
+                document.getText(TextRange(document.getLineStartOffset(index), document.getLineEndOffset(index)))
+            }
+        }
+    }
+
+    /**
      * Si una ruta anclada ya no lleva a ningún fichero (2.13.0): es lo que pinta el ancla
      * como rota y lo que busca `has:broken-anchor`. El mismo criterio que [open], para que
      * lo que la tarjeta avisa sea lo que el clic se va a encontrar.
@@ -171,7 +226,8 @@ object CodeAnchors {
         data class Found(val anchor: CodeAnchor) : Lookup
         data class Missing(val path: String) : Lookup
         data class Folder(val path: String) : Lookup
-        data class OutOfRange(val path: String, val lines: Int) : Lookup
+        /** [line] es la que no está, 0-based: el principio, o el final de un rango. */
+        data class OutOfRange(val path: String, val lines: Int, val line: Int) : Lookup
     }
 
     /**
@@ -208,17 +264,22 @@ object CodeAnchors {
             // Sin `Document` —binario o enorme— no hay líneas que contar: vale apuntar
             // al fichero, pero no a una línea que no se puede comprobar.
             val document = FileDocumentManager.getInstance().getDocument(file)
-                ?: return@computeBlocking if (reference.line == 0) {
+                ?: return@computeBlocking if (reference.endLine == 0) {
                     Lookup.Found(CodeAnchor.of(path, 0))
                 } else {
-                    Lookup.OutOfRange(path, 0)
+                    Lookup.OutOfRange(path, 0, reference.endLine)
                 }
             val lines = maxOf(document.lineCount, 1)
-            if (reference.line >= lines) return@computeBlocking Lookup.OutOfRange(path, lines)
+            // El final de un rango, igual que una línea suelta: `:20-80` en un fichero de
+            // 40 líneas es un número mal escrito, no «hasta donde llegue».
+            if (reference.line >= lines) return@computeBlocking Lookup.OutOfRange(path, lines, reference.line)
+            if (reference.endLine >= lines) return@computeBlocking Lookup.OutOfRange(path, lines, reference.endLine)
             val text = if (document.lineCount == 0) "" else document.getText(
                 TextRange(document.getLineStartOffset(reference.line), document.getLineEndOffset(reference.line)),
             )
-            Lookup.Found(CodeAnchor.of(path, reference.line, reference.column.coerceAtMost(text.length), text))
+            Lookup.Found(
+                CodeAnchor.of(path, reference.line, reference.column.coerceAtMost(text.length), text, reference.span),
+            )
         }
     }
 

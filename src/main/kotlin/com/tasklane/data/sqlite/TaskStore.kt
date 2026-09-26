@@ -310,10 +310,10 @@ internal class TaskStore(private val db: TaskDb) {
 
         val anchors = tasks.flatMap { task ->
             task.anchors.mapIndexed { pos, anchor ->
-                arrayOf<Any>(task.id.value, pos, anchor.path, anchor.line, anchor.column, anchor.text)
+                arrayOf<Any>(task.id.value, pos, anchor.path, anchor.line, anchor.column, anchor.text, anchor.span)
             }
         }
-        if (anchors.isNotEmpty()) sql.batch(ANCHOR_INSERT, 6, anchors.asSequence())
+        if (anchors.isNotEmpty()) sql.batch(ANCHOR_INSERT, 7, anchors.asSequence())
 
         val refs = tasks.flatMap { task ->
             task.attachments.map { it.id.value }.distinct().map { blob -> arrayOf<Any>(task.id.value, blob, task.repo.value) }
@@ -1035,7 +1035,7 @@ internal class TaskStore(private val db: TaskDb) {
      */
     fun anchorsIn(path: String): List<AnchoredTask> {
         val rows = db.reader.rows(
-            "SELECT ${TaskRows.columns("t")}, a.path, a.line, a.col, a.text " +
+            "SELECT ${TaskRows.columns("t")}, a.path, a.line, a.col, a.text, a.span " +
                 "FROM anchor a JOIN task t ON t.id = a.task_id WHERE a.path = ? AND t.state_terminal = 0",
             path,
         ) {
@@ -1044,6 +1044,7 @@ internal class TaskStore(private val db: TaskDb) {
                 line = it.getInt(14),
                 column = it.getInt(15),
                 text = it.getString(16).orEmpty(),
+                span = it.getInt(17),
             )
         }
         if (rows.isEmpty()) return emptyList()
@@ -1541,7 +1542,8 @@ internal class TaskStore(private val db: TaskDb) {
         private const val TAG_INSERT = "INSERT INTO tag (task_id, tag, repo, state, bookmarked, priority_rank, " +
             "sort_date, undated, completed_at, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
-        private const val ANCHOR_INSERT = "INSERT INTO anchor (task_id, pos, path, line, col, text) VALUES (?, ?, ?, ?, ?, ?)"
+        private const val ANCHOR_INSERT =
+            "INSERT INTO anchor (task_id, pos, path, line, col, text, span) VALUES (?, ?, ?, ?, ?, ?, ?)"
 
         private const val BLOB_REF_INSERT = "INSERT INTO blob_ref (task_id, blob_id, repo) VALUES (?, ?, ?)"
 
@@ -1618,7 +1620,7 @@ internal class TaskStore(private val db: TaskDb) {
                     tags.getOrPut(it.getString(0).orEmpty()) { ArrayList() } += it.getString(1).orEmpty()
                 }
                 sql.rows(
-                    "SELECT task_id, path, line, col, text FROM anchor WHERE task_id IN ($holes) ORDER BY pos",
+                    "SELECT task_id, path, line, col, text, span FROM anchor WHERE task_id IN ($holes) ORDER BY pos",
                     *params,
                 ) {
                     anchors.getOrPut(it.getString(0).orEmpty()) { ArrayList() } += TaskRows.anchorOf(it)

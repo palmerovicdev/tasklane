@@ -5,6 +5,7 @@ import com.intellij.ui.CheckedTreeNode
 import com.tasklane.domain.model.DateGroup
 import com.tasklane.domain.model.GroupKey
 import com.intellij.util.ui.EmptyIcon
+import com.tasklane.domain.model.AnchorSnippet
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
@@ -18,6 +19,7 @@ import com.tasklane.ui.toolwindow.CardImageView
 import com.tasklane.ui.toolwindow.CardPreviews
 import com.tasklane.ui.toolwindow.CardSelection
 import com.tasklane.ui.toolwindow.CardTextSelection
+import com.tasklane.ui.toolwindow.CodeSnippets
 import com.tasklane.ui.toolwindow.GroupNode
 import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
@@ -701,6 +703,94 @@ class TaskTreeRendererTest {
      * Las imágenes que se le dan por listas; el resto, ausentes. Sin esto haría falta
      * la `Application` del IDE, que es lo que este test evita.
      */
+    // ------------------------------------------------- bloques anclados (2.15.0)
+
+    private val block = CodeAnchor.of("src/auth/Login.kt", 3, text = "fun login() {", span = 3)
+
+    /** El código de cada ancla, ya leído: lo que [CardSnippets] tendría en su caché. */
+    private fun snippetsOf(vararg ready: Pair<CodeAnchor, AnchorSnippet>): CodeSnippets {
+        val map = ready.toMap()
+        return CodeSnippets { map[it] }
+    }
+
+    private val loginCode = AnchorSnippet(listOf("fun login() {", "    check(user)", "    save(user)", "}"), 4)
+
+    @Test
+    fun `desplegada la tarjeta pinta el bloque anclado con su ficha encima`() {
+        renderer.snippets = snippetsOf(block to loginCode)
+        val task = task("Revisar el login", anchors = listOf(block))
+        val tree = treeWith(task)
+
+        assertEquals("plegada no se ve el codigo", listOf("Revisar el login"), renderer.cardText(tree, 0))
+
+        expand(tree, task)
+
+        assertEquals(
+            listOf("Revisar el login", "Login.kt:4-7", "fun login() {", "    check(user)", "    save(user)", "}"),
+            renderer.cardText(tree, 0).map(String::trimEnd),
+        )
+    }
+
+    @Test
+    fun `la ficha del bloque lleva a su codigo y se sabe que es la del bloque`() {
+        renderer.snippets = snippetsOf(block to loginCode)
+        val task = task("Revisar el login", anchors = listOf(block))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val anchors = scanAll(tree, painted(tree, 0)) { renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Anchor }
+
+        assertTrue("la ficha de la linea de distintivos", anchors.any { it.anchor == block && !it.caption })
+        assertTrue("la ficha encima del bloque", anchors.any { it.anchor == block && it.caption })
+    }
+
+    /** Un bloque sólo se ve desplegando: la tarjeta tiene que ofrecer desplegarse. */
+    @Test
+    fun `un bloque anclado se puede desplegar aunque el cuerpo quepa`() {
+        renderer.snippets = snippetsOf(block to loginCode)
+        val tree = treeWith(task("Revisar el login", anchors = listOf(block)))
+        renderer.hoveredRow = 0
+
+        assertTrue(TaskTreeRenderer.RowTarget.EXPAND in scanAll(tree, painted(tree, 0)) { renderer.targetAt(tree, it) })
+    }
+
+    @Test
+    fun `una linea anclada no pinta bloque`() {
+        val line = CodeAnchor.of("src/auth/Login.kt", 3, text = "fun login() {")
+        renderer.snippets = snippetsOf(line to AnchorSnippet(listOf("fun login() {"), 1))
+        val task = task("Revisar el login", anchors = listOf(line))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        assertEquals(listOf("Revisar el login"), renderer.cardText(tree, 0))
+    }
+
+    @Test
+    fun `un bloque que aun se lee o cuyo fichero no esta no deja hueco`() {
+        renderer.snippets = snippetsOf()
+        val task = task("Revisar el login", anchors = listOf(block))
+        val tree = treeWith(task)
+        expand(tree, task)
+        assertEquals(listOf("Revisar el login"), renderer.cardText(tree, 0))
+
+        renderer.snippets = snippetsOf(block to loginCode)
+        renderer.brokenAnchors = setOf(block.path)
+        remeasure(tree)
+        assertEquals("roto, la ficha ya lo dice", listOf("Revisar el login"), renderer.cardText(tree, 0))
+    }
+
+    @Test
+    fun `un bloque mas largo de lo que se lee dice cuanto queda`() {
+        renderer.snippets = snippetsOf(block to AnchorSnippet(listOf("uno", "dos"), 9))
+        val task = task("Revisar el login", anchors = listOf(block))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val text = renderer.cardText(tree, 0)
+        assertEquals(5, text.size)
+        assertTrue(text.last(), "7" in text.last())
+    }
+
     private fun previewsOf(vararg ready: Pair<AttachmentId, BufferedImage>) = object : CardPreviews {
         private val images = ready.toMap()
 

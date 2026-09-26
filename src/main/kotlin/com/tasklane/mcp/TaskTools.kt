@@ -217,17 +217,20 @@ internal class TaskTools(private val project: Project) {
         if (tasks.isReadOnly(repo)) throw ToolError("This repository's tasks are read-only right now. See Tasklane: Diagnostics.")
     }
 
-    /** `src/Auth.kt:42`, como en el diálogo: con el texto de la línea para poder reencontrarla. */
+    /**
+     * `src/Auth.kt:42`, o el bloque `src/Auth.kt:42-58` (2.15.0), como en el diálogo: con el
+     * texto de la línea para poder reencontrarla.
+     */
     private fun anchorOf(text: String): CodeAnchor {
         val reference = AnchorReference.parse(text)
-            ?: throw ToolError("Invalid code location \"$text\". Use path:line, relative to the project root.")
+            ?: throw ToolError("Invalid code location \"$text\". Use path:line or path:line-endLine, relative to the project root.")
         refresh(reference.path)
         return when (val lookup = CodeAnchors.fromReference(project, reference)) {
             is CodeAnchors.Lookup.Found -> lookup.anchor
             is CodeAnchors.Lookup.Missing -> throw ToolError("No file at \"${lookup.path}\".")
             is CodeAnchors.Lookup.Folder -> throw ToolError("\"${lookup.path}\" is a folder, not a file.")
             is CodeAnchors.Lookup.OutOfRange ->
-                throw ToolError("\"${lookup.path}\" has ${lookup.lines} lines; there is no line ${reference.line + 1}.")
+                throw ToolError("\"${lookup.path}\" has ${lookup.lines} lines; there is no line ${lookup.line + 1}.")
         }
     }
 

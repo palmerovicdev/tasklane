@@ -233,6 +233,12 @@ internal class TasklanePanel(
     private val cardImages = CardImages(project) { remeasureRows() }
 
     /**
+     * El código de los bloques anclados (2.15.0). Aquí por lo mismo que [cardImages]:
+     * cuando llega, la tarjeta desplegada cambia de alto.
+     */
+    private val cardSnippets = CardSnippets(project, this, onChanged = { remeasureRows() }, repaint = { tree.repaint() })
+
+    /**
      * El hueco por el que se mira la lista. Es campo y no una variable local de
      * [buildContent] porque desde la Fase 2 hace falta **escucharlo**: llegar
      * desplazándose al centinela del final de una página es lo que pide la siguiente.
@@ -319,6 +325,7 @@ internal class TasklanePanel(
 
     init {
         renderer.images = cardImages
+        renderer.snippets = cardSnippets
         tree.isRootVisible = false
         tree.showsRootHandles = false
         // Ni el árbol ni el buscador llevan etiqueta visible —el sitio manda—, así que
@@ -397,7 +404,7 @@ internal class TasklanePanel(
         reorder = CardReorder(tree, renderer) { task, above, below ->
             service.apply(TaskCommand.Move(task.repo, task.id, above, below))
         }.also { it.install() }
-        RowClicks.install(tree, renderer, project)
+        RowClicks.install(tree, renderer, project, cardSnippets)
         TaskRowActions.install(tree, renderer, this)
         CardTextSelection.install(tree, renderer)
 
@@ -810,6 +817,8 @@ internal class TasklanePanel(
 
         // Una captura pegada puede rellenar un hueco que antes no estaba.
         cardImages.forgetMissing()
+        // Y un fichero que vuelve, o un ancla que cambió de sitio, otro bloque de código.
+        cardSnippets.refresh()
         renderer.config = snap.config
         renderer.highlighter = found.highlighter
         renderer.activeRepo = snap.activeRepo

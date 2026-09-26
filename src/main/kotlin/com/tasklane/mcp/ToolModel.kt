@@ -142,7 +142,7 @@ internal class TaskViews(
         }
         val (done, total) = task.checklist
         if (total > 0) put("checklist", "$done/$total")
-        if (task.anchors.isNotEmpty()) put("code", task.anchors.map { "${it.path}:${it.line + 1}" })
+        if (task.anchors.isNotEmpty()) put("code", task.anchors.map { it.reference })
     }
 
     /**
@@ -161,6 +161,9 @@ internal class TaskViews(
                 buildMap<String, Any?> {
                     put("path", anchor.path)
                     put("line", (line ?: anchor.line) + 1)
+                    // Un bloque (2.15.0): su última línea, contada desde donde está hoy la
+                    // primera, que es como se mueve el bloque entero.
+                    if (anchor.isRange) put("endLine", (line ?: anchor.line) + anchor.span + 1)
                     if (line == null) put("missing", true)
                     else if (line != anchor.line) put("anchoredAtLine", anchor.line + 1)
                     if (anchor.text.isNotEmpty()) put("text", anchor.text)

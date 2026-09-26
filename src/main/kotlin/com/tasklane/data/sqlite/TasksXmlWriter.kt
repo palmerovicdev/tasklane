@@ -82,6 +82,7 @@ internal class TasksXmlWriter(output: OutputStream, repo: RepoKey) : AutoCloseab
             attribute("line", anchor.line.toString())
             if (anchor.column > 0) attribute("column", anchor.column.toString())
             if (anchor.text.isNotEmpty()) attribute("text", anchor.text)
+            if (anchor.isRange) attribute("span", anchor.span.toString())
             out.write(" />\n")
         }
 

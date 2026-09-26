@@ -48,7 +48,8 @@ class AnchorReferenceTest {
     @Test
     fun `el formato de los enlaces de GitHub`() {
         assertEquals(ref("src/Main.kt", 27), AnchorReference.parse("src/Main.kt#L28"))
-        assertEquals(ref("src/Main.kt", 27), AnchorReference.parse("src/Main.kt#L28-L40"))
+        // Desde la 2.15.0 el rango es un bloque: el final ya no se descarta.
+        assertEquals(ref("src/Main.kt", 27).copy(span = 12), AnchorReference.parse("src/Main.kt#L28-L40"))
         assertEquals(ref("src/Main.kt", 27, 4), AnchorReference.parse("src/Main.kt#L28C5"))
     }
 

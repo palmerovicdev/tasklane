@@ -8,6 +8,7 @@ import com.intellij.ui.awt.RelativePoint
 import com.tasklane.TasklaneBundle
 import com.tasklane.code.CodeAnchors
 import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.text.TaskCopyText
 import com.tasklane.domain.command.TaskCommand
@@ -38,8 +39,14 @@ import javax.swing.JTree
  */
 internal object RowClicks {
 
-    fun install(tree: JTree, renderer: TaskTreeRenderer, project: Project) {
+    fun install(tree: JTree, renderer: TaskTreeRenderer, project: Project, snippets: CardSnippets? = null) {
         val shots = RowImageTips(project) { tree.toolTipText = it }
+        // El ancla bajo el ratón, para rehacer su tooltip cuando llegue su código
+        // (2.15.0): se compuso sin él, y el ratón quieto no pide otro.
+        var hoveredAnchor: CodeAnchor? = null
+        snippets?.onLoaded = { anchor ->
+            if (anchor == hoveredAnchor) tree.toolTipText = anchorTip(renderer, anchor)
+        }
         val mouse = object : MouseAdapter() {
 
             override fun mouseMoved(e: MouseEvent) {
@@ -49,6 +56,7 @@ internal object RowClicks {
                     tree.cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
                     tree.toolTipText = TasklaneBundle.message("toolwindow.row.reorder.tooltip")
                     shots.over(null)
+                    hoveredAnchor = null
                     return
                 }
                 val hotspot = renderer.hotspotAt(tree, e.point)
@@ -64,6 +72,9 @@ internal object RowClicks {
                 // Sobre qué capturas está el ratón, para que las que lleguen tarde del
                 // disco sólo se enseñen si sigue encima de las suyas.
                 shots.over(hotspot as? TaskTreeRenderer.Hotspot.Images)
+                hoveredAnchor = (hotspot as? TaskTreeRenderer.Hotspot.Anchor)
+                    ?.takeUnless { it.caption || it.anchor.path in renderer.brokenAnchors }
+                    ?.anchor
                 // Lo que se pinta es corto —la URL acortada, `Fichero.kt:42`— y el
                 // tooltip lleva lo largo. Con varios enlaces no se enseña ninguno: el
                 // popup los lista todos. El de la prioridad es el único que no amplía
@@ -72,13 +83,15 @@ internal object RowClicks {
                 // de capturas no es texto: es la captura.
                 tree.toolTipText = when (hotspot) {
                     is TaskTreeRenderer.Hotspot.Anchor ->
-                        if (hotspot.anchor.path in renderer.brokenAnchors) {
-                            TasklaneBundle.message(
+                        when {
+                            hotspot.anchor.path in renderer.brokenAnchors -> TasklaneBundle.message(
                                 "toolwindow.row.anchor.broken.tooltip",
                                 StringUtil.escapeXmlEntities(hotspot.anchor.path),
                             )
-                        } else {
-                            hotspot.anchor.path
+
+                            // La ficha de un bloque desplegado ya tiene el código debajo.
+                            hotspot.caption -> hotspot.anchor.reference
+                            else -> anchorTip(renderer, hotspot.anchor)
                         }
 
                     is TaskTreeRenderer.Hotspot.Links -> hotspot.links.singleOrNull()?.url
@@ -109,6 +122,7 @@ internal object RowClicks {
                 tree.cursor = Cursor.getDefaultCursor()
                 tree.toolTipText = null
                 shots.over(null)
+                hoveredAnchor = null
             }
 
             override fun mouseClicked(e: MouseEvent) {
@@ -161,6 +175,15 @@ internal object RowClicks {
         tree.addMouseListener(mouse)
         tree.addMouseMotionListener(mouse)
     }
+
+    /**
+     * La ruta del ancla y su código de hoy (2.15.0). Pedirlo aquí es lo que lo manda leer si
+     * aún no está; hasta que llega, la ruta a secas. Ver [AnchorChipTip].
+     */
+    private fun anchorTip(renderer: TaskTreeRenderer, anchor: CodeAnchor): String =
+        AnchorChipTip.html(anchor, renderer.snippets?.snippetOf(anchor)) {
+            TasklaneBundle.message("toolwindow.row.anchor.more", it)
+        }
 }
 
 /**

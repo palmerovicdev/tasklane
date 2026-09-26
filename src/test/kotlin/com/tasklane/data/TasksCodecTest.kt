@@ -54,6 +54,21 @@ class TasksCodecTest {
         assertEquals(0, TasksCodec.decode(encoded, repo).tasks.single().anchors.single().column)
     }
 
+    /**
+     * Un bloque (2.15.0) lleva su largo, y un ancla de una línea no lleva el atributo: así
+     * una versión anterior lee lo de siempre y se queda con la primera línea del bloque.
+     */
+    @Test
+    fun `un bloque escribe su largo y una linea no`() {
+        val anclas = listOf(CodeAnchor.of("a.kt", 2, text = "fun a() {", span = 4), CodeAnchor.of("b.kt", 7))
+        val encoded = TasksCodec.encode(repo, listOf(task().copy(anchors = anclas)))
+
+        val written = encoded.getChild("task").getChildren("anchor")
+        assertEquals("4", written[0].getAttributeValue("span"))
+        assertEquals(null, written[1].getAttributeValue("span"))
+        assertEquals(anclas, TasksCodec.decode(encoded, repo).tasks.single().anchors)
+    }
+
     /** Una tarea sin anclas no paga ni un elemento: el fichero se reescribe en cada guardado. */
     @Test
     fun `sin anclas no se escribe ningun elemento`() {

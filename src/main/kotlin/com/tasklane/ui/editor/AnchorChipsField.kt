@@ -144,11 +144,14 @@ internal class AnchorChipsField(
             is CodeAnchors.Lookup.Missing -> fail(TasklaneBundle.message("dialog.task.code.missing", lookup.path))
             is CodeAnchors.Lookup.Folder -> fail(TasklaneBundle.message("dialog.task.code.folder", lookup.path))
             is CodeAnchors.Lookup.OutOfRange ->
-                fail(TasklaneBundle.message("dialog.task.code.range", lookup.path, lookup.lines, reference.line + 1))
+                fail(TasklaneBundle.message("dialog.task.code.range", lookup.path, lookup.lines, lookup.line + 1))
             is CodeAnchors.Lookup.Found -> {
                 val anchor = lookup.anchor
-                // Dos veces el mismo sitio es una ficha repetida, no dos anclas.
-                if (chips.none { it.path == anchor.path && it.line == anchor.line }) chips = chips + anchor
+                // Dos veces el mismo sitio es una ficha repetida, no dos anclas. La línea y el
+                // bloque que empieza en ella sí son dos sitios distintos.
+                if (chips.none { it.path == anchor.path && it.line == anchor.line && it.span == anchor.span }) {
+                    chips = chips + anchor
+                }
                 editor.text = ""
                 rebuild()
                 null
@@ -184,7 +187,7 @@ internal class AnchorChipsField(
      * quita, y quien abre la tarea para limpiarla tiene que ver cuál sobra.
      */
     private fun chipFor(anchor: CodeAnchor): Chip {
-        val where = "${anchor.path}:${anchor.line + 1}"
+        val where = anchor.reference
         val broken = anchor.path in TaskService.getInstance(project).snapshot.value.brokenAnchors
         return Chip(
             text = anchor.label,

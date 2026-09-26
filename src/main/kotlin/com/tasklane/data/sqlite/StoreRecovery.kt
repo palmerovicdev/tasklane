@@ -308,7 +308,7 @@ internal object StoreRecovery {
         orIgnore: Boolean = true,
         within: LongRange? = null,
     ): Copied {
-        val columns = columnsOf(to, table).filter { keepRowid || it.first != rowid }
+        val columns = sharedColumns(from, to, table).filter { keepRowid || it.first != rowid }
         val names = columns.joinToString(", ") { it.first }
         val select = "SELECT $names FROM $table WHERE $rowid BETWEEN ? AND ?"
         val insert = "INSERT ${if (orIgnore) "OR IGNORE " else ""}INTO $table ($names) VALUES (${Sql.placeholders(columns.size)})"
@@ -407,7 +407,7 @@ internal object StoreRecovery {
         // Las filas hijas de lo que acaba de entrar, de la misma copia: son de esa versión de
         // la tarea, no de la del dañado.
         for (table in StoreAudit.SIDE_TABLES) {
-            val columns = columnsOf(to, table)
+            val columns = sharedColumns(copy, to, table)
             val names = columns.joinToString(", ") { it.first }
             val insert = "INSERT OR IGNORE INTO $table ($names) VALUES (${Sql.placeholders(columns.size)})"
             for (hole in holes) {
@@ -490,7 +490,7 @@ internal object StoreRecovery {
     private class Missing(val id: String, val updatedAt: Long, val tagsText: String, val tags: Boolean, val anchors: Boolean)
 
     private fun copySides(from: Sql, to: Sql, table: String, taskId: String) {
-        val columns = columnsOf(to, table)
+        val columns = sharedColumns(from, to, table)
         val names = columns.joinToString(", ") { it.first }
         val rows = runCatching {
             from.rows("SELECT $names FROM $table WHERE task_id = ?", taskId) { row ->
@@ -505,6 +505,22 @@ internal object StoreRecovery {
     /** Las columnas de una tabla en la base nueva, con si son enteras. El esquema manda, no el fichero dañado. */
     private fun columnsOf(sql: Sql, table: String): List<Pair<String, Boolean>> =
         sql.rows("PRAGMA table_info($table)") { it.getString(1).orEmpty() to it.getString(2).orEmpty().equals("INTEGER", ignoreCase = true) }
+
+    /**
+     * Las de [columnsOf] **que también tenga el origen** (2.15.0). Una copia de seguridad o
+     * un fichero dañado de antes de una columna nueva —`anchor.span`— no la tienen, y
+     * pedírsela haría fallar la lectura de la tabla entera: se perderían todas sus filas
+     * por una columna que en la base nueva tiene valor por defecto. Si el origen no deja
+     * leer ni su esquema, se piden todas, que es lo que se hacía antes.
+     */
+    private fun sharedColumns(from: Sql, to: Sql, table: String): List<Pair<String, Boolean>> {
+        val target = columnsOf(to, table)
+        val source = runCatching { from.rows("PRAGMA table_info($table)") { it.getString(1).orEmpty() }.toSet() }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return target
+        return target.filter { it.first in source }
+    }
 
     /**
      * El fichero dañado, en solo lectura si se deja —así ni siquiera el cierre le vuelca el

@@ -42,19 +42,46 @@ data class CodeAnchor(
     /**
      * El texto de la línea cuando se ancló, recortado. No es decoración: es lo que
      * permite reencontrarla cuando el fichero ha cambiado por encima. Ver
-     * [AnchorResolver].
+     * [AnchorResolver]. En un rango es el de la **primera** línea.
      */
     val text: String = "",
+    /**
+     * Cuántas líneas **más** abarca, después de [line] (2.15.0). Cero es el ancla de
+     * siempre, una línea; `span = 16` sobre la línea 41 es el bloque de la 42 a la 58
+     * como las cuenta la gente.
+     *
+     * Un largo y no una línea final a propósito: lo que se reencuentra cuando el fichero
+     * cambia es la primera línea —por su [text]—, y el bloque se va con ella entero.
+     * Con una línea final guardada, un import añadido arriba movería el principio y
+     * dejaría el final donde estaba, que es otro bloque. Es aproximado por lo mismo que
+     * [line]: si alguien escribe **dentro** del bloque, el final se queda corto.
+     */
+    val span: Int = 0,
 ) {
     val fileName: String get() = path.substringAfterLast('/')
+
+    /** La última línea del bloque, 0-based. En un ancla de una línea, [line]. */
+    val endLine: Int get() = line + span
+
+    /** Si abarca más de una línea. */
+    val isRange: Boolean get() = span > 0
 
     /**
      * Lo que se pinta en la tarjeta. Sin la columna a propósito: `Auth.kt:42` es
      * como se nombra un sitio en el código en cualquier conversación, y `Auth.kt:42:17`
      * es como lo nombra un compilador. La columna ya hace su trabajo al navegar y al
-     * colocar la marca; en una ficha sólo añadiría ruido.
+     * colocar la marca; en una ficha sólo añadiría ruido. Un rango sale `Auth.kt:42-58`.
      */
-    val label: String get() = "$fileName:${line + 1}"
+    val label: String get() = "$fileName:${lines()}"
+
+    /**
+     * La ruta entera con sus líneas —`src/auth/Auth.kt:42-58`—, que es lo que se escribe
+     * en el diálogo, lo que devuelve el agente por MCP y lo que sale en el CSV. Se vuelve
+     * a leer con [AnchorReference.parse], así que lo que se enseña se puede pegar.
+     */
+    val reference: String get() = "$path:${lines()}"
+
+    private fun lines(): String = if (isRange) "${line + 1}-${endLine + 1}" else "${line + 1}"
 
     companion object {
         /**
@@ -76,11 +103,12 @@ data class CodeAnchor(
         }
 
         /** Normaliza lo que venga del editor: separadores, posición negativa y texto largo. */
-        fun of(path: String, line: Int, column: Int = 0, text: String = ""): CodeAnchor = CodeAnchor(
+        fun of(path: String, line: Int, column: Int = 0, text: String = "", span: Int = 0): CodeAnchor = CodeAnchor(
             path = path.replace('\\', '/'),
             line = line.coerceAtLeast(0),
             column = column.coerceAtLeast(0),
             text = text.trim().take(MAX_TEXT),
+            span = span.coerceAtLeast(0),
         )
     }
 }

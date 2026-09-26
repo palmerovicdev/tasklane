@@ -153,6 +153,25 @@ class StoreRecoveryTest {
         }
     }
 
+    /**
+     * Una copia de antes de los rangos (2.15.0) no tiene `anchor.span`. Recuperar de ella
+     * tiene que traer sus anclas —de una línea, que es lo que eran—, no perderlas todas
+     * por pedirle una columna que no tiene.
+     */
+    @Test
+    fun `una copia sin la columna de los rangos trae sus anclas`() = withScenario { s ->
+        Sql(s.backup).let { sql -> try { sql.execute("ALTER TABLE anchor DROP COLUMN span") } finally { sql.close() } }
+        Files.write(s.file, Files.readAllBytes(s.file).also { it.fill(0x5A, 0, 100) })
+        assertTrue(TaskDb.openChecked(s.dir) is TaskDb.Opening.Damaged)
+
+        val outcome = StoreRecovery.recover(s.dir, s.backup)!!
+        assertEquals(600, outcome.restored)
+
+        reopened(s) { _, store ->
+            assertEquals(listOf(CodeAnchor.of("src/Main.kt", 10, 0, "fun main")), store.task(TaskId("t-205"))!!.anchors)
+        }
+    }
+
     @Test
     fun `sin copia y sin nada legible se dice que se perdio`() = withScenario { s ->
         Files.delete(s.backup)

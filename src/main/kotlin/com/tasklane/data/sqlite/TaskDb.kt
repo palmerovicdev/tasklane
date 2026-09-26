@@ -249,6 +249,12 @@ internal class TaskDb private constructor(
                     for (pragma in TaskSchema.PRAGMAS) writer.execute(pragma)
                     writer.transaction {
                         for (ddl in TaskSchema.DDL) writer.execute(ddl.trimIndent())
+                        // En la misma transacción que el DDL: o la base queda con todas
+                        // sus columnas o se vuelve a intentar entera en la próxima apertura.
+                        for ((table, column, alter) in TaskSchema.COLUMNS) {
+                            val present = writer.rows("PRAGMA table_info($table)") { it.getString(1) }
+                            if (column !in present) writer.execute(alter)
+                        }
                         // Después del DDL y no antes: si la creación falla a medias, la
                         // base se queda en la versión 0 y el siguiente arranque la vuelve a
                         // intentar en vez de darla por buena a medio hacer.

@@ -48,4 +48,22 @@ object AnchorResolver {
     /** Comodidad para las pruebas y para cualquiera que ya tenga las líneas partidas. */
     fun resolve(anchor: CodeAnchor, lines: List<String>): Int =
         resolve(anchor, lines.size) { lines[it] }
+
+    /**
+     * Las líneas que abarca **ahora** un ancla (2.15.0): la primera donde la deje
+     * [resolve] y, detrás, las [CodeAnchor.span] que se anclaron, acotadas al final del
+     * fichero. En un ancla de una línea es esa línea sola.
+     *
+     * El bloque se va entero con su primera línea: si el código de encima creció, baja
+     * todo junto. Lo que no se sigue es lo que cambia **dentro** —dos líneas añadidas en
+     * medio dejan el final dos más arriba de lo que era—; sin guardar el texto de cada
+     * línea no hay de dónde saberlo, y un bloque aproximado sigue diciendo de qué parte
+     * del fichero habla la nota.
+     */
+    fun range(anchor: CodeAnchor, lineCount: Int, lineAt: (Int) -> String): IntRange {
+        val first = resolve(anchor, lineCount, lineAt)
+        return first..minOf(first + anchor.span, (lineCount - 1).coerceAtLeast(first))
+    }
+
+    fun range(anchor: CodeAnchor, lines: List<String>): IntRange = range(anchor, lines.size) { lines[it] }
 }

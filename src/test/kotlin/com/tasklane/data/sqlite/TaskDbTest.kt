@@ -55,6 +55,35 @@ class TaskDbTest {
     }
 
     /**
+     * Una base de antes de los rangos (2.15.0) gana la columna `anchor.span` al abrirse, sin
+     * subir `user_version`: sus anclas son de una línea, y lo que inserta una versión
+     * anterior sin nombrar la columna sigue entrando.
+     */
+    @Test
+    fun `una base de antes de los rangos gana la columna al abrir`() = withDir { dir ->
+        TaskDb.open(dir)!!.let { first ->
+            TaskStore(first).importBatch(
+                listOf(StoreFixture.task("a", anchors = listOf(com.tasklane.domain.model.CodeAnchor.of("src/A.kt", 4)))),
+                StoreFixture.CONFIG,
+            )
+            first.writer.execute("ALTER TABLE anchor DROP COLUMN span")
+            first.close()
+        }
+
+        val second = TaskDb.open(dir)!!
+        try {
+            assertTrue("span" in second.writer.rows("PRAGMA table_info(anchor)") { it.getString(1) })
+            assertEquals(TaskSchema.VERSION, second.writer.count("PRAGMA user_version"))
+            assertEquals(0, second.writer.count("SELECT span FROM anchor WHERE task_id = 'a'"))
+            // Lo que haría una versión anterior al guardar una tarea.
+            second.writer.execute("INSERT INTO anchor (task_id, pos, path, line, col, text) VALUES ('a', 1, 'src/B.kt', 0, 0, '')")
+            assertEquals(2, TaskStore(second).task(com.tasklane.domain.model.TaskId("a"))!!.anchors.size)
+        } finally {
+            second.close()
+        }
+    }
+
+    /**
      * La promesa que `TasksCodec` hacía con el atributo `version`, trasladada a
      * `PRAGMA user_version`: una base escrita por una versión **posterior** del plugin
      * se abre en solo lectura y se avisa, en vez de degradarla escribiéndola con un

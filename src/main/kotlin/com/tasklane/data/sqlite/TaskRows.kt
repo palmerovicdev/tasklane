@@ -250,5 +250,6 @@ internal object TaskRows {
         line = rows.getInt(2),
         column = rows.getInt(3),
         text = rows.getString(4).orEmpty(),
+        span = rows.getInt(5),
     )
 }

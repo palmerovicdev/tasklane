@@ -30,6 +30,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P16 · Tasklane para agentes de IA (herramientas MCP)    | `2.12.0` |
 | ✅ | P1 · Anclas que sobreviven a renombrar y mover ficheros | `2.13.0` |
 | ✅ | P4 · Widget en la barra de estado                       | `2.14.0` |
+| ✅ | P12 · Anclar un rango, no una línea                     | `2.15.0` |
 
 ---
 
@@ -63,7 +64,7 @@ color si hay algo vencido. Hoy no hay ningún `StatusBarWidget`.
 Salió como «ToDo 3 · Doing 1 · 2 overdue»: se elige qué estados cuenta y si cuenta las
 vencidas (en rojo, sólo si las hay), y cada cuenta abre su pestaña o sus tareas.
 
-### P5 · Compartir tareas (importar XML) 👾
+### P5 · Compartir tareas (importar XML) ⏸️
 
 Mínimo: *Import XML…* en el menú *Export*, fusionando por id —`TasksXmlReader` ya existe y
 no tiene acción—. Ambicioso: tareas marcadas como compartidas que van a un fichero
@@ -112,11 +113,16 @@ tiene. Encaja con los enlaces de un clic que ya pinta la tarjeta.
 desmarcadas—, y plantillas por proyecto en `tasklane.xml` («Bug»: pasos, esperado,
 obtenido, checklist) elegibles desde la flecha de *New Task*.
 
-### P12 · Anclar un rango, no una línea 👾
+### P12 · Anclar un rango, no una línea ✅ `2.15.0`
 
 Con una selección en el editor, el ancla guarda de la línea X a la Y: el editor resalta
 el bloque entero, el tooltip enseña el fragmento y la tarjeta desplegada lo pinta como
 bloque de código. Hoy `CodeAnchor` sólo tiene `line` y `column`.
+
+Salió como primera línea más largo (`CodeAnchor.span`): el bloque se va entero con su
+primera línea. El tinte del editor lleva el color de la prioridad; el código de la tarjeta
+y del tooltip de la ficha se lee del fichero, no se guarda, y sigue al editor. Una selección
+de varias líneas ya no se copia al cuerpo. La columna nueva de `anchor` no sube el esquema.
 
 ### P13 · Historial de la tarea ⏸️
 
@@ -219,7 +225,7 @@ el dominio con los datos y MCP, y la caza de lo que parece vivo y no lo está. N
 una propuesta anterior, y cada una dice dónde está el hueco. Van ordenadas por el valor que
 creo que aportan.
 
-### P23 · Copias de seguridad que sobreviven al proyecto 🟡
+### P23 · Copias de seguridad que sobreviven al proyecto ⏸️
 
 Hoy hay **una** copia, `tasklane.db.backup`, en la misma carpeta que la base y sin las
 imágenes. `git clean -fdx`, o borrar `.idea` para «resetear» el proyecto, se lleva la base,
@@ -233,7 +239,7 @@ tareas tiene cada una, y aparta la base actual antes de sustituirla, como hace l
 reparación. Y lo que más importa: abrir un proyecto **sin base** pero con copias fuera
 ofrece recuperarlas («Hay una copia de hace 2 días con 340 tareas · Restore»).
 
-### P24 · Las capturas, también para el agente 🟡
+### P24 · Las capturas, también para el agente 👾
 
 `tasklane_get_task` sólo dice cuántas imágenes tiene la tarea (`images: 2`), y el cuerpo
 lleva `![](tasklane:<sha>)`, que fuera del IDE no significa nada. Media tarea es una
@@ -244,7 +250,7 @@ la llama. En la otra dirección, adjuntar una imagen desde una ruta en `create_t
 `update_task`, para que el agente deje la captura de lo que ha hecho o el diagrama que ha
 generado.
 
-### P25 · Saber qué ha hecho el agente 🟡
+### P25 · Saber qué ha hecho el agente ⏸️
 
 Lo que hace un agente aparece en la lista en el acto, pero sin firma: una tarea cerrada por
 Claude Code de madrugada es igual que una cerrada a mano. El servidor MCP dice qué cliente
@@ -255,7 +261,7 @@ llama (`ClientInfo.name`, hoy sin usar). Propuesta: guardar quién creó y quié
 historial (P13): sólo la firma y el aviso. Falta comprobar que esa API ya está en la
 2026.1.5 y no sólo en la 2026.2.
 
-### P26 · Encargar una tarea a un agente 🟡
+### P26 · Encargar una tarea a un agente 👾
 
 Para que un agente haga una tarea hay que ir a su terminal y escribir «haz la tarea de
 Tasklane sobre…». Una acción en la tarjeta, *Hand Off to Agent*, que abre una pestaña de la
@@ -266,7 +272,7 @@ cualquier otro: `codex`, `gemini`…— y pasa la tarea a *Doing*. Sin comando c
 La terminal va como dependencia opcional, como Git y MCP; `TerminalToolWindowManager` ya
 abre una pestaña con un comando. No es P17: no cambia tu contexto, delega la tarea.
 
-### P27 · Pegar y soltar en la lista 🟡
+### P27 · Pegar y soltar en la lista 👾
 
 Tasklane existe para capturar, pero la lista no acepta nada: `⌘V` sobre ella no hace nada y
 soltar algo tampoco (el único `DropTarget` es el del diálogo). Propuesta: pegar **varias
@@ -276,7 +282,7 @@ captura** crea una tarea con ella, y **una URL**, la tarea con su enlace. Soltar
 desde el Finder o la vista del proyecto: una imagen da una tarea con la captura, y un
 fichero de código, una tarea anclada a él. `TaskCommand.CreateMany` ya existe.
 
-### P28 · La búsqueda enseña por qué casa 🟡
+### P28 · La búsqueda enseña por qué casa 👾
 
 Se busca en el cuerpo entero, pero la tarjeta plegada enseña siempre **la primera línea**
 del cuerpo y sólo resalta en el título: si `token` casa en la línea doce, la tarjeta no dice
@@ -284,7 +290,7 @@ por qué ha salido. Propuesta: con una búsqueda activa, la línea del cuerpo qu
 la que casa, con el término resaltado, y el resaltado también ignora los acentos, como la
 búsqueda (hoy `autenticacion` encuentra `autenticación` pero no la resalta).
 
-### P29 · El lenguaje de consulta, completo 🟡
+### P29 · El lenguaje de consulta, completo 👾
 
 La ventana filtra por vencidas y marcadas, y el CSV exporta vencimiento, fechas y checklist,
 pero nada de eso se puede **buscar**: `is:overdue` se busca como texto y devuelve cero, y
@@ -295,7 +301,7 @@ autocompletado de operadores y valores en el buscador —estados, prioridades, e
 Lo ganan también `⇧⇧` y el agente por MCP, que no tienen el filtro de la ventana y hoy no
 pueden preguntar «qué está vencido». No es P9: no guarda nada, sólo deja decirlo.
 
-### P30 · Etiquetas de verdad 🟡
+### P30 · Etiquetas de verdad 👾
 
 Las etiquetas son texto suelto: el campo no sugiere las que ya existen —así nacen `#api` y
 `#apis`—, no hay forma de renombrar o fusionar una en todas las tareas, y la ficha de la
@@ -304,7 +310,7 @@ repositorio y cuántas tareas tiene cada una; un clic en `#api` en la tarjeta fi
 ella; una tabla de etiquetas en *Settings* para renombrar, fusionar y borrar, como la de
 prioridades y con su reasignación; y color opcional por etiqueta.
 
-### P31 · Vencimiento y etiquetas desde el menú, también sobre una selección 🟡
+### P31 · Vencimiento y etiquetas desde el menú, también sobre una selección 👾
 
 Prioridad y estado se cambian desde el menú y sobre una selección; vencimiento y etiquetas,
 sólo desde el diálogo y tarea a tarea. Propuesta: *Due ▸ Today / Tomorrow / End of Week /
@@ -313,7 +319,7 @@ la selección. Como pasó con `Task.order`, las piezas están y nadie las usa:
 `TaskCommand.SetDueDate` y `SetTags` están en el reductor y sólo los llaman los tests, y los
 preajustes ya están en `DueDates`.
 
-### P32 · Fijar una tarea encima del editor 🟡
+### P32 · Fijar una tarea encima del editor ⏸️
 
 La captura ampliada ya se fija con su chincheta y se queda encima del editor mientras se
 programa. Lo mismo para la tarea entera: una tarjeta flotante y pequeña con el título, la
@@ -322,7 +328,7 @@ vista al cambiar de pestaña y de fichero. Es tener delante los pasos mientras s
 la tool window abierta. No es P17: no cambia el estado ni guarda contextos, sólo deja la
 nota a la vista.
 
-### P33 · Mover una tarea a otro repositorio 🟡
+### P33 · Mover una tarea a otro repositorio ⏸️
 
 Con varios repositorios en la ventana, una tarea apuntada en el equivocado se queda ahí: no
 hay comando que cambie `task.repo`, el diálogo no tiene selector y no hay *Duplicate*. La
@@ -331,7 +337,7 @@ Propuesta: *Move To Repository ▸* —sólo con más de uno—, también sobre 
 lleva las capturas al almacén del otro repositorio; las anclas valen tal cual, porque son
 relativas al proyecto. Y `repository` en `tasklane_update_task`.
 
-### P34 · El teclado, entero de verdad 🟡
+### P34 · El teclado, entero de verdad 👾
 
 `docs/plan-atajos.md` dejó escrito «lo que hay que tocar» y no se hizo, y el README promete
 que la ventana «se maneja entera con el teclado», pero desplegar una tarjeta o pulsar un
@@ -343,7 +349,7 @@ desplegar, marcar y cambiar la prioridad (`1…9`); recorrer los distintivos de 
 el teclado; y que un cambio en el *Keymap* se aplique sin reabrir la ventana (hoy se lee una
 sola vez).
 
-### P35 · Primeros pasos en una lista vacía 🟡
+### P35 · Primeros pasos en una lista vacía 👾
 
 Un proyecto nuevo enseña «No tasks yet · Press the + button to create one», en texto sin
 enlace. Es justo cuando quien acaba de instalar el plugin decide si le sirve, y no se entera

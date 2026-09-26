@@ -181,6 +181,7 @@ internal object TasksXmlReader {
                 line = reader.getAttributeValue(null, "line")?.toIntOrNull() ?: 0,
                 column = reader.getAttributeValue(null, "column")?.toIntOrNull() ?: 0,
                 text = reader.getAttributeValue(null, "text").orEmpty(),
+                span = reader.getAttributeValue(null, "span")?.toIntOrNull() ?: 0,
             )
         }
 

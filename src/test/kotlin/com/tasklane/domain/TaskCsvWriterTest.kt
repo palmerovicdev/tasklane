@@ -49,13 +49,14 @@ class TaskCsvWriterTest {
             tags = listOf("api", "auth"),
             bookmarked = true,
             dueDate = Instant.parse("2026-09-20T21:59:59Z"),
-            anchors = listOf(CodeAnchor.of("src/Auth.kt", 41)),
+            // El bloque (2.15.0) sale como se escribe en el diálogo, y se puede volver a pegar.
+            anchors = listOf(CodeAnchor.of("src/Auth.kt", 41), CodeAnchor.of("src/Main.kt", 9, span = 3)),
         )
 
         val rows = csv(task).removePrefix("﻿").split("\r\n")
 
         assertEquals(
-            "Arreglar el login,,Done,High,\"api, auth\",2026-09-20,yes,src/Auth.kt:42,," +
+            "Arreglar el login,,Done,High,\"api, auth\",2026-09-20,yes,\"src/Auth.kt:42, src/Main.kt:10-13\",," +
                 "2026-09-13 12:00,2026-09-13 13:00,2026-09-13 14:00,t-1",
             rows[1],
         )

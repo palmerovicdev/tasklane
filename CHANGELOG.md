@@ -9,6 +9,44 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.15.0]
+
+Menor: anclar un bloque de código, no sólo una línea. Es la P12 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Un ancla puede abarcar un bloque.** Con varias líneas seleccionadas, *New Tasklane
+  Task from Here* ancla la tarea de la primera a la última, y la ficha dice
+  `Login.kt:42-58`. En el diálogo y por MCP se escribe igual —`src/Login.kt:42-58`—, y un
+  enlace de GitHub con rango, `#L42-L58`, ya no pierde el final.
+- **El editor tiñe el bloque entero** con un poco del color de la prioridad, debajo del
+  icono o la pastilla de siempre, mientras la tarea siga abierta. El tinte se rehace con el
+  tema y deja ver la línea del cursor.
+- **La tarjeta desplegada enseña el código** del bloque, tal como está hoy en el fichero y
+  no como estaba al anotarlo, con la ficha encima para ir a él. Sigue al editor: si se
+  cambia el código, la tarjeta lo ve. De un bloque largo se enseñan 40 líneas y se dice
+  cuántas quedan.
+- **El tooltip de la ficha lleva el código**, también el de un ancla de una línea: pasar el
+  ratón por `Login.kt:42` ya dice de qué trozo habla la nota.
+
+### Cambiado
+- Seleccionar varias líneas y crear la tarea desde ahí ya **no copia el código al cuerpo**:
+  su primera línea acababa siendo el título. Ahora se ancla el bloque, la tarjeta lo
+  enseña y el cuerpo queda para la nota. Una selección dentro de una línea se sigue
+  ofreciendo como título.
+
+### Detalles
+- El bloque se guarda como la primera línea más **cuántas le siguen**, y se reencuentra
+  por la primera: si el código de encima crece, baja entero. Lo que se escriba dentro del
+  bloque no se sigue —su final se queda donde estaba—.
+- `tasklane_get_task` da `endLine` en los bloques, contada desde donde está hoy la
+  primera línea, y el CSV escribe `ruta:42-58`.
+- **Formato:** una columna nueva, `anchor.span`, que se añade al abrir la base la primera
+  vez; el esquema **sigue en la versión 1**. Una versión anterior abre la base y edita las
+  tareas como siempre, pero si guarda una tarea con un bloque, el bloque se queda en su
+  primera línea. En `tasks.xml` el largo va en el atributo `span`, que una versión anterior
+  ignora. Recuperar una base desde una copia de antes de la columna trae sus anclas igual.
+
 ## [2.14.0]
 
 Menor sin cambio de formato: los recuentos en la barra de estado. Es la P4 de

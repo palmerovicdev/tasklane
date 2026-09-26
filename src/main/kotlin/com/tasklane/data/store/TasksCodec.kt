@@ -81,6 +81,9 @@ object TasksCodec {
                 // las versiones anteriores a la marca en el editor—.
                 if (anchor.column > 0) child.setAttribute("column", anchor.column.toString())
                 if (anchor.text.isNotEmpty()) child.setAttribute("text", anchor.text)
+                // El rango, también sólo cuando lo es (2.15.0). Una versión anterior no lo
+                // lee y se queda con la primera línea, que es el ancla que ella sabe pintar.
+                if (anchor.isRange) child.setAttribute("span", anchor.span.toString())
                 el.addContent(child)
             }
 
@@ -144,6 +147,7 @@ object TasksCodec {
                 line = child.getAttributeValue("line")?.toIntOrNull() ?: 0,
                 column = child.getAttributeValue("column")?.toIntOrNull() ?: 0,
                 text = child.getAttributeValue("text").orEmpty(),
+                span = child.getAttributeValue("span")?.toIntOrNull() ?: 0,
             )
         }
 

@@ -19,6 +19,7 @@ import com.intellij.openapi.editor.event.EditorMouseMotionListener
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -76,6 +77,10 @@ import java.awt.event.MouseEvent
  *
  * El índice se calcula **fuera del EDT** y sólo se vuelve al EDT a pintar, que es lo que
  * exigen el `MarkupModel` y el `InlayModel`.
+ *
+ * **Un ancla de varias líneas tiñe su bloque** (2.15.0): el icono o la pastilla siguen en
+ * la primera línea, que es donde se pulsa, y el fondo de todo el bloque lleva un poco del
+ * color de la prioridad. Ver [blocks].
  */
 @Service(Service.Level.PROJECT)
 internal class AnchorMarkers(
@@ -172,7 +177,47 @@ internal class AnchorMarkers(
             AnchorMarkerStyle.INLINE -> inline(editor, entries, fresh)
             AnchorMarkerStyle.OFF -> return
         }
+        blocks(editor, entries, fresh)
         marks[editor] = fresh
+    }
+
+    /**
+     * El fondo de los bloques anclados (2.15.0).
+     *
+     * **El color sale al pintar, no al instalar**: es la mezcla del fondo del esquema del
+     * editor con el de la prioridad, y un `JBColor.lazy` la rehace en cada repintado. Así
+     * cambiar de tema o de esquema no deja un bloque claro sobre un editor oscuro hasta
+     * que algo reinstale las marcas. Mezclado y no translúcido porque lo que se pinta
+     * debajo de un fondo con transparencia depende del orden en que el editor pinte cada
+     * capa, y eso no es contrato de nadie.
+     *
+     * **Por debajo de la línea del cursor** ([BLOCK_LAYER]): dentro del bloque, la línea
+     * donde se escribe tiene que seguir viéndose; y por encima de la sintaxis, que casi
+     * nunca pinta fondo pero cuando lo hace —un fragmento de otro lenguaje— no debe tapar
+     * el bloque.
+     *
+     * Dos tareas sobre el mismo bloque son **un** fondo, el de la que manda —la primera,
+     * ver [AnchoredTasks.order]—, como comparten icono en el margen. Dos bloques que se
+     * solapan se tiñen los dos, y en lo común gana uno: no se suman, que es lo que haría
+     * que un bloque anidado en otro gritara más que el resto.
+     */
+    private fun blocks(editor: Editor, entries: List<AnchoredTask>, marks: Marks) {
+        val document = editor.document
+        val seen = HashSet<IntRange>()
+        for (entry in entries) {
+            if (!entry.anchor.isRange) continue
+            val lines = AnchorResolver.range(entry.anchor, document.lineCount) { index -> lineAt(document, index) }
+            if (!seen.add(lines)) continue
+            val priority = colorOf(listOf(entry))
+            val tint = JBColor.lazy { ColorUtil.mix(editor.colorsScheme.defaultBackground, priority, BLOCK_TINT) }
+            marks.highlighters += editor.markupModel.addRangeHighlighter(
+                document.getLineStartOffset(lines.first),
+                document.getLineEndOffset(lines.last),
+                BLOCK_LAYER,
+                TextAttributes().apply { backgroundColor = tint },
+                HighlighterTargetArea.LINES_IN_RANGE,
+            )
+        }
     }
 
     /** Un icono por línea, con todas las tareas de esa línea detrás. */
@@ -456,6 +501,17 @@ internal class AnchorMarkers(
 
         /** Cuántas capturas caben en un tooltip antes de que deje de serlo. */
         private const val MAX_PREVIEWS = 2
+
+        /**
+         * Cuánto color de la prioridad lleva el fondo de un bloque (2.15.0). Lo justo para
+         * ver dónde empieza y dónde acaba sin leer el código a través de un filtro: el
+         * bloque se queda teñido mientras la tarea esté abierta, y un fondo que se nota
+         * mucho a la media hora ya no se mira.
+         */
+        private const val BLOCK_TINT = 0.1
+
+        /** Ver [blocks]: encima de la sintaxis, debajo de la línea del cursor. */
+        private const val BLOCK_LAYER = HighlighterLayer.CARET_ROW - 1
 
         /**
          * El hueco de una captura dentro del tooltip. Más ancho que esto y el globo tapa

@@ -121,6 +121,26 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.15.0 &mdash; anchor a block of code</h3>
+            <ul>
+              <li><b>Anchor a whole block, not just a line.</b> Select several lines and use
+                  <i>New Tasklane Task from Here</i>: the task is anchored from the first line to
+                  the last, and its badge reads <code>Login.kt:42-58</code>. Type ranges the same
+                  way in the task dialog or through the MCP tools; GitHub links with a
+                  <code>#L42-L58</code> range keep their end now.</li>
+              <li><b>The editor tints the block</b> with a hint of the priority colour while the
+                  task is open, under the usual gutter icon or inline chip.</li>
+              <li><b>The expanded card shows the code</b> of the block as it is in the file
+                  <i>today</i>, and follows your edits. The badge's tooltip shows it too, for
+                  single-line anchors as well.</li>
+              <li>Creating a task from a multi-line selection no longer copies the code into the
+                  task: the block is anchored and shown by the card, and the body is left for your
+                  note.</li>
+            </ul>
+            <p><b>Compatibility:</b> a new column is added to the task database the first time the
+               project opens; the schema version does not change. Earlier versions keep reading and
+               editing your tasks, but a task they save keeps only the first line of its block.</p>
+
             <h3>2.14.0 &mdash; counts in the status bar</h3>
             <ul>
               <li><b>Your list in the status bar.</b> <i>ToDo 3 &middot; Doing 1 &middot; 2

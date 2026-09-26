@@ -7,6 +7,7 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -130,6 +131,25 @@ class ToolModelTest {
 
         val gone = views.detail(t) { null }
         assertEquals(true, ((gone["code"] as List<*>).single() as Map<*, *>)["missing"])
+    }
+
+    /**
+     * Un bloque (2.15.0): el resumen lo nombra como se escribe, y el detalle da su última
+     * línea contada desde donde está hoy la primera.
+     */
+    @Test
+    fun `un bloque anclado dice hasta que linea llega`() {
+        val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {", span = 5)
+        val t = task("Login roto", anchor)
+        val views = TaskViews(config, { "root" }, now, zone)
+
+        assertEquals(listOf("src/Auth.kt:42-47"), views.summary(t)["code"])
+        val code = (views.detail(t) { 56 }["code"] as List<*>).single() as Map<*, *>
+        assertEquals(57, code["line"])
+        assertEquals(62, code["endLine"])
+
+        val single = (views.detail(task("Otra", CodeAnchor.of("a.kt", 3))) { 3 }["code"] as List<*>).single() as Map<*, *>
+        assertFalse("endLine" in single)
     }
 
     @Test

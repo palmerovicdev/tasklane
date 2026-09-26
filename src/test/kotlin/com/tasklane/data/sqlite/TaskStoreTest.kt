@@ -385,6 +385,16 @@ class TaskStoreTest {
         assertTrue(store.referencedAmong(REPO, candidatos).isEmpty())
     }
 
+    /** Un bloque anclado (2.15.0) vuelve con su largo, por los dos caminos de lectura. */
+    @Test
+    fun `un bloque anclado vuelve con su largo`() = withStore { store, _ ->
+        val block = CodeAnchor.of("src/Auth.kt", 41, 4, "fun login() {", span = 16)
+        store.put(task("a", anchors = listOf(block, CodeAnchor.of("src/Main.kt", 1))))
+
+        assertEquals(listOf(block, CodeAnchor.of("src/Main.kt", 1)), store.task(TaskId("a"))!!.anchors)
+        assertEquals(block, store.anchorsIn("src/Auth.kt").single().anchor)
+    }
+
     /** Qué tareas cuelgan de un fichero: un salto de índice, no el modelo entero (§3.6). */
     @Test
     fun `las anclas se preguntan por ruta`() = withStore { store, _ ->

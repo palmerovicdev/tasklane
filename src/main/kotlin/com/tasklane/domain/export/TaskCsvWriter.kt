@@ -69,7 +69,7 @@ class TaskCsvWriter(
                 task.tags.joinToString(", "),
                 task.dueDate?.let(date::format).orEmpty(),
                 if (task.bookmarked) "yes" else "no",
-                task.anchors.joinToString(", ") { "${it.path}:${it.line + 1}" },
+                task.anchors.joinToString(", ") { it.reference },
                 task.links.joinToString(" ") { it.url },
                 dateTime.format(task.createdAt),
                 dateTime.format(task.updatedAt),

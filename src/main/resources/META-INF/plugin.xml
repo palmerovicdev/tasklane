@@ -107,13 +107,13 @@
             <li><b>Change the priority from the card</b>: click the priority badge for the list
                 of priorities with their colours.</li>
             <li><b>Jump to the code</b> from the <code>Auth.kt:42</code> badge, with the full
-                path in its tooltip. On a narrow card the priority and anchor badges shrink to
+                path and the code that is there today in its tooltip. On a narrow card the priority and anchor badges shrink to
                 their icon instead of disappearing &mdash; guaranteed down to the narrowest the
                 window can be &mdash; and the icon still works.</li>
             <li><b>Expand a card</b> with the chevron on its right to read the whole task without
                 leaving the list: the full title, every line of the body and the images, each one
-                after the line that names it. Click an image to see it full size. The chevron only
-                appears when the card is hiding something.</li>
+                after the line that names it, and the code of any anchored block. Click an image to
+                see it full size. The chevron only appears when the card is hiding something.</li>
             <li><b>Select card text with the mouse</b> and copy it with <code>&#8984;C</code> /
                 <code>Ctrl+C</code>; <code>Escape</code> clears the selection.</li>
             <li><b>Bookmark</b> a task from the icon on its row to pin it to the top of its group,
@@ -221,9 +221,14 @@
         <ul>
             <li><b>Tasks that point at the code.</b> <i>New Tasklane Task from Here</i>, in the
                 editor's context menu and the <b>Tools</b> menu, opens the dialog with the file,
-                the line and the exact character already attached; whatever is selected comes in
-                as the body. With a file selected in the Project view instead, the task points at
+                the line and the exact character already attached; a selection within a line comes
+                in as the body. With a file selected in the Project view instead, the task points at
                 the file.</li>
+            <li><b>Anchor a block, not just a line.</b> Select several lines and the task is
+                anchored from the first to the last: its badge reads <code>Login.kt:42-58</code>,
+                the editor tints the whole block in the task's priority colour, and the expanded
+                card shows its code as it is today. Type <code>src/Login.kt:42-58</code> in the
+                dialog, or paste a GitHub <code>#L42-L58</code> link, to the same effect.</li>
             <li><b>Anchors that survive edits.</b> The line is stored with its text, not just its
                 number, and found again by that text: an extra import, a re-indent or a moved
                 function break nothing. If the line is gone the file still opens where it was, and

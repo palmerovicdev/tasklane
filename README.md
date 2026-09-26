@@ -65,7 +65,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas |
 | **En la barra de estado** | *ToDo 3 · Doing 1 · 2 overdue* del repositorio activo, con lo vencido en rojo. Qué estados cuenta y si cuenta las vencidas, a elegir; cada cuenta abre su pestaña o sus tareas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
-| **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic |
+| **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` —o a un bloque, `Login.kt:42-58`, seleccionando varias líneas— desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic y enseña el código del bloque |
 | **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
 | **El código enseña sus tareas** | Una marca en el margen o una pastilla en la línea, con el color de la prioridad, un tooltip con la tarea y un clic que la abre |
 | **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas, un selector, y búsqueda en todos a la vez |
@@ -92,7 +92,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.14.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.15.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -354,15 +354,17 @@ vivían junto al código pero no apuntaban a él, y volver a «¿dónde era esto
 de quien escribió la nota.
 
 *New Tasklane Task from Here*, en el **menú contextual del editor** y en el menú **Tools**,
-abre el diálogo de siempre con el sitio ya puesto. Si hay algo seleccionado, ese texto entra
-como cuerpo. Con un fichero seleccionado en la vista del proyecto en vez de un editor, la
-tarea apunta al fichero.
+abre el diálogo de siempre con el sitio ya puesto. Con **varias líneas seleccionadas**, el
+ancla abarca el bloque entero (2.15.0); con una selección dentro de una línea, ese texto
+entra como cuerpo. Con un fichero seleccionado en la vista del proyecto en vez de un
+editor, la tarea apunta al fichero.
 
 | | |
 |---|---|
-| Qué se guarda | La ruta **relativa a la raíz del proyecto**, la línea, la columna, y el texto de esa línea |
-| En la tarjeta | Un distintivo `Auth.kt:42` con color de enlace. Un clic abre el fichero por ahí —en la línea y el carácter exactos—; la ruta entera va al tooltip. Si no cabe entero se queda en su icono, que lleva al mismo sitio |
-| En el editor | La línea marcada, con el color de la prioridad. Ver [La marca en el editor](#la-marca-en-el-editor) |
+| Qué se guarda | La ruta **relativa a la raíz del proyecto**, la línea, la columna, y el texto de esa línea; en un bloque, además, cuántas líneas le siguen |
+| En la tarjeta | Un distintivo `Auth.kt:42` —o `Auth.kt:42-58`— con color de enlace. Un clic abre el fichero por ahí —en la línea y el carácter exactos—; el tooltip lleva la ruta entera y **el código de hoy**. Si no cabe entero se queda en su icono, que lleva al mismo sitio |
+| Un bloque, desplegado | La tarjeta desplegada pinta el código del bloque tal como está ahora en el fichero —hasta 40 líneas, y cuántas quedan—, con su ficha encima para ir a él. Sigue al editor mientras se escribe |
+| En el editor | La línea marcada, con el color de la prioridad; un bloque, además, con el fondo teñido de ese color. Ver [La marca en el editor](#la-marca-en-el-editor) |
 | Quitarla | En el diálogo de la tarea, con el aspa de su ficha. No se pueden añadir a mano: un ancla es un sitio del editor, y teclear una ruta y un número es lo que esto viene a evitar |
 | Buscar | `file:AuthService` por un trozo de la ruta, `has:code` por tenerla y `has:broken-anchor` por tenerla rota. La ruta entra además en el texto libre |
 | Si el fichero se mueve | Renombrarlo o moverlo **desde el IDE** —a mano o con una refactorización, él o su directorio— se lleva el ancla. Si desaparece de otra forma, el distintivo sale tachado y con icono de aviso |
@@ -391,6 +393,14 @@ las junta todas. Se comprueba al abrir el proyecto —el disco cambia con el IDE
 y con cada cambio del sistema de ficheros, así que si el fichero vuelve el ancla se
 arregla sola.
 
+**Un bloque es su primera línea y un largo** (2.15.0), no dos números de línea: se
+reencuentra por el texto de la primera, igual que un ancla de una línea, y el bloque se va
+entero con ella. Si el código de encima crece, baja todo junto; lo que se escriba **dentro**
+del bloque no se sigue, y su final se queda donde estaba. Se escribe como se nombra en
+cualquier sitio —`src/Login.kt:42-58`, o `#L42-L58` copiado de GitHub—, en el diálogo y
+por MCP. El código de la tarjeta **no se guarda con la tarea**: se lee del fichero, porque la
+nota habla del código que hay que tocar hoy, no del que había al anotarla.
+
 ### La marca en el editor
 
 Y el código, a su vez, enseña sus tareas. Una línea con tarea va marcada con el logo de
@@ -409,6 +419,7 @@ suele ser la respuesta: obligar a abrir la ventana justo ahí era el peor moment
 |---|---|
 | Qué se marca | Sólo lo que sigue **abierto**. Una tarea en un estado terminal es historia, no una nota sobre el código: marcarla convertiría el margen en un cementerio |
 | Varias en la misma línea | Una sola marca, con el logo entero —dos renglones— y el color de la de más prioridad. El tooltip las lista |
+| Un bloque | La marca en su primera línea, y el fondo del bloque entero con un poco del color de la prioridad (2.15.0). Por debajo de la línea del cursor, que se sigue viendo, y rehecho con el tema |
 | Dónde se elige | *Settings → Tools → Tasklane → Code anchors*. Es un ajuste **tuyo**: va a `workspace.xml`, no se comparte con el equipo |
 
 Hay dos formas, y ninguna es buena para todo el mundo:
@@ -501,8 +512,8 @@ servidor.
 |---|---|
 | `tasklane_list_repositories` | Los repositorios con sus tareas abiertas, y los estados y prioridades configurados |
 | `tasklane_list_tasks` | Sin consulta, lo abierto estado por estado y en el orden de la lista; con consulta, los aciertos por relevancia, con [la misma sintaxis](#búsqueda) que el buscador. `repository: "all"` busca en todos |
-| `tasklane_get_task` | Una tarea entera: cuerpo Markdown, casillas numeradas, enlaces y anclas **en la línea de hoy** —`anchoredAtLine` si se movió, `missing` si el fichero ya no está— |
-| `tasklane_create_task` | Crea una tarea, con estado, prioridad, etiquetas, vencimiento y anclas escritas como `src/Auth.kt:42` |
+| `tasklane_get_task` | Una tarea entera: cuerpo Markdown, casillas numeradas, enlaces y anclas **en la línea de hoy** —`anchoredAtLine` si se movió, `endLine` si es un bloque, `missing` si el fichero ya no está— |
+| `tasklane_create_task` | Crea una tarea, con estado, prioridad, etiquetas, vencimiento y anclas escritas como `src/Auth.kt:42`, o `src/Auth.kt:42-58` para un bloque |
 | `tasklane_update_task` | Cambia sólo lo que se le pasa; `dueDate: "none"` quita el vencimiento |
 | `tasklane_complete_task` | La lleva al estado cerrado. Repetirla no la reabre |
 | `tasklane_set_checklist_item` | Marca o desmarca la casilla N. Repetirla no la alterna |
@@ -785,7 +796,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.14.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.15.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

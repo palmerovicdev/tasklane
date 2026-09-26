@@ -74,7 +74,8 @@ class TasklaneToolset : McpToolset {
         |Returns one Tasklane task in full: its Markdown body (the first line is the title), state,
         |priority, tags, due date, links, numbered checklist items, and the code locations it is
         |anchored to. Code locations give the line where the anchored code is now, which may differ
-        |from where it was anchored; "missing": true means the file no longer exists.
+        |from where it was anchored, and "endLine" when they cover a block of lines; "missing": true
+        |means the file no longer exists.
         """,
     )
     suspend fun getTask(
@@ -105,7 +106,7 @@ class TasklaneToolset : McpToolset {
         tags: List<String>? = null,
         @McpDescription("Due date: YYYY-MM-DD, \"today\" or \"tomorrow\".")
         dueDate: String? = null,
-        @McpDescription("Code locations as path:line, relative to the project root, e.g. src/main/kotlin/Auth.kt:42.")
+        @McpDescription("Code locations as path:line or path:line-endLine for a block, relative to the project root, e.g. src/main/kotlin/Auth.kt:42 or src/main/kotlin/Auth.kt:42-58.")
         code: List<String>? = null,
     ): String = tools { create(body, repository, state, priority, tags, dueDate, code) }
 
@@ -131,7 +132,7 @@ class TasklaneToolset : McpToolset {
         tags: List<String>? = null,
         @McpDescription("New due date: YYYY-MM-DD, \"today\", \"tomorrow\", or \"none\" to remove it.")
         dueDate: String? = null,
-        @McpDescription("New code locations as path:line, replacing the current ones. An empty list removes them.")
+        @McpDescription("New code locations as path:line or path:line-endLine, replacing the current ones. An empty list removes them.")
         code: List<String>? = null,
         @McpDescription("Bookmark or unbookmark it. Bookmarked tasks stay at the top of their list.")
         bookmarked: Boolean? = null,
