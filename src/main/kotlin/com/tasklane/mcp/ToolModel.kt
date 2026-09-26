@@ -1,5 +1,6 @@
 package com.tasklane.mcp
 
+import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.DueDates
 import com.tasklane.domain.model.RepoKey
@@ -8,7 +9,10 @@ import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.TextNormalizer
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -113,18 +117,56 @@ internal fun checkItems(task: Task): List<CheckItem> {
 }
 
 /**
+ * Las capturas que el agente pasa por ruta (2.18.0). Kotlin puro: guardarlas es cosa de
+ * [TaskTools]; esto dice dónde están y cómo queda el cuerpo.
+ */
+internal object ToolImages {
+
+    /**
+     * La ruta que escribe el agente: absoluta, o relativa a la raíz del proyecto como las
+     * del código.
+     */
+    fun resolve(text: String, basePath: String?): Path {
+        val path = try {
+            Path.of(text.trim())
+        } catch (_: InvalidPathException) {
+            throw ToolError("Invalid image path \"$text\".")
+        }
+        if (path.isAbsolute) return path.normalize()
+        val base = basePath ?: throw ToolError("\"$text\" is relative and this project has no root folder. Use an absolute path.")
+        return Path.of(base).resolve(path).normalize()
+    }
+
+    /**
+     * [body] con las referencias de [ids] al final, una por línea, que es como la tarjeta
+     * las pinta debajo del texto. Las que el cuerpo ya nombra no se repiten: un agente que
+     * repite la llamada porque no vio la respuesta no debe duplicar la captura.
+     */
+    fun append(body: String, ids: List<AttachmentId>): String {
+        val present = ImageRefParser.ids(body)
+        val fresh = ids.distinct().filter { it !in present }
+        if (fresh.isEmpty()) return body
+        return body.trimEnd() + "\n" + fresh.joinToString("\n", transform = ImageRefParser::reference)
+    }
+}
+
+/**
  * Cómo ve un agente una tarea. Mapas y listas que [ToolJson] escribe tal cual.
  *
  * Dos formas: el **resumen**, para listas —lo de la tarjeta, sin el cuerpo—, y el
  * **detalle**, con el cuerpo entero, las anclas en su línea de hoy y las casillas
  * numeradas. Las fechas van en el día local del usuario (`2026-09-30`) porque es como
  * se escriben de vuelta; las marcas de tiempo, en ISO.
+ *
+ * @param imageFile el fichero de una captura, o `null` si ya no está. Lo pone quien tiene
+ *   el proyecto: ver `AttachmentService.file`.
  */
 internal class TaskViews(
     private val config: TasklaneConfig,
     private val repoName: (RepoKey) -> String,
     private val now: Instant,
     private val zone: ZoneId,
+    private val imageFile: (RepoKey, AttachmentId) -> Path? = { _, _ -> null },
 ) {
 
     fun summary(task: Task): Map<String, Any?> = buildMap<String, Any?> {
@@ -143,6 +185,7 @@ internal class TaskViews(
         val (done, total) = task.checklist
         if (total > 0) put("checklist", "$done/$total")
         if (task.anchors.isNotEmpty()) put("code", task.anchors.map { it.reference })
+        if (task.attachments.isNotEmpty()) put("images", task.attachments.map { it.id }.distinct().size)
     }
 
     /**
@@ -150,7 +193,7 @@ internal class TaskViews(
      *   no está. La pone quien tiene el proyecto: ver `CodeAnchors.currentLine`.
      */
     fun detail(task: Task, currentLine: (CodeAnchor) -> Int?): Map<String, Any?> = buildMap<String, Any?> {
-        putAll(summary(task) - "code" - "checklist")
+        putAll(summary(task) - "code" - "checklist" - "images")
         put("body", task.body)
         put("created", task.createdAt.toString())
         put("updated", task.updatedAt.toString())
@@ -175,7 +218,19 @@ internal class TaskViews(
             put("checklist", items.map { mapOf("index" to it.index, "checked" to it.checked, "text" to it.text) })
         }
         if (task.links.isNotEmpty()) put("links", task.links.map { it.url }.distinct())
-        if (task.attachments.isNotEmpty()) put("images", task.attachments.size)
+        // Media tarea es una captura, y fuera del IDE `![](tasklane:<sha>)` no dice nada
+        // (2.18.0): el servidor MCP sólo devuelve texto, pero el agente abre imágenes del
+        // disco. «ref» es lo que aparece en el cuerpo, para saber cuál es cuál.
+        val images = task.attachments.map { it.id }.distinct()
+        if (images.isNotEmpty()) {
+            put("images", images.map { id ->
+                val file = imageFile(task.repo, id)
+                buildMap<String, Any?> {
+                    put("ref", "${ImageRefParser.SCHEME}:${id.value}")
+                    if (file != null) put("path", file.toString()) else put("missing", true)
+                }
+            })
+        }
     }
 }
 

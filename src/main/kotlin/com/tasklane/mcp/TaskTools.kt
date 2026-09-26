@@ -4,8 +4,10 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.tasklane.code.CodeAnchors
+import com.tasklane.data.attachment.ImageNormalizer
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.model.AnchorReference
+import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
@@ -14,8 +16,10 @@ import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.query.QueryParser
 import com.tasklane.domain.text.TextNormalizer
 import com.tasklane.search.SearchScope
+import com.tasklane.service.AttachmentService
 import com.tasklane.service.SearchService
 import com.tasklane.service.TaskService
+import java.nio.file.Files
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,12 +44,13 @@ import java.util.Optional
 internal class TaskTools(private val project: Project) {
 
     private val tasks = TaskService.getInstance(project)
+    private val attachments = AttachmentService.getInstance(project)
     private val zone: ZoneId = ZoneId.systemDefault()
     private val now: Instant = Instant.now()
     private val snapshot = tasks.snapshot.value
     private val config = snapshot.config
 
-    private val views = TaskViews(config, ::repoName, now, zone)
+    private val views = TaskViews(config, ::repoName, now, zone, attachments::file)
 
     fun repositories(): String = ToolJson.write(
         mapOf(
@@ -127,27 +132,31 @@ internal class TaskTools(private val project: Project) {
         tags: List<String>?,
         due: String?,
         code: List<String>?,
+        images: List<String>?,
     ): String {
         if (body.isBlank()) throw ToolError("The task body is empty. Its first line is the title.")
         val repo = ToolNames.repository(snapshot.repositories, snapshot.activeRepo, repository)
         writable(repo.key)
         val id = TaskId.random()
-        write(
-            TaskCommand.Create(
-                repo = repo.key,
-                body = body,
-                stateId = state?.takeIf(String::isNotBlank)?.let { ToolNames.state(config, it).id },
-                priorityId = priority?.takeIf(String::isNotBlank)?.let { ToolNames.priority(config, it).id },
-                tags = tags.orEmpty(),
-                dueDate = due?.takeIf(String::isNotBlank)?.let { ToolNames.due(it, today(), zone) },
-                anchors = code.orEmpty().filter(String::isNotBlank).map(::anchorOf),
-                id = id,
-            ),
+        val command = TaskCommand.Create(
+            repo = repo.key,
+            body = body,
+            stateId = state?.takeIf(String::isNotBlank)?.let { ToolNames.state(config, it).id },
+            priorityId = priority?.takeIf(String::isNotBlank)?.let { ToolNames.priority(config, it).id },
+            tags = tags.orEmpty(),
+            dueDate = due?.takeIf(String::isNotBlank)?.let { ToolNames.due(it, today(), zone) },
+            anchors = code.orEmpty().filter(String::isNotBlank).map(::anchorOf),
+            id = id,
         )
+        // Las capturas, lo último: si un nombre o un ancla fallan, no queda ningún blob suelto.
+        write(command.copy(body = ToolImages.append(body, attach(repo.key, images))))
         return saved(id)
     }
 
-    /** Sólo cambia lo que se pasa. Un vencimiento `none` lo quita. */
+    /**
+     * Sólo cambia lo que se pasa. Un vencimiento `none` lo quita. Las [images] se añaden
+     * al cuerpo que quede —el nuevo, o el de ahora—; las que ya tenía siguen.
+     */
     fun update(
         id: String,
         body: String?,
@@ -157,22 +166,23 @@ internal class TaskTools(private val project: Project) {
         due: String?,
         code: List<String>?,
         bookmarked: Boolean?,
+        images: List<String>?,
     ): String {
         val task = find(id)
         writable(task.repo)
         if (body != null && body.isBlank()) throw ToolError("The task body can't be empty. Its first line is the title.")
-        write(
-            TaskCommand.UpdateTask(
-                repo = task.repo,
-                id = task.id,
-                body = body,
-                stateId = state?.takeIf(String::isNotBlank)?.let { ToolNames.state(config, it).id },
-                priorityId = priority?.takeIf(String::isNotBlank)?.let { ToolNames.priority(config, it).id },
-                tags = tags,
-                dueDate = due?.let { Optional.ofNullable(ToolNames.due(it, today(), zone)) },
-                anchors = code?.filter(String::isNotBlank)?.map(::anchorOf),
-            ),
+        val command = TaskCommand.UpdateTask(
+            repo = task.repo,
+            id = task.id,
+            body = body,
+            stateId = state?.takeIf(String::isNotBlank)?.let { ToolNames.state(config, it).id },
+            priorityId = priority?.takeIf(String::isNotBlank)?.let { ToolNames.priority(config, it).id },
+            tags = tags,
+            dueDate = due?.let { Optional.ofNullable(ToolNames.due(it, today(), zone)) },
+            anchors = code?.filter(String::isNotBlank)?.map(::anchorOf),
         )
+        val withImages = ToolImages.append(body ?: task.body, attach(task.repo, images))
+        write(command.copy(body = withImages.takeIf { body != null || it != task.body }))
         if (bookmarked != null && bookmarked != task.bookmarked) write(TaskCommand.ToggleBookmark(task.repo, task.id))
         return saved(task.id)
     }
@@ -242,6 +252,23 @@ internal class TaskTools(private val project: Project) {
                 throw ToolError("\"${lookup.path}\" has ${lookup.lines} lines; there is no line ${lookup.line + 1}.")
         }
     }
+
+    /**
+     * Las capturas que pasa el agente (2.18.0), guardadas como un fichero que se suelta en
+     * el diálogo —tal cual, ver [AttachmentService.attachFile]— en el repositorio de la
+     * tarea. Lo que no se puede leer como imagen falla antes de leerlo entero.
+     */
+    private fun attach(repo: RepoKey, paths: List<String>?): List<AttachmentId> =
+        paths.orEmpty().filter(String::isNotBlank).map { text ->
+            val file = ToolImages.resolve(text, project.basePath)
+            when {
+                Files.isDirectory(file) -> throw ToolError("\"$text\" is a folder, not an image.")
+                !Files.isRegularFile(file) -> throw ToolError("No file at \"$text\".")
+                Files.newInputStream(file).use { ImageNormalizer.sizeOf(it) } == null ->
+                    throw ToolError("\"$text\" is not an image Tasklane can read. Use PNG, JPEG, GIF or BMP.")
+            }
+            attachments.attachFile(repo, file) ?: throw ToolError("Tasklane could not save \"$text\". See the IDE log.")
+        }
 
     /**
      * El agente acaba de escribir el fichero desde fuera del IDE, y el vigilante de disco

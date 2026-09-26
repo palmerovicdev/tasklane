@@ -55,7 +55,7 @@ class TasklaneToolset : McpToolset {
         """,
     )
     suspend fun listTasks(
-        @McpDescription("Free text and operators, as in Tasklane's search box: state:Doing p:high #tag file:Auth.kt has:code is:done. Empty to list without searching.")
+        @McpDescription("Free text and operators, as in Tasklane's search box: state:Doing p:high #tag file:Auth.kt has:code has:image is:done. Empty to list without searching.")
         query: String? = null,
         @McpDescription("Only tasks in this state, e.g. \"Doing\".")
         state: String? = null,
@@ -75,7 +75,9 @@ class TasklaneToolset : McpToolset {
         |priority, tags, due date, links, numbered checklist items, and the code locations it is
         |anchored to. Code locations give the line where the anchored code is now, which may differ
         |from where it was anchored, and "endLine" when they cover a block of lines; "missing": true
-        |means the file no longer exists.
+        |means the file no longer exists. Images (screenshots, diagrams) appear in the body as
+        |![](tasklane:<id>); "images" gives the path of each image file on disk, so you can open it
+        |and see it. Keep those references if you rewrite the body.
         """,
     )
     suspend fun getTask(
@@ -90,7 +92,7 @@ class TasklaneToolset : McpToolset {
         |Adds a task to the developer's Tasklane list. Use it to record follow-up work you leave
         |pending instead of writing TODO comments in the code. The body is Markdown; its first
         |line is the title, and "- [ ] step" lines become a checklist. Anchor it to the code it is
-        |about with "code". Returns the created task.
+        |about with "code", and attach screenshots or diagrams with "images". Returns the created task.
         """,
     )
     suspend fun createTask(
@@ -108,15 +110,18 @@ class TasklaneToolset : McpToolset {
         dueDate: String? = null,
         @McpDescription("Code locations as path:line or path:line-endLine for a block, relative to the project root, e.g. src/main/kotlin/Auth.kt:42 or src/main/kotlin/Auth.kt:42-58.")
         code: List<String>? = null,
-    ): String = tools { create(body, repository, state, priority, tags, dueDate, code) }
+        @McpDescription("Image files to attach, such as a screenshot of the result or a diagram you generated: absolute paths or relative to the project root. PNG, JPEG, GIF or BMP. They are added at the end of the body.")
+        images: List<String>? = null,
+    ): String = tools { create(body, repository, state, priority, tags, dueDate, code, images) }
 
     @McpTool(name = "tasklane_update_task", title = "Update a Tasklane task")
     @McpToolHints(readOnlyHint = McpToolHintValue.FALSE, destructiveHint = McpToolHintValue.FALSE)
     @McpDescription(
         """
         |Changes a Tasklane task. Only the fields you pass change. Passing "body" replaces the whole
-        |Markdown body, so read the task first and keep what should stay. Moving it to a closed state
-        |closes it; to reopen, move it to an open one. Returns the updated task.
+        |Markdown body, so read the task first and keep what should stay, including its
+        |![](tasklane:<id>) image references. Moving it to a closed state closes it; to reopen, move
+        |it to an open one. Returns the updated task.
         """,
     )
     suspend fun updateTask(
@@ -136,7 +141,9 @@ class TasklaneToolset : McpToolset {
         code: List<String>? = null,
         @McpDescription("Bookmark or unbookmark it. Bookmarked tasks stay at the top of their list.")
         bookmarked: Boolean? = null,
-    ): String = tools { update(id, body, state, priority, tags, dueDate, code, bookmarked) }
+        @McpDescription("Image files to add at the end of the body: absolute paths or relative to the project root. PNG, JPEG, GIF or BMP. The images the task already has stay; to remove one, pass a body without its ![](tasklane:<id>) reference.")
+        images: List<String>? = null,
+    ): String = tools { update(id, body, state, priority, tags, dueDate, code, bookmarked, images) }
 
     @McpTool(name = "tasklane_complete_task", title = "Complete a Tasklane task")
     @McpToolHints(readOnlyHint = McpToolHintValue.FALSE, destructiveHint = McpToolHintValue.FALSE, idempotentHint = McpToolHintValue.TRUE)

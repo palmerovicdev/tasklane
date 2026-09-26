@@ -1,17 +1,20 @@
 package com.tasklane.mcp
 
+import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.text.ImageRefParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -150,6 +153,56 @@ class ToolModelTest {
 
         val single = (views.detail(task("Otra", CodeAnchor.of("a.kt", 3))) { 3 }["code"] as List<*>).single() as Map<*, *>
         assertFalse("endLine" in single)
+    }
+
+    // ------------------------------------------------------------------ capturas (2.18.0)
+
+    private val shot = AttachmentId("a".repeat(64))
+    private val other = AttachmentId("b".repeat(64))
+
+    @Test
+    fun `el detalle da la ruta de cada captura, una vez aunque salga dos, y dice cual ya no esta`() {
+        val body = "Login roto\n${ImageRefParser.reference(shot)}\notra vez ${ImageRefParser.reference(shot)}\n${ImageRefParser.reference(other)}"
+        val t = task(body).copy(attachments = ImageRefParser.parse(body))
+        val files = mapOf(shot to Path.of("/p/.idea/tasklane/attachments/aa/aa/${shot.value}.png"))
+        val views = TaskViews(config, { "root" }, now, zone) { _, id -> files[id] }
+
+        assertEquals(2, views.summary(t)["images"])
+        val images = views.detail(t) { null }["images"] as List<*>
+        assertEquals(
+            listOf(
+                mapOf("ref" to "tasklane:${shot.value}", "path" to "/p/.idea/tasklane/attachments/aa/aa/${shot.value}.png"),
+                mapOf("ref" to "tasklane:${other.value}", "missing" to true),
+            ),
+            images,
+        )
+    }
+
+    @Test
+    fun `sin capturas no hay clave images`() {
+        val views = TaskViews(config, { "root" }, now, zone)
+        assertFalse("images" in views.summary(task("Nada")))
+        assertFalse("images" in views.detail(task("Nada")) { null })
+    }
+
+    @Test
+    fun `las capturas van al final, una por linea, sin repetir las que el cuerpo ya nombra`() {
+        val body = "Login roto\n- [ ] paso\n${ImageRefParser.reference(shot)}\n\n"
+        assertEquals(
+            "Login roto\n- [ ] paso\n${ImageRefParser.reference(shot)}\n${ImageRefParser.reference(other)}",
+            ToolImages.append(body, listOf(other, shot, other)),
+        )
+        // Lo que ya está, o nada que añadir, deja el cuerpo como estaba.
+        assertEquals(body, ToolImages.append(body, listOf(shot)))
+        assertEquals(body, ToolImages.append(body, emptyList()))
+    }
+
+    @Test
+    fun `una ruta relativa es desde la raiz del proyecto y una absoluta se queda como esta`() {
+        assertEquals(Path.of("/p/build/shot.png"), ToolImages.resolve(" build/../build/shot.png ", "/p"))
+        assertEquals(Path.of("/tmp/shot.png"), ToolImages.resolve("/tmp/shot.png", "/p"))
+        val message = error { ToolImages.resolve("shot.png", null) }
+        assertTrue(message, message.contains("absolute path"))
     }
 
     @Test
