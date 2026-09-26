@@ -125,6 +125,20 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.24.0 &mdash; due dates and tags from the menu</h3>
+            <ul>
+              <li><b><i>Due &#9656;</i></b> in the card menu: <i>Today</i>, <i>Tomorrow</i>,
+                  <i>End of Week</i>, <i>Next Week</i>, <i>Pick Date&hellip;</i> and
+                  <i>Clear</i> &mdash; for one task or the whole selection, no dialog.</li>
+              <li><b><i>Tags &#9656; Add&hellip;</i></b> adds tags to every selected task, keeping
+                  the ones they have, with the repository's tags suggested as you type;
+                  <b><i>Remove &#9656;</i></b> lists the selection's tags and takes one off them
+                  all. Case-insensitive, like the rest of the tags.</li>
+              <li>One undo step for the whole selection, and <i>Due Today</i>, <i>Clear Due
+                  Date</i> or <i>Add Tags&hellip;</i> can have a shortcut in the Keymap.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.23.0 &mdash; tags, for real</h3>
             <ul>
               <li><b>The tags field suggests the repository's tags</b> as you type, with how many

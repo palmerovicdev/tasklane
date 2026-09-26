@@ -38,12 +38,14 @@ import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.export.ExportScope
+import com.tasklane.domain.model.DueDates
 import com.tasklane.domain.model.GroupKey
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.TagColor
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
@@ -59,6 +61,8 @@ import com.tasklane.service.TaskService
 import com.tasklane.service.ViewService
 import com.tasklane.ui.actions.TasklaneDataKeys
 import com.tasklane.ui.common.GroupLabels
+import com.tasklane.ui.editor.AddTagsDialog
+import com.tasklane.ui.editor.DueDateDialog
 import com.tasklane.ui.editor.TaskEditDialog
 import com.tasklane.ui.search.QuerySearchField
 import kotlinx.coroutines.CoroutineScope
@@ -86,6 +90,8 @@ import java.awt.event.MouseEvent
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.WeekFields
+import java.util.Locale
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JScrollPane
@@ -1473,6 +1479,60 @@ internal class TasklanePanel(
     fun setPrioritySelected(target: PriorityId) {
         service.applyAll(selectedTasks().map { TaskCommand.ChangePriority(it.repo, it.id, target) })
     }
+
+    // ---------------------------------------- vencimiento y etiquetas (P31)
+
+    /**
+     * Fija el vencimiento de la selección, o lo quita con `null`, sin pasar por el diálogo.
+     * Hasta la 2.23 sólo se cambiaba desde el diálogo y tarea a tarea. Cada fila con **su**
+     * repositorio, por lo mismo que [setPrioritySelected].
+     */
+    fun setDueSelected(due: Instant?) = setDue(selectedTasks(), due)
+
+    private fun setDue(tasks: List<Task>, due: Instant?) {
+        service.applyAll(tasks.filter { it.dueDate != due }.map { TaskCommand.SetDueDate(it.repo, it.id, due) })
+    }
+
+    /**
+     * *Due ▸ Pick Date…*: el calendario del diálogo, abierto en la fecha que ya comparten
+     * todas o, si no, en hoy. Vence al acabar el día elegido, como un preajuste.
+     *
+     * La selección se lee **antes** de abrirlo, por lo que dice [createTask]: con el modal
+     * abierto la lista se sigue repintando, y leerla al volver podría dar otra.
+     */
+    fun pickDueSelected() {
+        val tasks = selectedTasks().ifEmpty { return }
+        val zone = ZoneId.systemDefault()
+        val start = tasks.map { it.dueDate }.distinct().singleOrNull()?.atZone(zone)?.toLocalDate() ?: LocalDate.now(zone)
+        val picker = DueDateDialog(project, start, WeekFields.of(Locale.getDefault()).firstDayOfWeek)
+        if (picker.showAndGet()) setDue(tasks, DueDates.atEndOfDay(picker.date, zone))
+    }
+
+    /**
+     * *Tags ▸ Add…*: pide las etiquetas y las suma a toda la selección, sin quitarle a
+     * ninguna las que ya lleva. Sugiere las del repositorio de la selección, o las del
+     * activo si mezcla varios. La selección se lee antes del diálogo, como en [pickDueSelected].
+     */
+    fun addTagsSelected() {
+        val tasks = selectedTasks().ifEmpty { return }
+        val repo = tasks.map { it.repo }.distinct().singleOrNull() ?: snapshot.activeRepo
+        val dialog = AddTagsDialog(project, repo, snapshot.config, tasks.size)
+        if (!dialog.showAndGet()) return
+        val tags = dialog.tags.ifEmpty { return }
+        service.applyAll(tasks.map { TaskCommand.AddTags(it.repo, it.id, tags) })
+    }
+
+    /** *Tags ▸ Remove ▸ #api*: la quita de las tareas de la selección que la lleven. */
+    fun removeTagSelected(tag: String) {
+        service.applyAll(
+            selectedTasks()
+                .filter { task -> task.tags.any { it.equals(tag, ignoreCase = true) } }
+                .map { TaskCommand.RemoveTags(it.repo, it.id, setOf(tag)) },
+        )
+    }
+
+    /** El color de [tag], si tiene: el submenú *Remove ▸* lo pinta como la ficha de la tarjeta. */
+    fun tagColor(tag: String): TagColor? = snapshot.config.tagColor(tag)
 
     /**
      * Manda la selección a otro estado sin pasar por el diálogo.

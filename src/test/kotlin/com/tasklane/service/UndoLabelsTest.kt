@@ -96,4 +96,23 @@ class UndoLabelsTest {
             label(three, all { TaskCommand.ChangePriority(repo, it.id, TasklaneConfig.HIGH) }),
         )
     }
+
+    /** *Due ▸* y *Tags ▸* sobre una selección (P31). */
+    @Test
+    fun `el vencimiento y las etiquetas desde el menu`() {
+        val due = java.time.Instant.parse("2026-09-30T21:59:59Z")
+        val dated = reducer.step(three, all { TaskCommand.SetDueDate(repo, it.id, due) })
+        val tagged = reducer.step(three, all { TaskCommand.AddTags(repo, it.id, listOf("api")) })
+
+        assertEquals(UndoLabels.Label("undo.what.due", listOf(3)), label(three, all { TaskCommand.SetDueDate(repo, it.id, due) }))
+        assertEquals(UndoLabels.Label("undo.what.dueCleared", listOf(3)), label(dated, all { TaskCommand.SetDueDate(repo, it.id, null) }))
+        assertEquals(
+            UndoLabels.Label("undo.what.tagsAdded", listOf(3, "#api #ui")),
+            label(three, all { TaskCommand.AddTags(repo, it.id, listOf("api", "ui")) }),
+        )
+        assertEquals(
+            UndoLabels.Label("undo.what.tagsRemoved", listOf(3, "#api")),
+            label(tagged, all { TaskCommand.RemoveTags(repo, it.id, setOf("api")) }),
+        )
+    }
 }

@@ -9,6 +9,33 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.24.0]
+
+Menor sin cambio de formato: el vencimiento y las etiquetas, desde el menú y sobre una
+selección. Es la P31 de [`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- ***Due ▸*** en el menú de la tarjeta: *Today*, *Tomorrow*, *End of Week* y *Next Week* —los
+  preajustes del diálogo—, *Pick Date…* con el mismo calendario y *Clear*. Para una tarea o para
+  toda la selección, y sin abrir el diálogo. El preajuste en el que ya vencen todas sale apagado,
+  y *Clear*, si ninguna tiene fecha.
+- ***Tags ▸ Add…*** suma etiquetas a toda la selección sin quitarles las que llevan, con las del
+  repositorio sugeridas mientras se escribe, como en el diálogo.
+- ***Tags ▸ Remove ▸*** lista las etiquetas de la selección —las que llevan más tareas primero,
+  con su color— y quita la elegida de todas las que la llevan.
+- Las entradas de *Due ▸* y *Add…* son **acciones del *Keymap*** y salen en *Search Everywhere*
+  con su nombre largo —*Due Today*, *Clear Due Date*, *Add Tags…*—: se les puede dar tecla.
+
+### Detalles
+- Sumar y quitar **no miran mayúsculas**, como el resto de las etiquetas: `API` no se suma a una
+  tarea que ya lleva `api`, y quitar `api` quita también `API`.
+- La suma se hace con la tarea **tal como está al guardar**: una etiqueta que un agente le ponga
+  mientras el diálogo está abierto no se pierde.
+- Es editar la tarea: cambia su fecha de modificación, como en el diálogo, y **se deshace con
+  `⌘Z`** en un solo paso para toda la selección —*Undone: add #release to 12 tasks*—.
+- **Formato:** ninguno. Dos comandos nuevos sobre las filas de siempre; el esquema sigue en la
+  versión 1.
+
 ## [2.23.0]
 
 Menor sin cambio en la base: las etiquetas, de verdad. Es la P30 de

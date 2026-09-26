@@ -106,6 +106,19 @@ sealed interface TaskCommand {
     data class SetTags(override val repo: RepoKey, val id: TaskId, val tags: List<String>) : RepoScoped
 
     /**
+     * Añade etiquetas a una tarea sin tocar las que ya lleva (P31): es *Tags ▸ Add…* sobre
+     * una selección. La que ya lleva, aunque sea con otras mayúsculas, no se repite.
+     *
+     * No es [SetTags] con la lista ya sumada porque la suma se hace con la tarea tal como
+     * está al escribir, dentro de la transacción. Sumando a la de la fila, una etiqueta que
+     * un agente le pusiera entre pintar y pulsar se perdería.
+     */
+    data class AddTags(override val repo: RepoKey, val id: TaskId, val tags: List<String>) : RepoScoped
+
+    /** Quita estas etiquetas de una tarea, sin mirar mayúsculas (P31): *Tags ▸ Remove ▸*. */
+    data class RemoveTags(override val repo: RepoKey, val id: TaskId, val tags: Set<String>) : RepoScoped
+
+    /**
      * Cambia unas etiquetas por otras en una tarea (P30): renombrar, fusionar o borrar una
      * etiqueta desde los ajustes es esto, tarea a tarea, en un [Batch].
      *

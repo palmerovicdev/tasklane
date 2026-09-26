@@ -54,7 +54,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
 | **Mover de estado sin diálogo** | *Move To ▸* o `⇧⌥←/→`, también sobre una selección |
 | **Marcar** | Sube la tarea al principio de su grupo, sea cual sea su prioridad |
-| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
+| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad, el vencimiento o las etiquetas, o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
 | **Deshacer y rehacer** | `⌘Z` en la lista deshace lo último que se hizo en el repositorio —completar, mover, prioridad, marcar, reordenar, una casilla, editar, crear o borrar— y `⌘⇧Z` lo rehace |
 | **Agrupar y plegar** | Por fecha —hoy y un grupo por día—, por prioridad o por etiqueta, elegido por estado; cada cabecera se pliega |
 | **Filtrar la vista** | Todas, abiertas, vencidas o marcadas, sumado a la búsqueda |
@@ -63,7 +63,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
 | **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
-| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir y color opcional; un clic en una de la tarjeta filtra por ella |
+| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir y color opcional; un clic en una de la tarjeta filtra por ella. Las dos cosas, también desde el menú y para toda una selección con *Due ▸* y *Tags ▸* |
 | **En la barra de estado** | *ToDo 3 · Doing 1 · 2 overdue* del repositorio activo, con lo vencido en rojo. Qué estados cuenta y si cuenta las vencidas, a elegir; cada cuenta abre su pestaña o sus tareas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` —o a un bloque, `Login.kt:42-58`, seleccionando varias líneas— desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic y enseña el código del bloque |
@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.23.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.24.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -221,19 +221,29 @@ lo demás. Toda la tarjeta responde al ratón, no sólo la parte con letras.
 ### Trabajar con tareas
 
 El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*, *Edit*,
-*Toggle Completed*, *Bookmark*, *Move To ▸*, *Priority ▸*, *Export* y *Delete*.
+*Toggle Completed*, *Bookmark*, *Move To ▸*, *Priority ▸*, *Due ▸*, *Tags ▸*, *Export* y
+*Delete*.
 
 - **Todo vale sobre una selección múltiple**: completar, marcar, mover, cambiar la
-  prioridad y borrar. Muchas tareas a la vez son **una** operación y un repintado; por
+  prioridad, el vencimiento o las etiquetas, y borrar. Muchas tareas a la vez son **una** operación y un repintado; por
   encima de diez va en segundo plano con barra, y **cancelar la deshace entera**.
 - **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`.
 - **Cambiar la prioridad** de la selección con *Priority ▸*, cada entrada con su color.
+- **Vencimiento y etiquetas sin diálogo** (2.24.0), para una tarea o para toda la selección:
+  - *Due ▸ Today / Tomorrow / End of Week / Next Week* —los preajustes del diálogo—,
+    *Pick Date…* con el mismo calendario y *Clear* para quitarlo. El preajuste en el que ya
+    vencen todas sale apagado.
+  - *Tags ▸ Add…* suma etiquetas a todas sin quitarles las que llevan, con las del
+    repositorio sugeridas al escribir; *Tags ▸ Remove ▸* lista las de la selección, las que
+    llevan más tareas primero, y quita la elegida de todas. Sin mirar mayúsculas, como el
+    resto: `API` no se suma a una tarea que ya lleva `api`.
+  - Las entradas de *Due ▸* y *Add…* son acciones del *Keymap*: «Due Today» puede tener tecla.
 - **Borrar** con `Supr` o *Delete*. No pregunta, y **se deshace**: sale un aviso
   *«3 tasks deleted — Undo»* que devuelve lo borrado tal como estaba —mismas fechas, mismo
   sitio, mismas imágenes—, aunque después se hayan hecho otras cosas.
 - **Todo se deshace** (2.16.0): `⌘Z` con el foco en la lista deshace lo último que se hizo
-  en el repositorio que se está mirando —completar, mover, la prioridad, marcar, reordenar,
-  una casilla, editar, crear o borrar, sobre una tarea o sobre una selección— y `⌘⇧Z` lo
+  en el repositorio que se está mirando —completar, mover, la prioridad, el vencimiento, las
+  etiquetas, marcar, reordenar, una casilla, editar, crear o borrar, sobre una tarea o sobre una selección— y `⌘⇧Z` lo
   rehace. La barra de estado dice qué: *Undone: move 3 tasks to Done*. Vuelve lo que se
   cambió y nada más: lo que un agente haya escrito después en esas tareas se queda, y lo que
   hace un agente por MCP no entra en la pila. Se guardan los últimos 100 pasos o 10.000
@@ -343,7 +353,9 @@ del editor: una tarea apuntada de prisa no nace distinta de una escrita con calm
 ### Vencimiento, etiquetas y marcadores
 
 Los tres se editan en el diálogo de la tarea y son campos del modelo, no texto del
-cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sintaxis.
+cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sintaxis. El
+vencimiento y las etiquetas, además, desde el menú y para toda una selección: ver
+[Trabajar con tareas](#trabajar-con-tareas).
 
 - **Vencimiento** por preajustes —hoy, mañana, final de la semana, la semana que viene— o
   con una fecha concreta del calendario. Vence al **acabar** el día, así que algo
@@ -930,7 +942,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.23.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.24.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

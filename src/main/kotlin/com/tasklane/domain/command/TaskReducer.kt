@@ -259,6 +259,20 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 if (tags == task.tags) task else task.copy(tags = tags, updatedAt = now)
             }
 
+            // Sumar y quitar desde el menú (P31) es editar la tarea, como SetTags: toca
+            // `updatedAt`. Sin mirar mayúsculas, como TagParser: `API` no se suma a `api`.
+            is TaskCommand.AddTags -> edit(subject, command.id) { task ->
+                val have = task.tags.mapTo(HashSet()) { it.lowercase() }
+                val added = clean(command.tags).filter { have.add(it.lowercase()) }
+                if (added.isEmpty()) task else task.copy(tags = task.tags + added, updatedAt = now)
+            }
+
+            is TaskCommand.RemoveTags -> edit(subject, command.id) { task ->
+                val gone = command.tags.mapTo(HashSet()) { it.lowercase() }
+                val tags = task.tags.filterNot { it.lowercase() in gone }
+                if (tags.size == task.tags.size) task else task.copy(tags = tags, updatedAt = now)
+            }
+
             // Renombrar una etiqueta en los ajustes no es editar la tarea: `updatedAt` no se
             // toca, como al arrastrar las anclas de un fichero renombrado. Si se tocara,
             // fusionar `#apis` en `#api` llevaría al grupo de hoy cada tarea que la llevara,
@@ -352,6 +366,8 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         is TaskCommand.SetDueDate -> listOf(command.id)
         is TaskCommand.ToggleBookmark -> listOf(command.id)
         is TaskCommand.SetTags -> listOf(command.id)
+        is TaskCommand.AddTags -> listOf(command.id)
+        is TaskCommand.RemoveTags -> listOf(command.id)
         is TaskCommand.Retag -> listOf(command.id)
         is TaskCommand.ToggleComplete -> listOf(command.id)
         is TaskCommand.ToggleCheck -> listOf(command.id)

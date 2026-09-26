@@ -227,6 +227,26 @@ class TaskRevertTest {
         assertEquals(aparcada, reducer.step(elegida, TaskCommand.Revert(change)).task(aparcada.id))
     }
 
+    /**
+     * *Tags ▸ Add…* sobre una selección (P31) se deshace tarea a tarea, y respeta la que
+     * un agente cambió después: ésa se queda como la dejó él.
+     */
+    @Test
+    fun `deshacer sumar una etiqueta respeta la que otro toco despues`() {
+        val creadas = created("a", "b")
+        val (a, b) = creadas.tasks.map { it.id }
+        val (etiquetadas, change) = reducer.recorded(
+            creadas,
+            TaskCommand.Batch(listOf(TaskCommand.AddTags(repo, a, listOf("release")), TaskCommand.AddTags(repo, b, listOf("release")))),
+        )
+        val tocada = agent.step(etiquetadas, TaskCommand.AddTags(repo, b, listOf("ui")))
+
+        val vuelta = reducer.step(tocada, TaskCommand.Revert(change))
+
+        assertEquals(emptyList<String>(), vuelta.task(a)!!.tags)
+        assertEquals(listOf("release", "ui"), vuelta.task(b)!!.tags)
+    }
+
     // -------------------------------------------------------------------- reordenar
 
     @Test

@@ -22,6 +22,7 @@ import com.tasklane.service.TaskService
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.KeyStroke
 
@@ -78,6 +79,9 @@ internal class TagChipsField(
     }
 
     val tags: List<String> get() = TagParser.add(chips, editor.text)
+
+    /** Donde se escribe: lo que un diálogo que sólo tiene este campo enfoca al abrirse. */
+    val focusTarget: JComponent get() = editor
 
     init {
         isOpaque = true

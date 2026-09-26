@@ -39,6 +39,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P29 · El lenguaje de consulta, completo                 | `2.21.0` |
 | ✅ | P26 · Encargar una tarea a un agente                    | `2.22.0` |
 | ✅ | P30 · Etiquetas de verdad                               | `2.23.0` |
+| ✅ | P31 · Vencimiento y etiquetas desde el menú             | `2.24.0` |
 
 ---
 
@@ -397,7 +398,7 @@ sin mirar mayúsculas; renombrar se lo lleva y borrar lo quita sólo si la etiqu
 en ningún repositorio. Se ve en la tarjeta, en las fichas del diálogo y en las sugerencias;
 no en las cabeceras de *Group By ▸ Tag*.
 
-### P31 · Vencimiento y etiquetas desde el menú, también sobre una selección 👾
+### P31 · Vencimiento y etiquetas desde el menú, también sobre una selección ✅ `2.24.0`
 
 Prioridad y estado se cambian desde el menú y sobre una selección; vencimiento y etiquetas,
 sólo desde el diálogo y tarea a tarea. Propuesta: *Due ▸ Today / Tomorrow / End of Week /
@@ -405,6 +406,17 @@ Next Week / Pick Date… / Clear* y *Tags ▸ Add… / Remove ▸* en el menú c
 la selección. Como pasó con `Task.order`, las piezas están y nadie las usa:
 `TaskCommand.SetDueDate` y `SetTags` están en el reductor y sólo los llaman los tests, y los
 preajustes ya están en `DueDates`.
+
+Salió así: *Due ▸* usa `SetDueDate` tal cual, con los preajustes de `DueDates` calculados al
+pulsar, *Pick Date…* con el `DueDateDialog` del diálogo y *Clear*; sale apagado el preajuste en
+el que ya vencen todas. Las etiquetas **no** usan `SetTags`: sumar a la lista de la fila perdería
+lo que un agente pusiera entre pintar y pulsar, así que hay dos comandos nuevos, `AddTags` y
+`RemoveTags`, que leen la tarea dentro de la transacción y no miran mayúsculas. *Add…* es un
+diálogo con el `TagChipsField` de siempre, sugerencias incluidas; *Remove ▸* lista las etiquetas
+de la selección (`SelectionTags`), las que llevan más tareas primero y con su color. Es editar:
+toca `updatedAt` y entra en `⌘Z` con su propia frase. Las entradas de *Due ▸* y *Add…* se
+declaran en `plugin.xml` con nombre largo para el *Keymap* —*Due Today*— y el corto en el menú
+(`override-text` de `ToolwindowPopup`).
 
 ### P32 · Fijar una tarea encima del editor ⏸️
 

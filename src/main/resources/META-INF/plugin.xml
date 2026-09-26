@@ -145,13 +145,17 @@
         <ul>
             <li><b>A context menu</b> with <i>New Task</i>, <i>Edit</i>, <i>Toggle
                 Completed</i>, <i>Bookmark</i>, <i>Move To &#9656;</i>, <i>Priority &#9656;</i>,
-                <i>Export</i> and <i>Delete</i> &mdash; the same one as the row's
-                <i>&vellip;</i> menu.</li>
+                <i>Due &#9656;</i>, <i>Tags &#9656;</i>, <i>Export</i> and <i>Delete</i> &mdash;
+                the same one as the row's <i>&vellip;</i> menu.</li>
             <li><b>Move tasks between states</b> with <i>Move To &#9656;</i>, or one tab at a time
                 with <code>&#8679;&#8997;&larr;/&rarr;</code>, without opening a dialog.
                 <code>&#8997;&larr;/&rarr;</code> just switches the tab you are looking at.</li>
+            <li><b>Set the due date or the tags without a dialog</b>: <i>Due &#9656;</i> has the
+                dialog's presets, <i>Pick Date&hellip;</i> and <i>Clear</i>; <i>Tags &#9656;
+                Add&hellip;</i> adds tags to every selected task, keeping the ones they have, and
+                <i>Remove &#9656;</i> takes one of the selection's tags off them all.</li>
             <li><b>Everything works on a multiple selection</b>: complete, bookmark, move, change
-                priority, delete. Many tasks at once are one operation and one repaint; above ten
+                priority, due date or tags, delete. Many tasks at once are one operation and one repaint; above ten
                 it runs in the background with a progress bar, and <b>cancelling undoes
                 it</b>.</li>
             <li><b>Deleting can be undone</b>: a <i>3 tasks deleted &mdash; Undo</i>
@@ -623,6 +627,44 @@
         <group id="Tasklane.SetPriority" popup="true"
                class="com.tasklane.ui.actions.SetPriorityActionGroup"
                icon="AllIcons.Nodes.SortBySeverity"/>
+        <!-- Vencimiento y etiquetas de la seleccion sin pasar por el dialogo (P31). Las
+             entradas se declaran una a una -y no se calculan como las de Priority- porque
+             no dependen de la configuracion: asi son asignables en el Keymap y salen en
+             Search Everywhere con su nombre largo («Due Today»). En el menu de la lista
+             llevan el corto, con override-text para ToolwindowPopup. Remove ▸ si se
+             calcula: son las etiquetas de la seleccion. -->
+        <group id="Tasklane.Due" popup="true"
+               class="com.tasklane.ui.actions.DueActionGroup"
+               icon="/icons/calendar.svg">
+            <action id="Tasklane.DueToday" class="com.tasklane.ui.actions.DueTodayAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+            <action id="Tasklane.DueTomorrow" class="com.tasklane.ui.actions.DueTomorrowAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+            <action id="Tasklane.DueEndOfWeek" class="com.tasklane.ui.actions.DueEndOfWeekAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+            <action id="Tasklane.DueNextWeek" class="com.tasklane.ui.actions.DueNextWeekAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+            <separator/>
+            <action id="Tasklane.DuePick" class="com.tasklane.ui.actions.PickDueAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+            <action id="Tasklane.DueClear" class="com.tasklane.ui.actions.ClearDueAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+        </group>
+        <group id="Tasklane.Tags" popup="true"
+               class="com.tasklane.ui.actions.TagsActionGroup"
+               icon="AllIcons.General.Hashtag">
+            <action id="Tasklane.AddTags" class="com.tasklane.ui.actions.AddTagsAction">
+                <override-text place="ToolwindowPopup"/>
+            </action>
+            <group id="Tasklane.RemoveTag" popup="true"
+                   class="com.tasklane.ui.actions.RemoveTagActionGroup"/>
+        </group>
         <action id="Tasklane.MoveToNextState"
                 class="com.tasklane.ui.actions.MoveToNextStateAction"/>
         <action id="Tasklane.MoveToPreviousState"
@@ -759,6 +801,8 @@
             <reference ref="Tasklane.ToggleBookmark"/>
             <reference ref="Tasklane.MoveToState"/>
             <reference ref="Tasklane.SetPriority"/>
+            <reference ref="Tasklane.Due"/>
+            <reference ref="Tasklane.Tags"/>
             <reference ref="Tasklane.MoveUp"/>
             <reference ref="Tasklane.MoveDown"/>
             <separator/>

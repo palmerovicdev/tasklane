@@ -54,6 +54,23 @@ internal object UndoLabels {
                     ?.let { Label("undo.what.priority", listOf(n, config.priorityOrDefault(it).name)) }
                     ?: changed
 
+            // *Due ▸* y *Tags ▸* sobre una selección (P31). Sin la fecha: el deshacer la
+            // devuelve, y decir cuál era pediría la zona y el formato del IDE.
+            parts.all { it is TaskCommand.SetDueDate } -> when {
+                afters.all { it.dueDate == null } -> Label("undo.what.dueCleared", listOf(n))
+                else -> Label("undo.what.due", listOf(n))
+            }
+
+            parts.all { it is TaskCommand.AddTags } ->
+                parts.map { (it as TaskCommand.AddTags).tags }.distinct().singleOrNull()
+                    ?.let { Label("undo.what.tagsAdded", listOf(n, hashed(it))) }
+                    ?: changed
+
+            parts.all { it is TaskCommand.RemoveTags } ->
+                parts.map { (it as TaskCommand.RemoveTags).tags }.distinct().singleOrNull()
+                    ?.let { Label("undo.what.tagsRemoved", listOf(n, hashed(it))) }
+                    ?: changed
+
             parts.all { it is TaskCommand.ToggleBookmark } -> when {
                 afters.all { it.bookmarked } -> Label("undo.what.bookmarked", listOf(n))
                 afters.none { it.bookmarked } -> Label("undo.what.unbookmarked", listOf(n))
@@ -70,4 +87,6 @@ internal object UndoLabels {
             else -> changed
         }
     }
+
+    private fun hashed(tags: Collection<String>): String = tags.joinToString(" ") { "#$it" }
 }

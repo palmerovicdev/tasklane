@@ -112,6 +112,35 @@ class TaskReducerTest {
         assertEquals(listOf("api", "docs"), conTags.tags)
     }
 
+    /**
+     * *Tags ▸ Add…* sobre una selección (P31): suma sin quitar las que ya lleva, y lo que ya
+     * lleva —aunque sea con otras mayúsculas— no se repite.
+     */
+    @Test
+    fun `sumar etiquetas no quita ni repite`() {
+        val creada = reducer.step(empty, TaskCommand.Create(repo, "Migrar", tags = listOf("api", "docs")))
+        val id = creada.activeTasks.single().id
+
+        val despues = TaskReducer(Clock.fixed(t0.plusSeconds(60), ZoneOffset.UTC))
+            .step(creada, TaskCommand.AddTags(repo, id, listOf("API", " release ", "", "Release", "ui")))
+            .activeTasks.single()
+
+        assertEquals(listOf("api", "docs", "release", "ui"), despues.tags)
+        assertTrue("sumar etiquetas es editar la tarea", despues.updatedAt.isAfter(t0))
+        assertSame("sumar lo que ya lleva no cambia nada", creada, reducer.step(creada, TaskCommand.AddTags(repo, id, listOf("API"))))
+    }
+
+    @Test
+    fun `quitar una etiqueta no mira mayusculas`() {
+        val creada = reducer.step(empty, TaskCommand.Create(repo, "Migrar", tags = listOf("API", "docs")))
+        val id = creada.activeTasks.single().id
+
+        val sin = reducer.step(creada, TaskCommand.RemoveTags(repo, id, setOf("api"))).activeTasks.single()
+
+        assertEquals(listOf("docs"), sin.tags)
+        assertSame("quitar la que no lleva no cambia nada", creada, reducer.step(creada, TaskCommand.RemoveTags(repo, id, setOf("ui"))))
+    }
+
     @Test
     fun `crear desde el editor guarda el ancla`() {
         val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {")
