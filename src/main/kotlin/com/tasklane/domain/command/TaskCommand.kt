@@ -106,6 +106,25 @@ sealed interface TaskCommand {
     data class SetTags(override val repo: RepoKey, val id: TaskId, val tags: List<String>) : RepoScoped
 
     /**
+     * Cambia unas etiquetas por otras en una tarea (P30): renombrar, fusionar o borrar una
+     * etiqueta desde los ajustes es esto, tarea a tarea, en un [Batch].
+     *
+     * [renames] va de la etiqueta de ahora —tal cual se guardó— a la nueva, o a `null`
+     * para quitarla. Es un mapa y no un par porque se aplica **de una vez**: intercambiar
+     * dos nombres con dos comandos seguidos juntaría las dos etiquetas en una en la tarea
+     * que llevara ambas.
+     *
+     * No es [SetTags] con la lista ya calculada porque quien lo pide no tiene las tareas:
+     * tiene cuáles llevan la etiqueta. La lista sale de la tarea tal como está al
+     * escribir, dentro de la transacción.
+     */
+    data class Retag(
+        override val repo: RepoKey,
+        val id: TaskId,
+        val renames: Map<String, String?>,
+    ) : RepoScoped
+
+    /**
      * Sustituye las anclas de código. Sólo se quitan, nunca se añaden por aquí: se
      * capturan en el editor al crear la tarea, que es el único sitio que sabe dónde
      * estaba el cursor.

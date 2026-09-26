@@ -125,6 +125,23 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.23.0 &mdash; tags, for real</h3>
+            <ul>
+              <li><b>The tags field suggests the repository's tags</b> as you type, with how many
+                  tasks each has, most used first &mdash; so <code>#api</code> and
+                  <code>#apis</code> stop growing side by side.</li>
+              <li><b>Click <code>#api</code> on a card to filter by it</b>: it goes into the tool
+                  window's search, which the board shares. Click it again to drop it.</li>
+              <li><b>A tags table in <i>Settings &#9656; Tools &#9656; Tasklane</i></b> for the
+                  active repository: rename a tag in its cell, rename it to an existing one to merge
+                  the two, or delete it &mdash; from its tasks, or giving them another tag instead.
+                  Renaming does not touch the tasks' modification date.</li>
+              <li><b>Optional colour per tag</b>, light and dark like the priorities', on cards, in
+                  the dialog and in the suggestions.</li>
+            </ul>
+            <p><b>Compatibility:</b> no database change; <code>tasklane.xml</code> gains a
+              <code>&lt;tags&gt;</code> list only when a tag has a colour.</p>
+
             <h3>2.22.0 &mdash; hand a task off to an AI agent</h3>
             <ul>
               <li><b>Hand Off to Agent</b> in the card menu opens a tab of the IDE's terminal in the

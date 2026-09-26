@@ -1,19 +1,29 @@
 package com.tasklane.ui.editor
 
-import com.intellij.ui.DocumentAdapter
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CustomShortcutSet
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
-import com.intellij.ui.components.JBTextField
-import com.intellij.util.ui.UIUtil
+import com.intellij.util.textCompletion.TextFieldWithCompletion
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
+import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.TagParser
-import java.awt.event.KeyAdapter
+import com.tasklane.service.TaskService
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JPanel
-import javax.swing.SwingUtilities
-import javax.swing.event.DocumentEvent
+import javax.swing.KeyStroke
 
 /**
  * Las etiquetas de una tarea como fichas: cada una con su aspa, y un hueco al final
@@ -33,15 +43,38 @@ import javax.swing.event.DocumentEvent
  * El texto a medio escribir **cuenta como etiqueta** al leer [tags]. Aceptar el
  * diálogo con `api` escrito y sin cerrar no puede perderlo: nadie entiende que una
  * etiqueta que está viendo escrita no se guarde.
+ *
+ * Desde la P30 el hueco **sugiere** las etiquetas que ya existen en [repo], con cuántas
+ * tareas lleva cada una —ver [TagCompletion]—, y las fichas llevan el color de la
+ * etiqueta si lo tiene. Por eso el hueco es un campo de editor de la plataforma, como el
+ * de las anclas, y sus teclas son acciones: ver [AnchorChipsField].
  */
-internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout(stretchLast = true)) {
+internal class TagChipsField(
+    project: Project,
+    repo: RepoKey,
+    initial: List<String>,
+    private val config: TasklaneConfig,
+    parentDisposable: Disposable,
+) : JPanel(ChipsLayout(stretchLast = true)) {
 
+    /** Volátil: la lista de sugerencias la lee fuera del EDT para no ofrecer las que ya están. */
+    @Volatile
     private var chips: List<String> = TagParser.parse(initial.joinToString(","))
 
-    private val editor = JBTextField().apply {
+    private val editor = TextFieldWithCompletion(
+        project,
+        TagCompletion(
+            load = { TaskService.getInstance(project).tagCounts(repo) },
+            taken = { chips },
+            colorOf = config::tagColor,
+            onPicked = ::commitAll,
+        ),
+        "",
+        true,
+        true,
+        false,
+    ).apply {
         border = JBUI.Borders.empty()
-        isOpaque = false
-        columns = COLUMNS
     }
 
     val tags: List<String> get() = TagParser.add(chips, editor.text)
@@ -61,22 +94,34 @@ internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout(stretch
             }
         })
 
-        editor.document.addDocumentListener(object : DocumentAdapter() {
-            override fun textChanged(e: DocumentEvent) {
-                // El documento no se puede tocar desde dentro de su propio evento.
-                SwingUtilities.invokeLater(::commitTyped)
+        editor.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                // El documento no se puede tocar desde dentro de su propio evento, y
+                // cambiarlo es una escritura: la cola de la aplicación y no la de Swing.
+                ApplicationManager.getApplication().invokeLater(
+                    ::commitTyped,
+                    ModalityState.stateForComponent(this@TagChipsField),
+                )
             }
         })
-        editor.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode != KeyEvent.VK_BACK_SPACE || editor.text.isNotEmpty() || chips.isEmpty()) return
-                // Retroceso con el campo vacío se lleva la última ficha. Es el gesto
-                // que todo el mundo prueba primero.
-                e.consume()
+        // Retroceso con el campo vacío se lleva la última ficha. Es el gesto que todo el
+        // mundo prueba primero. Apagada en cualquier otro caso, la tecla borra texto.
+        object : DumbAwareAction() {
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = editor.text.isEmpty() && chips.isNotEmpty()
+            }
+
+            override fun actionPerformed(e: AnActionEvent) {
                 chips = chips.dropLast(1)
                 rebuild()
             }
-        })
+        }.registerCustomShortcutSet(
+            CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SPACE, 0)),
+            editor,
+            parentDisposable,
+        )
         rebuild()
     }
 
@@ -97,10 +142,19 @@ internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout(stretch
         rebuild()
     }
 
+    /** Una sugerencia elegida: lo que hay escrito ya es la etiqueta entera. */
+    private fun commitAll() {
+        val closed = TagParser.parse(editor.text)
+        editor.text = ""
+        if (closed.isEmpty()) return
+        chips = TagParser.parse((chips + closed).joinToString(","))
+        rebuild()
+    }
+
     private fun rebuild() {
         removeAll()
         chips.forEach { tag -> add(chipFor(tag)) }
-        editor.emptyText.text = if (chips.isEmpty()) TasklaneBundle.message("dialog.task.tags.hint") else ""
+        editor.setPlaceholder(if (chips.isEmpty()) TasklaneBundle.message("dialog.task.tags.hint") else null)
         add(editor)
         revalidate()
         repaint()
@@ -113,6 +167,7 @@ internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout(stretch
     private fun chipFor(tag: String) = Chip(
         text = tag,
         removeTooltip = TasklaneBundle.message("dialog.task.tags.remove", tag),
+        foreground = config.tagColor(tag)?.let { JBColor(it.light, it.dark) },
     ) {
         chips = chips.filterNot { it == tag }
         rebuild()
@@ -120,6 +175,5 @@ internal class TagChipsField(initial: List<String>) : JPanel(ChipsLayout(stretch
 
     private companion object {
         const val PADDING = 3
-        const val COLUMNS = 8
     }
 }

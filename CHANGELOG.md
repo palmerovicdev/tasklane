@@ -9,6 +9,39 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.23.0]
+
+Menor sin cambio en la base: las etiquetas, de verdad. Es la P30 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **El campo de etiquetas sugiere las que ya hay en el repositorio**, con cuántas tareas lleva
+  cada una: las más usadas arriba, y antes las que empiezan como lo escrito. Es lo que evita que
+  nazcan `#api` y `#apis`. Elegir una la convierte en ficha; las que la tarea ya lleva no salen.
+- **Un clic en `#api` en la tarjeta filtra por ella**: la pone en el buscador de la ventana —que
+  es también el del tablero—, detrás de lo que hubiera escrito, así que ir de una etiqueta a otra
+  estrecha la búsqueda. Otro clic en la misma la quita.
+- **Una tabla de etiquetas en *Settings → Tools → Tasklane*, la del repositorio activo**, con
+  cuántas tareas lleva cada una:
+  - **Renombrar**, en su celda. Un nombre que ya existe **fusiona** las dos.
+  - **Borrar** pregunta qué hacer con sus tareas: sólo quitársela, o darles otra en su lugar.
+  - Se aplica al pulsar *Apply*, con barra y cancelable.
+- **Color opcional por etiqueta**, claro y oscuro como el de las prioridades, pulsando la muestra;
+  *Remove Colour* lo quita. La etiqueta sale con su color en la tarjeta, en las fichas del diálogo
+  y en la lista de sugerencias.
+
+### Detalles
+- Renombrar, fusionar o borrar una etiqueta **no cambia la fecha de modificación** de sus tareas:
+  no es editarlas, y no se van al grupo de hoy.
+- Cambia **sólo las tareas del repositorio activo**, que es el que nombra el título de la tabla.
+- Como reasignar un estado, **no entra en la pila de `⌘Z`**: *Cancel* deja todo como estaba, y
+  cancelar la barra no cambia ninguna tarea ni aplica nada más de la página.
+- El color es **del proyecto** —va a `tasklane.xml`, como el de las prioridades— y vale para la
+  etiqueta en todos los repositorios, sin mirar mayúsculas. Renombrar se lo lleva, y borrar una
+  etiqueta que ya no queda en ningún repositorio borra su color.
+- **Formato:** la base no cambia. `tasklane.xml` gana una lista `<tags>` sólo si alguna etiqueta
+  tiene color; una versión anterior la ignora.
+
 ## [2.22.0]
 
 Menor sin cambio de formato: encargar una tarea a un agente de IA. Es la P26 de

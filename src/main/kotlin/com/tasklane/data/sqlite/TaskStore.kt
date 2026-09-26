@@ -1160,10 +1160,39 @@ internal class TaskStore(private val db: TaskDb) {
         }
         .toMap()
 
+    /**
+     * Las etiquetas de [repo] y cuántas tareas lleva cada una (P30), las más usadas primero.
+     * Tal cual se guardaron: `API` y `api` son dos filas, que es justo lo que la tabla de
+     * los ajustes deja fusionar.
+     *
+     * No es un salto de índice: recorre las filas de `tag` del repositorio. Se pregunta al
+     * abrir los ajustes o el diálogo de una tarea, no en cada pulsación.
+     */
     fun tagCounts(repo: RepoKey): List<TagCount> = db.reader.rows(
         "SELECT tag, count(*) AS n FROM tag WHERE repo = ? GROUP BY tag ORDER BY n DESC, tag",
         repo.value,
     ) { TagCount(it.getString(0).orEmpty(), it.getInt(1)) }
+
+    /** Las tareas de [repo] que llevan alguna de [tags], tal cual se guardaron (P30). */
+    fun taskIdsTagged(repo: RepoKey, tags: Collection<String>): List<TaskId> {
+        val out = LinkedHashSet<String>()
+        for (chunk in tags.distinct().chunked(Sql.MAX_VARIABLES - 1)) {
+            db.reader.rows(
+                "SELECT DISTINCT task_id FROM tag WHERE repo = ? AND tag IN (${Sql.placeholders(chunk.size)})",
+                repo.value,
+                *chunk.map { it as Any }.toTypedArray(),
+            ) { out += it.getString(0).orEmpty() }
+        }
+        return out.map(::TaskId)
+    }
+
+    /**
+     * Las etiquetas que se usan **fuera** de [repo] (P30). Borrar o renombrar una en los
+     * ajustes sólo le quita el color si ya no queda en ningún otro repositorio: ver
+     * `TagEdits.colors`.
+     */
+    fun tagsOutside(repo: RepoKey): Set<String> =
+        db.reader.rows("SELECT DISTINCT tag FROM tag WHERE repo <> ?", repo.value) { it.getString(0).orEmpty() }.toSet()
 
     /** Cuántas siguen sin cerrar en un estado. Lo pregunta el ofrecimiento de rellenar `completedAt`. */
     fun openCountOf(state: StateId): Int =

@@ -73,12 +73,21 @@ data class TasklaneConfig(
      * [com.tasklane.data.attachment.AttachmentQuota]; esto es sólo el número.
      */
     val imageQuotaMegabytes: Int = DEFAULT_IMAGE_QUOTA_MB,
+    /**
+     * El color de las etiquetas que lo tienen (P30), por [TagColor.key]. Las demás no
+     * están: la mayoría de etiquetas no lo llevan, y un proyecto que no usa colores no
+     * escribe ni una línea más en `tasklane.xml`.
+     */
+    val tagColors: Map<String, TagColor> = emptyMap(),
 ) {
     val defaultState: TaskState get() = states.firstOrNull { it.isDefault } ?: states.first()
     val defaultPriority: TaskPriority get() = priorities.firstOrNull { it.isDefault } ?: priorities.first()
 
     fun state(id: StateId): TaskState? = states.firstOrNull { it.id == id }
     fun priority(id: PriorityId): TaskPriority? = priorities.firstOrNull { it.id == id }
+
+    /** El color de [tag], si tiene. Lo pregunta cada ficha de cada tarjeta que se pinta. */
+    fun tagColor(tag: String): TagColor? = if (tagColors.isEmpty()) null else tagColors[TagColor.key(tag)]
 
     /** Un estado que ya no existe no puede tumbar la carga: se remapea. Ver `TaskReducer`. */
     fun stateOrDefault(id: StateId): TaskState = state(id) ?: defaultState
@@ -108,6 +117,9 @@ data class TasklaneConfig(
                     trigger = p.trigger?.trim()?.takeIf(String::isNotEmpty),
                 )
             },
+            tagColors = tagColors.entries
+                .associate { (tag, color) -> TagColor.key(tag) to TagColor(color.light and RGB, color.dark and RGB) }
+                .filterKeys(String::isNotEmpty),
         )
     }
 
@@ -133,6 +145,8 @@ data class TasklaneConfig(
         /** Por debajo de un giga el aviso sería ruido; por encima de un tera ya no es un aviso. */
         const val MIN_IMAGE_QUOTA_MB = 1024
         const val MAX_IMAGE_QUOTA_MB = 1024 * 1024
+
+        private const val RGB = 0xFFFFFF
 
         val TODO = StateId("s-todo")
         val DOING = StateId("s-doing")

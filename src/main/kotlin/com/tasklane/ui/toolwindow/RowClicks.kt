@@ -10,9 +10,11 @@ import com.tasklane.code.CodeAnchors
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.query.TagToggle
 import com.tasklane.domain.text.TaskCopyText
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.service.AttachmentService
+import com.tasklane.service.SearchService
 import com.tasklane.service.TaskService
 import com.tasklane.ui.common.ImagePreviewPopup
 import com.tasklane.ui.common.ImageTooltip
@@ -41,6 +43,7 @@ internal object RowClicks {
 
     fun install(tree: JTree, renderer: TaskTreeRenderer, project: Project, snippets: CardSnippets? = null) {
         val shots = RowImageTips(project) { tree.toolTipText = it }
+        val search = SearchService.getInstance(project)
         // El ancla bajo el ratón, para rehacer su tooltip cuando llegue su código
         // (2.15.0): se compuso sin él, y el ratón quieto no pide otro.
         var hoveredAnchor: CodeAnchor? = null
@@ -121,6 +124,16 @@ internal object RowClicks {
 
                     is TaskTreeRenderer.Hotspot.Check -> null
 
+                    // Dice qué pasará: la misma ficha filtra o deja de filtrar.
+                    is TaskTreeRenderer.Hotspot.Tag -> TasklaneBundle.message(
+                        if (TagToggle.isActive(search.rawQuery.value, hotspot.name)) {
+                            "toolwindow.row.tag.active.tooltip"
+                        } else {
+                            "toolwindow.row.tag.tooltip"
+                        },
+                        hotspot.name,
+                    )
+
                     null -> null
                 }
             }
@@ -173,6 +186,13 @@ internal object RowClicks {
                         TaskService.getInstance(project).apply(
                             TaskCommand.ToggleCheck(hotspot.task.repo, hotspot.task.id, hotspot.offset),
                         )
+                    }
+
+                    // Al buscador de la ventana, que es también el del tablero (P30): la
+                    // búsqueda se ve y se deshace donde se escribe, y pulsar otra vez la quita.
+                    is TaskTreeRenderer.Hotspot.Tag -> {
+                        e.consume()
+                        search.setQuery(TagToggle.toggle(search.rawQuery.value, hotspot.name))
                     }
 
                     null -> Unit

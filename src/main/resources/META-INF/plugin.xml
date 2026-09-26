@@ -123,6 +123,8 @@
                 link.</li>
             <li><b>Change the priority from the card</b>: click the priority badge for the list
                 of priorities with their colours.</li>
+            <li><b>Filter by a tag from the card</b>: click <code>#api</code> to add it to the
+                search, click it again to drop it. Tags with a colour show in it.</li>
             <li><b>Jump to the code</b> from the <code>Auth.kt:42</code> badge, with the full
                 path and the code that is there today in its tooltip. On a narrow card the priority and anchor badges shrink to
                 their icon instead of disappearing &mdash; guaranteed down to the narrowest the
@@ -185,7 +187,9 @@
                 the overdue tasks. Hide it from the status bar's own menu.</li>
             <li><b>Tags as chips</b>, typed separated by comma or space, removed with their cross
                 or with <code>Backspace</code>. In the search field they are
-                <code>#api</code>.</li>
+                <code>#api</code>. <b>The field suggests the repository's tags</b> as you type,
+                with how many tasks each has, so <code>#api</code> and <code>#apis</code> do not
+                grow side by side.</li>
             <li><b>Code anchors as chips</b>, each one removable. They are captured from the
                 editor, never typed.</li>
             <li><b>Priority triggers</b>: typing <code>!!! Fix the login</code> creates <i>Fix the
@@ -357,6 +361,11 @@
                 a colour for light and dark themes picked with the platform colour picker. Drag
                 rows to change the priority order; deleting one asks where its tasks should
                 go.</li>
+            <li><b>Tags</b> of the active repository, most used first, with how many tasks each
+                has: rename one in its cell &mdash; to an existing name to merge the two &mdash;,
+                delete it from its tasks or give them another tag instead, and give it an optional
+                colour for light and dark themes. Renaming does not touch the tasks' modification
+                date.</li>
             <li>Nothing is written until <i>Apply</i> &mdash; <i>Cancel</i> leaves the project as
                 it was &mdash;, and mistakes are flagged first: blank names, two priorities with the
                 same trigger, a trigger with a space. There is always at least one state and one

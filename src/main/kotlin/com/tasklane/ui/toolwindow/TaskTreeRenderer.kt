@@ -21,6 +21,7 @@ import com.tasklane.domain.model.CheckBox
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.DetailBlock
 import com.tasklane.domain.model.RepoKey
+import com.tasklane.domain.model.TagColor
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskLink
@@ -314,6 +315,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
     /** Lo que responde al clic sobre un gemelo de sólo icono. Ver [priorityChip]. */
     private val iconTags = IdentityHashMap<SimpleColoredComponent, Any>()
+
+    /** El estilo de cada color de etiqueta (P30), para no crear uno por ficha y repintado. */
+    private val tagStyles = HashMap<TagColor, SimpleTextAttributes>()
 
     /** La casilla que lleva cada línea como icono, para resolver su clic. Ver [checkRun]. */
     private val lineChecks = IdentityHashMap<SimpleColoredComponent, Any>()
@@ -1294,8 +1298,15 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             chip("$CHECKED$done/$total", null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
 
+        // Se pulsan (P30): filtran la lista por la etiqueta. Con su color si lo tiene, y si
+        // no, grises como siempre: el color es la excepción que se busca con la vista.
         for (tag in task.tags) {
-            chip("#$tag", null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+            val style = config.tagColor(tag)?.let { color ->
+                tagStyles.getOrPut(color) {
+                    SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, JBColor(color.light, color.dark))
+                }
+            } ?: SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES
+            chip("#$tag", null, style, TagChip(tag))
         }
 
         chip(formatDate(task.completedAt ?: task.updatedAt), null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
@@ -1691,6 +1702,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             is AttachmentId -> Hotspot.Image(task.repo, tag)
             is CopyTask -> Hotspot.Copy(tag.task)
             is CheckTag -> Hotspot.Check(tag.task, tag.offset)
+            is TagChip -> Hotspot.Tag(tag.name)
             else -> null
         }
     }
@@ -1712,9 +1724,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         /** Una casilla de lista de comprobación: [offset] es dónde está su `x` en el cuerpo. */
         class Check(val task: Task, val offset: Int) : Hotspot
+
+        /** Una etiqueta de la línea de distintivos (P30): filtra por ella. */
+        class Tag(val name: String) : Hotspot
     }
 
     private class CopyTask(val task: Task)
+
+    private class TagChip(val name: String)
 
     /** La ficha encima de un bloque anclado. Ver [anchorLines]. */
     private class BlockCaption(val anchor: CodeAnchor)

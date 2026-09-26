@@ -259,6 +259,15 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 if (tags == task.tags) task else task.copy(tags = tags, updatedAt = now)
             }
 
+            // Renombrar una etiqueta en los ajustes no es editar la tarea: `updatedAt` no se
+            // toca, como al arrastrar las anclas de un fichero renombrado. Si se tocara,
+            // fusionar `#apis` en `#api` llevaría al grupo de hoy cada tarea que la llevara,
+            // sin que nadie las hubiera mirado.
+            is TaskCommand.Retag -> edit(subject, command.id) { task ->
+                val tags = clean(task.tags.mapNotNull { if (it in command.renames) command.renames[it] else it })
+                if (tags == task.tags) task else task.copy(tags = tags)
+            }
+
             is TaskCommand.Move ->
                 if (subject.task(command.id) == null || (command.above == null && command.below == null)) nothing(config)
                 else Plan(listOf(Mutation.Place(command.repo, command.id, command.above, command.below)), config)
@@ -343,6 +352,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         is TaskCommand.SetDueDate -> listOf(command.id)
         is TaskCommand.ToggleBookmark -> listOf(command.id)
         is TaskCommand.SetTags -> listOf(command.id)
+        is TaskCommand.Retag -> listOf(command.id)
         is TaskCommand.ToggleComplete -> listOf(command.id)
         is TaskCommand.ToggleCheck -> listOf(command.id)
         is TaskCommand.Move -> listOf(command.id)

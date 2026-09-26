@@ -990,6 +990,34 @@ class TaskService(
 
     fun tagCounts(repo: RepoKey): List<TagCount> = store?.tagCounts(repo).orEmpty()
 
+    /** Ver `TaskStore.tagsOutside`. */
+    fun tagsOutside(repo: RepoKey): Set<String> = store?.tagsOutside(repo).orEmpty()
+
+    /**
+     * Renombra, fusiona o quita etiquetas en todas las tareas de [repo] que las lleven
+     * (P30). Es lo que aplica la tabla de etiquetas de los ajustes; [renames] como en
+     * [TaskCommand.Retag].
+     *
+     * **Bloqueante**: los ajustes lo llaman con su barra modal, como la limpieza de
+     * imágenes, y [progress] puede cancelar lanzando. Es una transacción, así que cancelar
+     * no deja la mitad renombrada. No entra en la pila de `⌘Z`, por lo que dice
+     * [recorder]: los ajustes tienen su propio *Cancel*.
+     */
+    fun retag(repo: RepoKey, renames: Map<String, String?>, progress: (Int, Int) -> Unit = { _, _ -> }) {
+        val renamed = renames.filter { (from, to) -> from != to }
+        if (renamed.isEmpty()) return
+        metrics.time(TasklaneMetrics.Op.COMMAND) {
+            synchronized(gate) {
+                // Dentro del cerrojo: una tarea que un agente etiquete mientras tanto entra.
+                val ids = store?.taskIdsTagged(repo, renamed.keys).orEmpty()
+                val commands = ids.map { TaskCommand.Retag(repo, it, renamed) }
+                if (commands.isNotEmpty()) {
+                    inBulk { applyLocked(commands.singleOrNull() ?: TaskCommand.Batch(commands), progress) }
+                }
+            }
+        }
+    }
+
     /** Cuántas siguen sin cerrar en un estado. Lo pregunta el ofrecimiento de rellenar `completedAt`. */
     fun openCountOf(state: StateId): Int = store?.openCountOf(state) ?: 0
 

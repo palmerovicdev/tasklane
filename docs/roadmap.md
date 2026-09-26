@@ -38,6 +38,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P28 · La búsqueda enseña por qué casa                   | `2.20.0` |
 | ✅ | P29 · El lenguaje de consulta, completo                 | `2.21.0` |
 | ✅ | P26 · Encargar una tarea a un agente                    | `2.22.0` |
+| ✅ | P30 · Etiquetas de verdad                               | `2.23.0` |
 
 ---
 
@@ -371,7 +372,7 @@ palabra que empieza como un operador lo ofrece **sin** elegirlo —`Enter` sigue
 lista— y `⌃Espacio` enseña todos. De paso se arregló que el agente con `state:Done` en la
 consulta y sin `includeClosed` recibiera cero (venía de la 2.12.0).
 
-### P30 · Etiquetas de verdad 👾
+### P30 · Etiquetas de verdad ✅ `2.23.0`
 
 Las etiquetas son texto suelto: el campo no sugiere las que ya existen —así nacen `#api` y
 `#apis`—, no hay forma de renombrar o fusionar una en todas las tareas, y la ficha de la
@@ -379,6 +380,22 @@ tarjeta es gris y no hace nada al pulsarla. Propuesta: autocompletado con las de
 repositorio y cuántas tareas tiene cada una; un clic en `#api` en la tarjeta filtra por
 ella; una tabla de etiquetas en *Settings* para renombrar, fusionar y borrar, como la de
 prioridades y con su reasignación; y color opcional por etiqueta.
+
+Salió así: el campo del diálogo es el de las anclas (`TextFieldWithCompletion`) con
+`TagCompletion`, que lee una vez `tagCounts` del repositorio; primero las que **empiezan** como
+lo escrito y luego las más usadas, sin las que la tarea ya lleva. El clic en la ficha **añade**
+`#api` al buscador de la ventana (y del tablero) detrás de lo escrito, y otro clic la quita
+(`TagToggle`); sigue siendo prefijo, así que `#api` también trae `#apis` —para eso está
+fusionar—. La tabla, *Tags in \<repo>*, es del **repositorio activo**: sin `+` —una etiqueta
+nace al escribirla—, renombrar en la celda, un nombre que ya existe **fusiona**, y borrar
+pregunta entre «sólo quitarla» (primera opción: una tarea sin etiquetas es una tarea) o darles
+otra. Se aplica con el comando `Retag`, un mapa de renombres **a la vez** (intercambiar dos
+nombres no los junta), tarea a tarea en un `Batch`, con barra modal cancelable; **no toca
+`updatedAt`** —como arrastrar anclas— y **no entra en `⌘Z`**, como reasignar un estado. El
+color, claro y oscuro, es **del proyecto** (`tasklane.xml`, `<tags>` sólo si hay alguno) y va
+sin mirar mayúsculas; renombrar se lo lleva y borrar lo quita sólo si la etiqueta ya no queda
+en ningún repositorio. Se ve en la tarjeta, en las fichas del diálogo y en las sugerencias;
+no en las cabeceras de *Group By ▸ Tag*.
 
 ### P31 · Vencimiento y etiquetas desde el menú, también sobre una selección 👾
 

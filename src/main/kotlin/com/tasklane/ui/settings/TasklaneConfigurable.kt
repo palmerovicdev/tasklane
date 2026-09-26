@@ -37,6 +37,7 @@ import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.StatusBarChoice
+import com.tasklane.domain.model.TagColor
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
@@ -126,6 +127,17 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     private val statesTable: StatesTable = StatesTable(::onStatesChanged, ::confirmStateRemoval, personalColumns)
     private val prioritiesTable = PrioritiesTable(project, ::updateProblems, ::confirmPriorityRemoval)
     private val triggersCheckBox = JBCheckBox(TasklaneBundle.message("settings.triggers.enabled"))
+
+    /** Las etiquetas del repositorio activo (P30). Se leen fuera del EDT al abrir: ver [loadTags]. */
+    private val tagsTable = TagsTable(project, ::updateProblems, ::confirmTagRemoval)
+
+    /**
+     * Las etiquetas borradas, de su nombre de hoy al de la fila adonde van sus tareas, o a
+     * `null` para sólo quitarlas; y cuántas tareas llevaba cada una. Como las
+     * reasignaciones de estado: se anotan y salen al aplicar. Ver [TagEdits.renames].
+     */
+    private val tagRemovals = LinkedHashMap<String, String?>()
+    private val removedTagTasks = HashMap<String, Int>()
 
     /**
      * Profundidad de detección de repositorios. Es un filtro de vista, no un borrado:
@@ -223,6 +235,14 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.priorities.comment")) }
         }
 
+        // Del repositorio activo, como todo lo que toca tareas: renombrar, fusionar y borrar
+        // cambian sólo las suyas. Los colores, en cambio, son del proyecto, como los de las
+        // prioridades, y el comentario lo dice.
+        group(TasklaneBundle.message("settings.tags.title", activeRepoName().second)) {
+            row { cell(tagsTable.component).align(Align.FILL) }.resizableRow()
+            row { comment(TasklaneBundle.message("settings.tags.comment")) }
+        }
+
         group(TasklaneBundle.message("settings.repos.title")) {
             row(TasklaneBundle.message("settings.repos.depth")) { cell(depthSpinner) }
             row { comment(TasklaneBundle.message("settings.repos.comment")) }
@@ -312,6 +332,9 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         statesTable.refresh()
         stateReassign.clear()
         priorityReassign.clear()
+        tagRemovals.clear()
+        removedTagTasks.clear()
+        loadTags()
         updateProblems()
         super.reset()
     }
@@ -321,16 +344,23 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             currentConfig() != configService.config.value ||
             stateReassign.isNotEmpty() ||
             priorityReassign.isNotEmpty() ||
+            tagRemovals.isNotEmpty() ||
+            tagsTable.rows.any { TagEdits.clean(it.name) != it.original } ||
             archiveDays() != view.archive.value.days ||
             statusChoice() != statusCounts.choice.value ||
             windowHidden != view.windowHidden.value ||
             boardHidden != view.boardHidden.value
 
     override fun apply() {
-        val config = currentConfig()
+        var config = currentConfig()
         ConfigValidator.validate(config).firstOrNull()?.let {
             throw ConfigurationException(describe(it), TasklaneBundle.message("settings.title"))
         }
+        tagProblem()?.let { throw ConfigurationException(it, TasklaneBundle.message("settings.title")) }
+
+        // 0. Las etiquetas, lo primero: es lo único que se puede cancelar a medias, y
+        //    cancelar tiene que dejar el proyecto entero como estaba.
+        config = config.copy(tagColors = applyTags())
 
         val service = TaskService.getInstance(project)
         if (archiveDays() != view.archive.value.days) view.setArchiveDays(archiveDays())
@@ -386,6 +416,10 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             triggersCheckBox.isSelected,
             depthSpinner.number,
             imageQuotaSpinner.number,
+            // Sin quitar el color a las que se renombran: saber si siguen en otro
+            // repositorio es una consulta, y esto se pregunta a cada momento. Lo hace
+            // [applyTags].
+            TagEdits.colors(configService.config.value.tagColors, tagsTable.rows, pendingTagRenames(), keep = null),
         ).normalized()
 
     // ----------------------------------------------------------- validación
@@ -396,8 +430,20 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         prioritiesTable.markProblems(
             problems.filter { it !is ConfigProblem.BlankStateName }.mapNotNull { it.index }.toSet(),
         )
-        problemLabel.text = problems.firstOrNull()?.let(::describe).orEmpty()
-        problemLabel.isVisible = problems.isNotEmpty()
+        val tagRows = tagsTable.rows
+        tagsTable.markProblems(tagRows.indices.filterTo(HashSet()) { TagEdits.problemOf(tagRows[it]) != null })
+        val message = problems.firstOrNull()?.let(::describe) ?: tagProblem()
+        problemLabel.text = message.orEmpty()
+        problemLabel.isVisible = message != null
+    }
+
+    /** La primera fila de etiquetas que no se puede aplicar, dicha. */
+    private fun tagProblem(): String? = tagsTable.rows.firstNotNullOfOrNull { row ->
+        when (TagEdits.problemOf(row)) {
+            null -> null
+            TagEdits.Problem.BLANK -> TasklaneBundle.message("settings.tags.problem.blank")
+            TagEdits.Problem.SEPARATOR -> TasklaneBundle.message("settings.tags.problem.separator", row.name.trim())
+        }
     }
 
     private fun describe(problem: ConfigProblem): String = when (problem) {
@@ -466,6 +512,124 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         if (!dialog.showAndGet()) return false
         priorityReassign[row.id] = dialog.target.id
         return true
+    }
+
+    // ----------------------------------------------------- etiquetas (P30)
+
+    /** Adónde van las tareas de una etiqueta borrada: otra fila, o `null` para sólo quitarla. */
+    private class TagTarget(val row: TagRow?)
+
+    /**
+     * Borrar una etiqueta pregunta qué hacer con sus tareas, como un estado. A diferencia
+     * de un estado, aquí **sí** hay un «sólo quítala» —una tarea sin etiquetas es una
+     * tarea—, y es lo que se ofrece primero; la otra salida es darles otra, que es fusionar.
+     */
+    private fun confirmTagRemoval(row: TagRow): Boolean {
+        val count = row.tasks + tagRemovals.keys.filter { tagDestination(it) == row.original }
+            .sumOf { removedTagTasks[it] ?: 0 }
+        val options = listOf(TagTarget(null)) + tagsTable.rows.filter { it !== row }.map(::TagTarget)
+        val dialog = ReassignDialog(
+            project = project,
+            dialogTitle = TasklaneBundle.message("settings.tags.delete.title", row.name),
+            question = TasklaneBundle.message("settings.tags.delete.question", count),
+            options = options,
+            label = { target ->
+                target.row?.let { TasklaneBundle.message("settings.tags.delete.into", it.name) }
+                    ?: TasklaneBundle.message("settings.tags.delete.remove")
+            },
+            confirmText = TasklaneBundle.message("settings.delete"),
+        )
+        if (!dialog.showAndGet()) return false
+        tagRemovals[row.original] = dialog.target.row?.original
+        removedTagTasks[row.original] = count
+        return true
+    }
+
+    /** La fila en la que acaba una etiqueta borrada, siguiendo la cadena. `null`: se quita. */
+    private fun tagDestination(original: String): String? {
+        var at = original
+        val seen = mutableSetOf(at)
+        while (at in tagRemovals) {
+            at = tagRemovals[at] ?: return null
+            if (!seen.add(at)) return null
+        }
+        return at
+    }
+
+    private fun pendingTagRenames(): Map<String, String?> = TagEdits.renames(tagsTable.rows, tagRemovals)
+
+    /**
+     * Las etiquetas del repositorio activo, fuera del EDT: salen de agrupar la tabla
+     * `tag`, que no es un salto de índice, y los ajustes no pueden abrirse congelados por
+     * ella. Es lo que hace el peso de las imágenes.
+     */
+    private fun loadTags() {
+        val (repo, _) = activeRepoName()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val counts = TaskService.getInstance(project).tagCounts(repo)
+            ApplicationManager.getApplication().invokeLater(
+                {
+                    val config = configService.config.value
+                    tagsTable.rows = counts.map { TagRow.of(it, config.tagColor(it.tag)) }
+                    updateProblems()
+                },
+                ModalityState.any(),
+            )
+        }
+    }
+
+    /**
+     * Renombra, fusiona y quita lo que diga la tabla en las tareas del repositorio activo,
+     * con barra modal y cancelable, como la limpieza de imágenes. Devuelve los colores
+     * como quedan.
+     *
+     * Cancelar no deja nada a medias —es una transacción— y para aquí el *Apply* entero,
+     * que es lo que dice el aviso.
+     */
+    private fun applyTags(): Map<String, TagColor> {
+        val rows = tagsTable.rows
+        val renames = pendingTagRenames()
+        val base = configService.config.value.tagColors
+        if (renames.isEmpty()) return TagEdits.colors(base, rows, renames, keep = null)
+
+        val (repo, name) = activeRepoName()
+        val service = TaskService.getInstance(project)
+        if (service.isReadOnly(repo)) {
+            throw ConfigurationException(
+                TasklaneBundle.message("settings.tags.readOnly", name),
+                TasklaneBundle.message("settings.title"),
+            )
+        }
+        var done = false
+        ProgressManager.getInstance().run(
+            object : com.intellij.openapi.progress.Task.Modal(
+                project,
+                TasklaneBundle.message("settings.tags.progress", name),
+                true,
+            ) {
+                override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    service.retag(repo, renames) { at, total ->
+                        indicator.checkCanceled()
+                        indicator.fraction = at.toDouble() / total.coerceAtLeast(1)
+                    }
+                    done = true
+                }
+            },
+        )
+        if (!done) {
+            throw ConfigurationException(
+                TasklaneBundle.message("settings.tags.cancelled", name),
+                TasklaneBundle.message("settings.title"),
+            )
+        }
+
+        val colors = TagEdits.colors(base, rows, renames, keep = service.tagsOutside(repo))
+        // Ya aplicado, la tabla es la de ahora: una fila por etiqueta, con su cuenta nueva.
+        tagRemovals.clear()
+        removedTagTasks.clear()
+        tagsTable.rows = service.tagCounts(repo).map { TagRow.of(it, colors[TagColor.key(it.tag)]) }
+        return colors
     }
 
     /**

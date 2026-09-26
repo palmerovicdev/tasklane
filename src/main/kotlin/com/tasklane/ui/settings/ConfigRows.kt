@@ -4,6 +4,7 @@ import com.tasklane.domain.model.DateAnchor
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.TagColor
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
@@ -84,10 +85,12 @@ internal fun buildConfig(
     triggersEnabled: Boolean,
     repoDepth: Int,
     imageQuotaMegabytes: Int,
+    tagColors: Map<String, TagColor> = emptyMap(),
 ): TasklaneConfig = TasklaneConfig(
     states = states.mapIndexed { i, row -> row.toDomain(i) },
     priorities = priorities.mapIndexed { i, row -> row.toDomain(i) },
     triggersEnabled = triggersEnabled,
     repoDepth = repoDepth,
     imageQuotaMegabytes = imageQuotaMegabytes,
+    tagColors = tagColors,
 )

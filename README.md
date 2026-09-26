@@ -63,7 +63,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
 | **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
-| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas |
+| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir y color opcional; un clic en una de la tarjeta filtra por ella |
 | **En la barra de estado** | *ToDo 3 · Doing 1 · 2 overdue* del repositorio activo, con lo vencido en rojo. Qué estados cuenta y si cuenta las vencidas, a elegir; cada cuenta abre su pestaña o sus tareas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` —o a un bloque, `Login.kt:42-58`, seleccionando varias líneas— desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic y enseña el código del bloque |
@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.22.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.23.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -195,7 +195,7 @@ tarea de una frase sigue midiendo una línea.
 | Casilla | Siempre. Marcarla lleva la tarea al estado terminal; desmarcarla, al de por defecto |
 | Título | Hasta **tres** líneas; lo que no cabe se recorta. Una tarea cerrada sale tachada. Doble clic o `Enter` abre la tarea entera |
 | Descripción | Si hay cuerpo bajo el título. Una línea, recortada; buscando, [la que casa](#búsqueda) |
-| Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas**, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
+| Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas** —un clic filtra por ella y otro lo quita—, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
 | Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas |
 | Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
 
@@ -356,6 +356,13 @@ cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sinta
 - **En la barra de estado**, siempre a la vista: ver [La barra de estado](#la-barra-de-estado).
 - **Etiquetas** como fichas: se escriben separadas por coma o espacio y se quitan con
   su aspa, o con `Retroceso` desde el campo vacío. En el buscador son `#api`.
+  - **Mientras se escribe, sugiere las del repositorio**, con cuántas tareas lleva cada una
+    y las más usadas arriba: así no nacen `#api` y `#apis`. Elegir una ya es ficha.
+  - **Un clic en `#api` en la tarjeta filtra por ella**: la añade al buscador, detrás de lo
+    que hubiera, y otro clic la quita.
+  - **Renombrar, fusionar y borrar** una etiqueta en todas las tareas del repositorio activo,
+    y darle **color**, en *Settings → Tools → Tasklane*: ver [Ajustes](#ajustes). Renombrar
+    no cambia la fecha de modificación de las tareas.
 - **Marcador**: sube la tarea al principio de su grupo pase lo que pase, porque
   marcar es precisamente decir «que no se me pierda esto». Se pulsa en la propia fila.
 
@@ -830,6 +837,7 @@ actúan al pulsarlos.
 |---|---|
 | **States** | Una tabla: nombre, cuál es el de por defecto para las tareas nuevas, cuáles son terminales (cerrar una tarea), cómo agrupa cada uno y por qué fecha. **El orden es el de las pestañas**: se arrastra la fila por su asa o se usan las flechas. Tres casillas más por estado son **tuyas**, en `workspace.xml` y no en `tasklane.xml` (2.17.1): si tiene pestaña en la **Tool window**, columna en el **Board** y cuenta en la **Status bar**. De fábrica, todos salen en la ventana y en el tablero |
 | **Priorities** | Otra tabla, **de la más alta a la más baja** como en la ventana: nombre, por defecto, trigger y color para tema claro y oscuro, que se cambia pulsando la muestra. Arrastrar las filas es cambiar el orden de prioridad. Debajo, el interruptor de los triggers |
+| **Tags in *repositorio*** | Las etiquetas del **repositorio activo**, las más usadas primero, con cuántas tareas lleva cada una (2.23.0). **Renombrar** en la celda —a un nombre que ya existe, **fusiona** las dos—, **borrar** con `-` y un **color** opcional para tema claro y oscuro, que se quita con *Remove Colour*. Renombrar y borrar tocan sólo las tareas de ese repositorio; el color es del proyecto, en `tasklane.xml`, y vale para la etiqueta en todos |
 | **Repositories** | Hasta qué profundidad se detectan repositorios bajo la raíz. Un filtro de vista, nunca un borrado |
 | **Code anchors** | Marca en el margen, pastilla en la línea o ninguna. Es **tuyo**: va a `workspace.xml` |
 | **Due dates** | Encender o apagar el aviso de vencimientos. Tuyo, en `workspace.xml` |
@@ -841,10 +849,14 @@ actúan al pulsarlos.
 
 - **Borrar un estado o una prioridad con tareas** pregunta adónde van. Siempre queda al
   menos uno de cada.
+- **Borrar una etiqueta** pregunta qué hacer con sus tareas: sólo quitársela, o darles otra
+  en su lugar. Se aplica con barra, y cancelarla no cambia nada: ni las etiquetas ni lo demás
+  de la página. No entra en la pila de `⌘Z`, como reasignar un estado.
 - **Convertir un estado en terminal** ofrece rellenar la fecha de cierre de las tareas
   que ya tiene con su última modificación: sin eso caerían todas en «sin fecha».
 - **Los errores se marcan antes de aplicar**, con la fila en rojo: un nombre vacío, dos
-  prioridades con el mismo trigger o un trigger con un espacio, que nunca casaría.
+  prioridades con el mismo trigger o un trigger con un espacio, que nunca casaría, y una
+  etiqueta con un espacio o una coma, que la partirían en dos.
 
 ## Datos y seguridad
 
@@ -918,7 +930,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.22.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.23.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

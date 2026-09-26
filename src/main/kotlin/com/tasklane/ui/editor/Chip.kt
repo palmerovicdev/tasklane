@@ -6,6 +6,7 @@ import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Container
 import java.awt.Cursor
@@ -31,6 +32,8 @@ internal class Chip(
     icon: Icon? = null,
     tooltip: String? = null,
     removeTooltip: String,
+    /** El del texto, si no es el de siempre: el color de una etiqueta (P30). */
+    foreground: Color? = null,
     private val onRemove: () -> Unit,
 ) : JPanel(BorderLayout(JBUI.scale(GAP), 0)) {
 
@@ -43,6 +46,7 @@ internal class Chip(
                 // constructor: las etiquetas van sin él y el de la plataforma no
                 // promete admitirlo.
                 icon?.let { this.icon = it }
+                foreground?.let { this.foreground = it }
                 font = UIUtil.getFont(UIUtil.FontSize.SMALL, font)
                 toolTipText = tooltip
             },

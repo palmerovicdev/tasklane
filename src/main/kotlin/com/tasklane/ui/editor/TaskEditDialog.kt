@@ -112,8 +112,8 @@ internal class TaskEditDialog(
         dueOptions.firstOrNull { it.instant == initialDueDate } ?: dueOptions.first(),
     ) { it.label }
 
-    /** Las etiquetas, como fichas. Ver [TagChipsField]. */
-    private val tagsField = TagChipsField(initialTags)
+    /** Las etiquetas, como fichas, con las del repositorio sugeridas. Ver [TagChipsField]. */
+    private val tagsField = TagChipsField(project, repo, initialTags, config, disposable)
 
     /**
      * Los sitios del código de los que habla la tarea: los que trae y los que se

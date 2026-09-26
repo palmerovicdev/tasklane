@@ -469,6 +469,17 @@ class TaskTreeRendererTest {
         assertTrue("el distintivo de prioridad tiene que seguir teniendo su zona", priorities.isNotEmpty())
     }
 
+    /** Cada etiqueta de la tarjeta se pulsa, y dice cuál es (P30): filtra por ella. */
+    @Test
+    fun `cada etiqueta de la tarjeta se pulsa por separado`() {
+        val tree = treeWith(task("Revisar el login", tags = listOf("api", "urgente")))
+        val bounds = painted(tree, 0)
+
+        val tags = scanAll(tree, bounds) { renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Tag }
+
+        assertEquals(setOf("api", "urgente"), tags.map { it.name }.toSet())
+    }
+
     // ------------------------------------------------------ desplegar la tarjeta
 
     /**

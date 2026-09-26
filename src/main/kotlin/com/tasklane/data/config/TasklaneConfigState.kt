@@ -7,6 +7,7 @@ import com.tasklane.domain.model.DateAnchor
 import com.tasklane.domain.model.Grouping
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.TagColor
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
@@ -47,6 +48,14 @@ class PriorityBean {
     @Attribute var default: Boolean = false
 }
 
+/** El color de una etiqueta (P30). Sólo las que lo tienen: ver `TasklaneConfig.tagColors`. */
+@Tag("tag")
+class TagBean {
+    @Attribute var name: String = ""
+    @Attribute var colorLight: String = "808080"
+    @Attribute var colorDark: String = "808080"
+}
+
 class TasklaneConfigState {
 
     @XCollection(propertyElementName = "states", style = XCollection.Style.v2)
@@ -63,6 +72,13 @@ class TasklaneConfigState {
 
     @Attribute
     var imageQuotaMegabytes: Int = TasklaneConfig.DEFAULT_IMAGE_QUOTA_MB
+
+    /**
+     * Vacía, no se escribe: un proyecto sin colores de etiqueta deja `tasklane.xml` como
+     * estaba, y una versión anterior a la que llegue la lista la ignora sin más.
+     */
+    @XCollection(propertyElementName = "tags", style = XCollection.Style.v2)
+    var tags: MutableList<TagBean> = mutableListOf()
 }
 
 // ------------------------------------------------------------------ mapeo
@@ -77,7 +93,11 @@ fun TasklaneConfigState.toDomain(): TasklaneConfig? {
     val states = states.mapIndexedNotNull { i, bean -> bean.toDomain(i) }
     val priorities = priorities.mapIndexedNotNull { i, bean -> bean.toDomain(i) }
     if (states.isEmpty() || priorities.isEmpty()) return null
-    return TasklaneConfig(states, priorities, triggersEnabled, repoDepth, imageQuotaMegabytes)
+    // Una fila sin nombre no es el color de ninguna etiqueta: se tira, como un estado sin id.
+    val tagColors = tags
+        .filter { it.name.isNotBlank() }
+        .associate { it.name to TagColor(parseColor(it.colorLight), parseColor(it.colorDark)) }
+    return TasklaneConfig(states, priorities, triggersEnabled, repoDepth, imageQuotaMegabytes, tagColors)
         .normalized()
 }
 
@@ -133,6 +153,15 @@ fun TasklaneConfig.toState(): TasklaneConfigState = TasklaneConfigState().also {
     state.triggersEnabled = triggersEnabled
     state.repoDepth = repoDepth
     state.imageQuotaMegabytes = imageQuotaMegabytes
+    // Por nombre y no en el orden en que se eligieron: el diff de un merge tiene que ser el
+    // de lo que cambió, no el de una lista que se baraja.
+    state.tags = tagColors.entries.sortedBy { it.key }.mapTo(mutableListOf()) { (tag, color) ->
+        TagBean().apply {
+            name = tag
+            colorLight = formatColor(color.light)
+            colorDark = formatColor(color.dark)
+        }
+    }
 }
 
 /** Un enum desconocido —fichero de otra versión— cae al valor seguro, no revienta. */
