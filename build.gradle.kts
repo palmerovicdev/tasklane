@@ -73,6 +73,10 @@ dependencies {
         // Igual que Git4Idea: opcional en plugin.xml, obligatorio para compilar las
         // herramientas MCP de com.tasklane.mcp (2.12.0).
         bundledPlugin("com.intellij.mcpServer")
+        // Igual otra vez: encargar una tarea a un agente abre una pestana de la terminal (P26).
+        // Su API de pestanas vive en un modulo de contenido del plugin, que un <depends>
+        // clasico tambien alcanza: la plataforma le da acceso a todos sus modulos.
+        bundledPlugin("org.jetbrains.plugins.terminal")
 
         if (localIde != null) {
             // Descarga cero: se compila contra el IDE ya instalado.
@@ -121,6 +125,22 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.22.0 &mdash; hand a task off to an AI agent</h3>
+            <ul>
+              <li><b>Hand Off to Agent</b> in the card menu opens a tab of the IDE's terminal in the
+                  task's repository, with your agent working on that task &mdash; <code>claude</code>
+                  out of the box &mdash; and moves it to <i>Doing</i>. One undo step.</li>
+              <li><b>Copy Agent Prompt</b> copies the same request, for an agent's chat; <b>Copy
+                  Agent Instructions</b>, a paragraph for <code>CLAUDE.md</code> or
+                  <code>AGENTS.md</code>: pending work goes to Tasklane, not to TODO comments.</li>
+              <li><b>The command is yours</b> in <i>Settings &#9656; Tools &#9656; Tasklane &#9656; AI
+                  agent</i>, and so is the prompt: <code>codex {prompt}</code>, <code>gemini -i
+                  {prompt}</code>&hellip; The request is quoted for your shell, so a task title
+                  never runs as a command.</li>
+              <li>The Terminal plugin is optional: without it, copying the prompt still works.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.21.0 &mdash; the full query language</h3>
             <ul>
               <li><b><code>is:overdue</code> and <code>is:bookmarked</code></b> in the search box,

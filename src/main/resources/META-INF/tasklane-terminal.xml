@@ -1,0 +1,8 @@
+<idea-plugin>
+    <!-- Encargar una tarea a un agente (P26): la pestana de la terminal donde trabaja. Este
+         descriptor solo se carga si el plugin Terminal esta activo; sin el no se carga nada
+         de com.tasklane.agent.terminal, Hand Off to Agent no sale y queda Copy Agent Prompt. -->
+    <extensions defaultExtensionNs="com.tasklane">
+        <agentTerminal implementation="com.tasklane.agent.terminal.IdeAgentTerminal"/>
+    </extensions>
+</idea-plugin>

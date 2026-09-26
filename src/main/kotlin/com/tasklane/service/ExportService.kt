@@ -183,6 +183,20 @@ class ExportService(private val project: Project) {
         return false
     }
 
+    /**
+     * Un texto suelto al portapapeles —la petición para un agente, o sus instrucciones (P26)—
+     * por el mismo camino comprobado que la exportación, y [done] en el EDT con si llegó.
+     *
+     * En un hilo de fondo y no con una tarea de progreso: su `onSuccess` esperaría a que se
+     * cerrara un diálogo modal, y desde los ajustes el resultado se enseña en el propio diálogo.
+     */
+    internal fun copyText(text: String, done: (Boolean) -> Unit) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val copied = putOnClipboard(text)
+            ApplicationManager.getApplication().invokeLater({ done(copied) }, ModalityState.any())
+        }
+    }
+
     /** Un intento: escribir en el EDT y releer aquí. Lo que no llegó al sistema no está copiado. */
     private fun attempt(content: String, put: () -> Unit): Boolean = runCatching {
         ApplicationManager.getApplication().invokeAndWait(put, ModalityState.any())

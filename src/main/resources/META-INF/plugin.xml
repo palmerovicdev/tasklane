@@ -208,6 +208,15 @@
             <li><b>No delete tool</b>, on purpose: deleting stays with you and its Undo. Nothing
                 is loaded unless the MCP Server plugin is enabled, and Tasklane opens no port of
                 its own.</li>
+            <li><b>Hand Off to Agent</b> in the card menu opens a tab of the IDE's terminal in the
+                task's repository, with your agent working on that task &mdash; <code>claude</code>
+                out of the box &mdash; and moves it to <i>Doing</i>. The command and the prompt are
+                yours in <i>Settings &#9656; Tools &#9656; Tasklane &#9656; AI agent</i>
+                (<code>codex {prompt}</code>, <code>gemini -i {prompt}</code>&hellip;), and the
+                request is quoted for your shell, so a task title never runs as a command.
+                <b>Copy Agent Prompt</b> copies the same request for an agent's chat, and <b>Copy
+                Agent Instructions</b> a paragraph for <code>CLAUDE.md</code> or
+                <code>AGENTS.md</code>. The Terminal plugin is optional.</li>
         </ul>
 
         <h3>Search</h3>
@@ -365,6 +374,9 @@
                 a done state, or show them all (the default). Yours alone.</li>
             <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
                 the warning threshold.</li>
+            <li><b>AI agent</b>: the command and the prompt of <i>Hand Off to Agent</i>, whether the
+                task moves to in progress, and the button that copies the instructions for
+                <code>CLAUDE.md</code>. Yours alone, for every project.</li>
             <li><b>Save as template for new projects</b>, so configuring per project does not mean
                 configuring every project, and a direct link to the Keymap.</li>
         </ul>
@@ -430,6 +442,11 @@
          si el IDE trae su servidor MCP. Sin él no se carga nada de com.tasklane.mcp. -->
     <depends optional="true" config-file="tasklane-mcp.xml">com.intellij.mcpServer</depends>
 
+    <!-- Opcional igual: encargar una tarea a un agente (P26) abre una pestana de la terminal
+         del IDE. Sin el plugin Terminal no hay extension de com.tasklane.agentTerminal y solo
+         queda copiar la peticion. -->
+    <depends optional="true" config-file="tasklane-terminal.xml">org.jetbrains.plugins.terminal</depends>
+
     <resource-bundle>messages.TasklaneBundle</resource-bundle>
 
     <extensionPoints>
@@ -438,6 +455,12 @@
         <extensionPoint
             name="repositoryProvider"
             interface="com.tasklane.repo.RepositoryProvider"
+            dynamic="true"/>
+        <!-- Quien abre la terminal para un agente (P26). Mismo motivo que el de arriba: la
+             implementacion sale de tasklane-terminal.xml, solo con el plugin Terminal. -->
+        <extensionPoint
+            name="agentTerminal"
+            interface="com.tasklane.agent.AgentTerminal"
             dynamic="true"/>
     </extensionPoints>
 
@@ -644,6 +667,19 @@
                 class="com.tasklane.ui.actions.ExportAndRemoveRepoAction"
                 icon="AllIcons.Actions.GC"/>
 
+        <!-- Encargar la tarea a un agente de IA (P26). Hand Off to Agent solo sale con el
+             plugin Terminal y una orden en los ajustes; Copy Agent Prompt, siempre. Las
+             instrucciones para CLAUDE.md no son de una tarea: se buscan por nombre y estan en
+             los ajustes del agente. -->
+        <action id="Tasklane.HandOffToAgent"
+                class="com.tasklane.ui.actions.HandOffToAgentAction"
+                icon="AllIcons.Nodes.Console"/>
+        <action id="Tasklane.CopyAgentPrompt"
+                class="com.tasklane.ui.actions.CopyAgentPromptAction"
+                icon="AllIcons.Actions.Copy"/>
+        <action id="Tasklane.CopyAgentInstructions"
+                class="com.tasklane.ui.actions.CopyAgentInstructionsAction"/>
+
         <!-- Todo el repositorio activo a un fichero, una accion por formato (2.3.0). -->
         <action id="Tasklane.SaveRepoCsv"
                 class="com.tasklane.ui.actions.SaveRepoCsvAction"/>
@@ -716,6 +752,9 @@
             <reference ref="Tasklane.SetPriority"/>
             <reference ref="Tasklane.MoveUp"/>
             <reference ref="Tasklane.MoveDown"/>
+            <separator/>
+            <reference ref="Tasklane.HandOffToAgent"/>
+            <reference ref="Tasklane.CopyAgentPrompt"/>
             <separator/>
             <reference ref="Tasklane.Export"/>
             <separator/>

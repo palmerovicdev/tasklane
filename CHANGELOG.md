@@ -9,6 +9,36 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.22.0]
+
+Menor sin cambio de formato: encargar una tarea a un agente de IA. Es la P26 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Hand Off to Agent**, en el menú de la tarjeta: abre una pestaña de la terminal del IDE en
+  el repositorio de la tarea, con el agente trabajando en ella —de fábrica, `claude` con una
+  petición que dice qué tarea es y con qué herramientas leerla— y la pasa a *Doing*.
+- **Copy Agent Prompt**: la misma petición al portapapeles, para el chat de un agente que no
+  vive en la terminal.
+- **Copy Agent Instructions**: el párrafo para `CLAUDE.md` o `AGENTS.md` que manda lo
+  pendiente a Tasklane y no a `// TODO`. En *Search Everywhere* y con un botón en los ajustes.
+- **Grupo *AI agent* en los ajustes**: la orden —`codex {prompt}`, `gemini -i {prompt}`…—,
+  la petición, si la tarea pasa a *en curso* y el botón de las instrucciones.
+
+### Detalles
+- La petición, `{id}` y `{title}` se escriben **entre las comillas sin expansión** de la
+  shell con la que arranca la pestaña —zsh, bash, fish, PowerShell o `cmd`—: el título de una
+  tarea no puede colarse como orden. Va en una línea y sin caracteres de control.
+- *En curso* es el primer estado abierto después del de por defecto, y sólo se avanza: lo que
+  ya está ahí o más allá se queda, y lo cerrado vuelve. Es un paso de `⌘Z`.
+- Una tarea cada vez: varias serían varios agentes sobre los mismos ficheros.
+- La terminal es dependencia **opcional**, como Git y MCP. Se usa la API de pestañas de la
+  terminal nueva (`TerminalToolWindowTabsManager`, experimental): la de
+  `TerminalToolWindowManager` está deprecada desde la 2026.1.
+- Los ajustes del agente son **de la aplicación**, en `tasklane-agent.xml`, y no de cada
+  proyecto: qué agente hay instalado es cosa de la máquina.
+- **Formato:** ninguno.
+
 ## [2.21.0]
 
 Menor sin cambio de formato: el lenguaje de consulta, completo. Es la P29 de

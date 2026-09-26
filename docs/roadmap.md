@@ -37,6 +37,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P27 · Pegar y soltar en la lista                        | `2.19.0` |
 | ✅ | P28 · La búsqueda enseña por qué casa                   | `2.20.0` |
 | ✅ | P29 · El lenguaje de consulta, completo                 | `2.21.0` |
+| ✅ | P26 · Encargar una tarea a un agente                    | `2.22.0` |
 
 ---
 
@@ -290,7 +291,7 @@ llama (`ClientInfo.name`, hoy sin usar). Propuesta: guardar quién creó y quié
 historial (P13): sólo la firma y el aviso. Falta comprobar que esa API ya está en la
 2026.1.5 y no sólo en la 2026.2.
 
-### P26 · Encargar una tarea a un agente 👾
+### P26 · Encargar una tarea a un agente ✅ `2.22.0`
 
 Para que un agente haga una tarea hay que ir a su terminal y escribir «haz la tarea de
 Tasklane sobre…». Una acción en la tarjeta, *Hand Off to Agent*, que abre una pestaña de la
@@ -300,6 +301,18 @@ cualquier otro: `codex`, `gemini`…— y pasa la tarea a *Doing*. Sin comando c
 `CLAUDE.md` o `AGENTS.md` que le dice al agente «lo pendiente, a Tasklane, no a `// TODO`».
 La terminal va como dependencia opcional, como Git y MCP; `TerminalToolWindowManager` ya
 abre una pestaña con un comando. No es P17: no cambia tu contexto, delega la tarea.
+
+Salió así (`AgentRequest`, `AgentHandOff` e `IdeAgentTerminal`): la pestaña se abre con la API
+de la terminal nueva, `TerminalToolWindowTabsManager` —la de `TerminalToolWindowManager` está
+deprecada desde la 2026.1—, **en la raíz del repositorio de la tarea**, y la orden se escribe
+cuando se sabe con qué shell arrancó, para entrecomillar la petición **sin expansión** en zsh,
+bash, fish, PowerShell o `cmd`: el título de una tarea no puede colarse como orden. El usuario
+pidió que **la orden se pudiera cambiar en los ajustes**: el grupo *AI agent* tiene la orden
+(`{prompt}`, `{id}` y `{title}`; sin `{prompt}` la petición va al final), la petición, si la
+tarea pasa a *en curso* —el primer estado abierto tras el de por defecto, sólo hacia delante—
+y el botón de las instrucciones. Esos ajustes son **de la aplicación** (`tasklane-agent.xml`) y
+no del proyecto, porque qué agente hay instalado es de la máquina. Una tarea cada vez, y *Copy
+Agent Prompt* no mueve nada: copiar no es encargar.
 
 ### P27 · Pegar y soltar en la lista ✅ `2.19.0`
 

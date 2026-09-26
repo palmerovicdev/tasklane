@@ -278,6 +278,9 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.images.quota.comment")) }
         }
 
+        // Encargar una tarea a un agente (P26). De la aplicación, no del proyecto: ver AgentGroup.
+        agentGroup(project)
+
         row { cell(problemLabel) }
 
         row {
