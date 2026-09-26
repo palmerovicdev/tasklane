@@ -9,6 +9,25 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.25.1]
+
+Encargar una tarea a un agente ya no la mueve de estado: la cierra el agente al acabar.
+
+### Cambiado
+- ***Hand Off to Agent* deja la tarea donde está**: ni *Doing* ni ningún otro estado mientras
+  el agente trabaja. Al acabar, el agente la cierra con `tasklane_complete_task`, que la lleva
+  directa al primer estado cerrado —*Done* con los de fábrica—.
+- **La petición de fábrica se lo dice**: que no cambie el estado mientras trabaja y que la
+  cierre al terminar. Quien no la haya tocado recibe la nueva; una propia se queda como está.
+
+### Quitado
+- La casilla *Move the task to Doing when handing it off* del grupo *AI agent* de los ajustes,
+  con el paso que encendía. Quien la tuviera guardada la arrastra en `tasklane-agent.xml` y no
+  se lee.
+
+### Detalles
+- **Formato:** ninguno.
+
 ## [2.25.0]
 
 Menor sin cambio de formato: la ventana, entera con el teclado. Es la P34 de

@@ -125,6 +125,17 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.25.1 &mdash; handing off doesn't move the task</h3>
+            <ul>
+              <li><b><i>Hand Off to Agent</i> leaves the task where it is</b>: no more
+                  <i>Doing</i> while the agent works. When it's done, the agent closes it with
+                  <code>tasklane_complete_task</code>, straight to <i>Done</i>, and the default
+                  prompt now asks for exactly that.</li>
+              <li>The <i>Move the task to Doing</i> checkbox is gone from the <i>AI agent</i>
+                  settings.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.25.0 &mdash; the whole window from the keyboard</h3>
             <ul>
               <li><b>In the list</b>: <code>&#8984;N</code> creates a task, <code>Space</code>

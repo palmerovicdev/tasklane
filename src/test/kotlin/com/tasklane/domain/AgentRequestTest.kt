@@ -6,7 +6,6 @@ import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
-import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -38,6 +37,13 @@ class AgentRequestTest {
         assertTrue(prompt, prompt.startsWith("Work on the Tasklane task t-1: \"Arreglar el login\"."))
         assertTrue(prompt, "tasklane_get_task" in prompt)
         assertTrue("el cuerpo no va en la peticion", "detalle" !in prompt)
+    }
+
+    @Test
+    fun `la peticion de fabrica pide cerrarla sin pasar por otros estados`() {
+        val prompt = AgentRequest.prompt("", task("Arreglar el login"))
+
+        assertTrue(prompt, prompt.endsWith("Don't change its state while you work: when it is done, close it with tasklane_complete_task."))
     }
 
     @Test
@@ -159,66 +165,6 @@ class AgentRequestTest {
         val name = AgentRequest.tabName("claude", task("a".repeat(100)))
 
         assertEquals("claude \u00b7 " + "a".repeat(39) + "\u2026", name)
-    }
-
-    // ----------------------------------------------------------- en curso
-
-    @Test
-    fun `de fabrica pasa de ToDo a Doing`() {
-        assertEquals(TasklaneConfig.DOING, AgentRequest.workingState(TasklaneConfig.DEFAULT, TasklaneConfig.TODO))
-    }
-
-    @Test
-    fun `lo que ya esta en curso se queda`() {
-        assertNull(AgentRequest.workingState(TasklaneConfig.DEFAULT, TasklaneConfig.DOING))
-    }
-
-    @Test
-    fun `lo cerrado vuelve a en curso`() {
-        assertEquals(TasklaneConfig.DOING, AgentRequest.workingState(TasklaneConfig.DEFAULT, TasklaneConfig.DONE))
-    }
-
-    @Test
-    fun `lo que va mas alla de en curso se queda`() {
-        val review = StateId("s-review")
-        val config = TasklaneConfig.DEFAULT.copy(
-            states = listOf(
-                TaskState(TasklaneConfig.TODO, "ToDo", 0, isDefault = true),
-                TaskState(TasklaneConfig.DOING, "Doing", 1),
-                TaskState(review, "Review", 2),
-                TaskState(TasklaneConfig.DONE, "Done", 3, terminal = true),
-            ),
-        )
-
-        assertNull(AgentRequest.workingState(config, review))
-    }
-
-    @Test
-    fun `en curso es el primero abierto despues del de por defecto`() {
-        val backlog = StateId("s-backlog")
-        val config = TasklaneConfig.DEFAULT.copy(
-            states = listOf(
-                TaskState(backlog, "Backlog", 0),
-                TaskState(TasklaneConfig.TODO, "ToDo", 1, isDefault = true),
-                TaskState(TasklaneConfig.DOING, "Doing", 2),
-                TaskState(TasklaneConfig.DONE, "Done", 3, terminal = true),
-            ),
-        )
-
-        assertEquals(TasklaneConfig.DOING, AgentRequest.workingState(config, backlog))
-        assertEquals(TasklaneConfig.DOING, AgentRequest.workingState(config, StateId("borrado")))
-    }
-
-    @Test
-    fun `sin estado abierto detras del de por defecto no se mueve`() {
-        val config = TasklaneConfig.DEFAULT.copy(
-            states = listOf(
-                TaskState(TasklaneConfig.TODO, "ToDo", 0, isDefault = true),
-                TaskState(TasklaneConfig.DONE, "Done", 1, terminal = true),
-            ),
-        )
-
-        assertNull(AgentRequest.workingState(config, TasklaneConfig.TODO))
     }
 
     // ------------------------------------------------------------ ayudas

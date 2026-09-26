@@ -9,14 +9,14 @@ import com.tasklane.agent.AgentHandOff
 
 /**
  * *Hand Off to Agent* (P26): abrir una pestaña de la terminal con el agente trabajando en la
- * tarea, y pasarla a *en curso*.
+ * tarea.
  *
  * Una tarea cada vez, a propósito: varias abrirían varios agentes a la vez sobre el mismo
  * repositorio, pisándose los ficheros. Sólo se ve con terminal y con una orden configurada;
  * si no, queda [CopyAgentPromptAction].
  *
- * Pasar a *en curso* va por [com.tasklane.ui.toolwindow.TasklanePanel.moveSelectedTo], que es
- * *Move To ▸*: un paso de `⌘Z`, y en el tablero la tarjeta se va seleccionada a su columna.
+ * No la mueve de estado (2.25.1): se queda donde estaba y el agente la cierra al acabar, con
+ * `tasklane_complete_task`. Ver [com.tasklane.domain.agent.AgentRequest].
  */
 internal class HandOffToAgentAction : PanelAction() {
 
@@ -28,11 +28,8 @@ internal class HandOffToAgentAction : PanelAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val panel = panelOf(e) ?: return
-        val task = panel.selectedTasks().singleOrNull() ?: return
-        if (!AgentHandOff.open(project, task)) return
-        if (!panel.isSelectionEditable()) return
-        AgentHandOff.workingState(project, task)?.let(panel::moveSelectedTo)
+        val task = panelOf(e)?.selectedTasks()?.singleOrNull() ?: return
+        AgentHandOff.open(project, task)
     }
 }
 

@@ -1,12 +1,14 @@
 package com.tasklane.domain.agent
 
-import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
-import com.tasklane.domain.model.TasklaneConfig
 
 /**
- * Encargar una tarea a un agente (P26): la petición que se le hace, la orden que la lleva a
- * la terminal y a qué estado pasa la tarea.
+ * Encargar una tarea a un agente (P26): la petición que se le hace y la orden que la lleva a
+ * la terminal.
+ *
+ * Encargarla no la mueve de estado (2.25.1): la tarea sigue donde estaba mientras el agente
+ * trabaja, y es él quien la cierra con `tasklane_complete_task`, directa al primer estado
+ * cerrado. Ni *Doing* al empezar ni pasos intermedios: lo que dice cómo va es la pestaña.
  *
  * Es Kotlin puro a propósito, como el resto del dominio: lo delicado de esta función no es
  * abrir una pestaña de la terminal sino **qué se escribe en ella**. La petición lleva el título
@@ -35,12 +37,16 @@ object AgentRequest {
     /**
      * Qué se le pide. Nombra las herramientas de Tasklane porque el agente sólo tiene el id: el
      * cuerpo, la lista y las anclas los lee él con `tasklane_get_task`, en la línea de hoy.
+     *
+     * Le dice que **no toque el estado** mientras trabaja: con `tasklane_update_task` a mano
+     * podría pasarla a *Doing* o a *Review* por su cuenta, y la tarea tiene que ir de donde
+     * está a cerrada de un salto.
      */
     const val DEFAULT_PROMPT =
         "Work on the Tasklane task $ID: \"$TITLE\". Read it in full with tasklane_get_task, " +
-            "check off its checklist with tasklane_set_checklist_item as you go, record any " +
-            "follow-up work with tasklane_create_task instead of TODO comments, and close it " +
-            "with tasklane_complete_task when it is done."
+            "check off its checklist with tasklane_set_checklist_item as you go, and record any " +
+            "follow-up work with tasklane_create_task instead of TODO comments. Don't change its " +
+            "state while you work: when it is done, close it with tasklane_complete_task."
 
     /**
      * El párrafo para `CLAUDE.md` o `AGENTS.md`: lo pendiente, a Tasklane y no a `// TODO`. Es
@@ -118,26 +124,6 @@ object AgentRequest {
             ?: "agent"
         val title = oneLine(task.title).let { if (it.length > TAB_TITLE) it.take(TAB_TITLE - 1).trimEnd() + "…" else it }
         return if (title.isEmpty()) program else "$program · $title"
-    }
-
-    /**
-     * A qué estado pasa [current] al encargarla, o `null` si se queda donde está.
-     *
-     * «En curso» es **el primer estado abierto después del de por defecto**: con los de fábrica,
-     * *Doing*. Los estados son del proyecto y se llaman como cada uno quiera, así que no se
-     * busca por nombre sino por la forma de la lista: se crea en el de por defecto, se trabaja
-     * en el siguiente.
-     *
-     * Sólo se mueve hacia delante: lo que ya está en curso o más allá —*Review*, por ejemplo—
-     * se queda. Lo cerrado sí vuelve: si se le encarga a un agente es que no estaba hecho.
-     */
-    fun workingState(config: TasklaneConfig, current: StateId): StateId? {
-        val states = config.states
-        val start = states.indexOfFirst { it.id == config.defaultState.id }
-        val working = states.withIndex().firstOrNull { (index, state) -> index > start && !state.terminal } ?: return null
-        val at = states.indexOfFirst { it.id == current }
-        val here = states.getOrNull(at) ?: return working.value.id
-        return working.value.id.takeIf { here.terminal || at < working.index }
     }
 
     /** Todo espacio —saltos incluidos— a uno solo, y fuera los caracteres de control. */

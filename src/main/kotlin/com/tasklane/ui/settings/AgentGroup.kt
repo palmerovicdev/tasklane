@@ -6,7 +6,6 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.COLUMNS_LARGE
 import com.intellij.ui.dsl.builder.Panel
-import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.rows
@@ -14,12 +13,10 @@ import com.tasklane.TasklaneBundle
 import com.tasklane.agent.AgentHandOff
 import com.tasklane.agent.AgentTerminal
 import com.tasklane.data.config.AgentSettings
-import com.tasklane.domain.agent.AgentRequest
-import com.tasklane.service.TaskService
 
 /**
- * El grupo *AI agent* de los ajustes (P26): la orden, la petición, si la tarea pasa a *en
- * curso* y el botón que copia las instrucciones para `CLAUDE.md` o `AGENTS.md`.
+ * El grupo *AI agent* de los ajustes (P26): la orden, la petición y el botón que copia las
+ * instrucciones para `CLAUDE.md` o `AGENTS.md`.
  *
  * Va aparte de [TasklaneConfigurable] porque no comparte nada con el resto de la página: es
  * de la aplicación y no del proyecto —ver [AgentSettings]— y el `bind` del DSL se ocupa solo
@@ -52,10 +49,6 @@ internal fun Panel.agentGroup(project: Project) {
                 .comment(TasklaneBundle.message("settings.agent.prompt.comment"))
         }
         row {
-            checkBox(TasklaneBundle.message("settings.agent.move", workingName(project)))
-                .bindSelected({ settings.moveToWorking }, { settings.moveToWorking = it })
-        }
-        row {
             val status = JBLabel()
             button(TasklaneBundle.message("settings.agent.instructions")) {
                 status.icon = null
@@ -70,16 +63,6 @@ internal fun Panel.agentGroup(project: Project) {
         row { comment(TasklaneBundle.message("settings.agent.instructions.comment")) }
         row { comment(TasklaneBundle.message("settings.agent.comment")) }
     }
-}
-
-/**
- * Cómo se llama *en curso* en este proyecto, para la casilla: «Move it to Doing». Con los estados
- * sin guardar de la tabla no se entera, pero sirve para lo que es, que es saber cuál.
- */
-private fun workingName(project: Project): String {
-    val config = TaskService.getInstance(project).snapshot.value.config
-    return AgentRequest.workingState(config, config.defaultState.id)?.let { config.state(it)?.name }
-        ?: TasklaneBundle.message("settings.agent.move.none")
 }
 
 private const val PROMPT_ROWS = 3

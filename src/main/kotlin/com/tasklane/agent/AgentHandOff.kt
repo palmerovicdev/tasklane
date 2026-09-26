@@ -8,7 +8,6 @@ import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.AgentSettings
 import com.tasklane.domain.agent.AgentRequest
-import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.service.ExportService
 import com.tasklane.service.TaskService
@@ -17,8 +16,8 @@ import com.tasklane.service.TaskService
  * Encargar una tarea a un agente (P26): lo que hacen *Hand Off to Agent*, *Copy Agent Prompt*
  * y *Copy Agent Instructions*, sin la parte de Swing.
  *
- * Qué se escribe y a qué estado pasa lo decide [AgentRequest], que es dominio puro; aquí queda
- * juntarlo con los ajustes, la terminal y el portapapeles.
+ * Qué se escribe lo decide [AgentRequest], que es dominio puro; aquí queda juntarlo con los
+ * ajustes, la terminal y el portapapeles.
  */
 internal object AgentHandOff {
 
@@ -27,7 +26,7 @@ internal object AgentHandOff {
 
     /**
      * Abre una pestaña de la terminal en el repositorio de [task], con el agente trabajando en
-     * ella. Devuelve si la abrió: sólo entonces pasa la tarea a *en curso*.
+     * ella. Devuelve si la abrió. La tarea no se mueve: la cierra el agente al acabar.
      *
      * Se abre en **la raíz del repositorio de la tarea** y no en la del proyecto: con varios
      * repositorios, el agente tiene que empezar donde está el código del que habla la tarea.
@@ -49,12 +48,6 @@ internal object AgentHandOff {
             notify(project, TasklaneBundle.message("agent.open.failed", e.message.orEmpty()), NotificationType.ERROR)
             false
         }
-    }
-
-    /** A qué estado pasa [task] al encargarla, o `null` si se queda. Ver [AgentRequest.workingState]. */
-    fun workingState(project: Project, task: Task): StateId? {
-        if (!AgentSettings.getInstance().moveToWorking) return null
-        return AgentRequest.workingState(TaskService.getInstance(project).snapshot.value.config, task.stateId)
     }
 
     /** La petición al portapapeles, para pegarla en el chat de un agente sin terminal. */

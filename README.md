@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.25.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.25.1.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -651,8 +651,9 @@ Detalles que importan:
 ### Encargar una tarea a un agente
 
 Desde la `2.22.0`, *Hand Off to Agent*, en el menú de la tarjeta, abre **una pestaña de la
-terminal del IDE** en el repositorio de la tarea, con el agente ya trabajando en ella, y pasa
-la tarea a *Doing*. De fábrica escribe:
+terminal del IDE** en el repositorio de la tarea, con el agente ya trabajando en ella. La tarea
+**no se mueve** al encargarla (desde la `2.25.1`): el agente la cierra al acabar, directa a
+*Done*. De fábrica escribe:
 
 ```bash
 claude 'Work on the Tasklane task <id>: "<título>". Read it in full with tasklane_get_task, …'
@@ -666,9 +667,9 @@ El agente sólo recibe el id y el título: el cuerpo, la lista y las anclas los 
 | La orden | *Settings → Tools → Tasklane → AI agent*. `{prompt}` es la petición **ya entrecomillada** para la shell de la terminal; `{id}` y `{title}`, igual. Sin `{prompt}` la petición va al final, así que `codex` a secas vale; `gemini -i {prompt}` la pone donde la pide Gemini. Vacía, no se abre nada |
 | La petición | También en los ajustes, con `{id}` y `{title}`. Va en una línea y sin caracteres de control, porque se escribe en una terminal. Vacía, vuelve la de fábrica |
 | Las comillas | La petición lleva el título de la tarea, y ése lo puede haber escrito cualquiera —un agente por MCP, un XML importado—. Va entre las comillas **sin expansión** de la shell con la que arranca la pestaña —zsh, bash, fish, PowerShell o `cmd`—, así que un `$(…)` en un título es texto y no una orden |
-| A qué estado pasa | Al primer estado abierto **después del de por defecto** —*Doing* con los de fábrica—, y sólo hacia delante: lo que ya está en *Doing* o más allá se queda, y lo cerrado vuelve. Es un paso de `⌘Z`, y en el tablero la tarjeta se va seleccionada a su columna. Se puede apagar |
+| El estado | Encargarla no la mueve: se queda donde estaba mientras el agente trabaja. La petición de fábrica le pide que **no toque el estado** y que, al acabar, la cierre con `tasklane_complete_task`, que la lleva de un salto al primer estado cerrado —*Done* con los de fábrica—, sin pasar por *Doing*. Si escribes tu propia petición, pídeselo igual. Hasta la `2.25.0` pasaba a *Doing* al encargarla |
 | Una cada vez | Con varias tareas seleccionadas no se ofrece: serían varios agentes a la vez sobre los mismos ficheros |
-| *Copy Agent Prompt* | La misma petición al portapapeles, para el chat de un agente que no vive en la terminal. No mueve la tarea: copiar no es encargar |
+| *Copy Agent Prompt* | La misma petición al portapapeles, para el chat de un agente que no vive en la terminal |
 | *Copy Agent Instructions* | Un párrafo para `CLAUDE.md` o `AGENTS.md`: lo pendiente, a Tasklane y no a `// TODO`. En *Search Everywhere* y con un botón en los ajustes |
 | Sin el plugin *Terminal* | *Hand Off to Agent* no sale, y los ajustes lo dicen; copiar funciona igual |
 
@@ -857,7 +858,7 @@ actúan al pulsarlos.
 | **Status bar** | Si el widget de la barra de estado cuenta las vencidas; qué estados cuenta es la columna *Status bar* de la tabla de estados. Tuyo, en `workspace.xml`. Ver [La barra de estado](#la-barra-de-estado) |
 | **Completed tasks** | Esconder de la lista de un estado terminal lo cerrado hace más de N días, o verlo todo (de fábrica). Tuyo, en `workspace.xml`. Ver [Archivar lo terminado](#archivar-lo-terminado) |
 | **Images** | El peso de las imágenes del repositorio activo, *Delete Unused Images*, *Delete All Images…* y el umbral del aviso. Ver [Imágenes](#imágenes) |
-| **AI agent** | La orden y la petición de *Hand Off to Agent*, si la tarea pasa a *en curso* y el botón que copia las instrucciones para `CLAUDE.md`. Tuyo y **de todos tus proyectos**, en `tasklane-agent.xml`. Ver [Encargar una tarea a un agente](#encargar-una-tarea-a-un-agente) |
+| **AI agent** | La orden y la petición de *Hand Off to Agent* y el botón que copia las instrucciones para `CLAUDE.md`. Tuyo y **de todos tus proyectos**, en `tasklane-agent.xml`. Ver [Encargar una tarea a un agente](#encargar-una-tarea-a-un-agente) |
 | Enlaces | *Save as template for new projects* y *Configure shortcuts in Keymap* |
 
 - **Borrar un estado o una prioridad con tareas** pregunta adónde van. Siempre queda al

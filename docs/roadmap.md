@@ -317,6 +317,11 @@ y el botón de las instrucciones. Esos ajustes son **de la aplicación** (`taskl
 no del proyecto, porque qué agente hay instalado es de la máquina. Una tarea cada vez, y *Copy
 Agent Prompt* no mueve nada: copiar no es encargar.
 
+En la `2.25.1`, a petición del usuario, **encargarla ya no la mueve**: ni *Doing* ni nada, y la
+casilla de los ajustes se fue con el paso. La petición de fábrica le dice al agente que no toque
+el estado y que, al acabar, la cierre con `tasklane_complete_task`: de donde estaba a *Done* de
+un salto.
+
 ### P27 · Pegar y soltar en la lista ✅ `2.19.0`
 
 Tasklane existe para capturar, pero la lista no acepta nada: `⌘V` sobre ella no hace nada y
@@ -478,7 +483,7 @@ y las herramientas MCP, quedan estos huecos que no cubren las propuestas anterio
 Son **ideas para elegir**, sin versión asignada. Van de mayor a menor valor esperado; el
 primer corte de cada una permite comprobar si resuelve el problema antes de ampliarla.
 
-### P36 · Saber cuándo un ancla ya no apunta al código correcto 🟡
+### P36 · Saber cuándo un ancla ya no apunta al código correcto ⏸️
 
 `AnchorResolver` encuentra el texto original de la línea dentro del mismo fichero. Si
 ese texto ya no existe, abre la línea antigua aproximada; la marca de ancla rota sólo
@@ -494,7 +499,7 @@ borrar la línea anclada deje una señal visible y permita corregirla sin rehace
 Complementa P1 y P12: aquellas conservan la ruta y el bloque; ésta recupera la
 **confianza en el destino** cuando cambia el contenido.
 
-### P37 · Comprobar una tarea desde su propia tarjeta 🟡
+### P37 · Comprobar una tarea desde su propia tarjeta ⏸️
 
 La checklist dice qué se pretendía hacer, pero no guarda una comprobación ejecutable.
 P20 propone crear una tarea desde un test fallido; falta el camino de vuelta para saber,
@@ -509,7 +514,7 @@ cambio. Empezar por una configuración por tarea evita inventar un sistema de te
 propio; probar primero que el identificador de la configuración sobrevive a renombres y
 que la ejecución funciona en la versión mínima del IDE.
 
-### P38 · Que el agente y la persona no se pisen una edición 🟡
+### P38 · Que el agente y la persona no se pisen una edición ⏸️
 
 `tasklane_get_task` devuelve el cuerpo y `updated`; `tasklane_update_task` puede
 reemplazar cuerpo, etiquetas y anclas completos sin decir qué versión leyó el agente.
@@ -527,7 +532,7 @@ cambios —como marcar— que deliberadamente no lo tocan. Antes de elegirla, co
 la compatibilidad de las herramientas MCP actuales y la migración de datos. Es una
 garantía de trabajo compartido, distinta de la autoría y los avisos de P25.
 
-### P39 · Convertir una inspección del IDE en trabajo pendiente 🟡
+### P39 · Convertir una inspección del IDE en trabajo pendiente ⏸️
 
 Tasklane ya captura `TODO` reconocidos por el IDE, y P20 propone capturar fallos de
 Run/Debug. Queda fuera un origen diario de deuda técnica: la advertencia concreta que
@@ -541,7 +546,7 @@ apareciendo; nunca cerrarla sólo porque un análisis parcial dejó de mostrarlo
 el primer corte a problemas con fichero y rango y validar la API en la versión mínima
 del IDE antes de prometerlo en todos los lenguajes.
 
-### P40 · Avisar antes de apuntar dos veces la misma tarea 🟡
+### P40 · Avisar antes de apuntar dos veces la misma tarea ⏸️
 
 *Import TODO Comments…* ya compara las anclas de un fichero con el texto de la línea
 para señalar lo importado. Crear desde el editor, Quick Add o MCP no consulta esa pista:

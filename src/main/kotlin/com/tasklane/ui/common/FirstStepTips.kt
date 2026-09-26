@@ -62,10 +62,13 @@ internal object FirstStepTips {
      * **No se enseña si lo señalado no se ve ya**, y no es cortesía: la plataforma esconde el
      * globo cuyo punto cae fuera de lo visible como si se hubiera pulsado *Got It*, y lo
      * daría por visto sin que nadie lo viera.
+     *
+     * @return si se pidió enseñarlo; `false` si ya se vio, hay otro igual o lo señalado no se
+     *   ve, y entonces quien llama puede volver a intentarlo más tarde.
      */
-    fun show(id: String, project: Project, parent: Disposable, component: JComponent, point: () -> Point?) {
-        if (id in live || !component.isShowing || !canShow(id)) return
-        val first = point()?.takeIf { component.visibleRect.contains(it) } ?: return
+    fun show(id: String, project: Project, parent: Disposable, component: JComponent, point: () -> Point?): Boolean {
+        if (id in live || !component.isShowing || !canShow(id)) return false
+        val first = point()?.takeIf { component.visibleRect.contains(it) } ?: return false
         var last = first
         val tip = build(id, project, parent).withPosition(Balloon.Position.below)
         tip.setOnBalloonCreated { balloon ->
@@ -82,6 +85,7 @@ internal object FirstStepTips {
             )
         }
         tip.show(component) { _, _ -> (point() ?: last).also { last = it } }
+        return true
     }
 
     private fun build(id: String, project: Project, parent: Disposable): GotItTooltip = when (id) {

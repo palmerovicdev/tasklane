@@ -11,8 +11,8 @@ import com.intellij.util.xmlb.annotations.Attribute
 import com.tasklane.domain.agent.AgentRequest
 
 /**
- * Cómo se encarga una tarea a un agente (P26): la orden que se escribe en la terminal, la
- * petición que lleva y si la tarea pasa a *en curso*.
+ * Cómo se encarga una tarea a un agente (P26): la orden que se escribe en la terminal y la
+ * petición que lleva.
  *
  * Es de la persona, como la marca del editor, pero **de la aplicación** y no de
  * `workspace.xml`: qué agente tiene uno instalado —`claude`, `codex`, `gemini`— es de su
@@ -23,6 +23,9 @@ import com.tasklane.domain.agent.AgentRequest
  * `null` es «lo de fábrica», y no se guarda: si la orden o la petición de fábrica mejoran, las
  * recibe quien no las haya tocado. La orden vacía es otra cosa —«no abras nada»— y sí se
  * guarda.
+ *
+ * Hasta la 2.25.0 había un `moveToWorking`, que pasaba la tarea a *en curso* al encargarla. Se
+ * fue con el propio paso: quien lo tenga guardado lo arrastra en el XML y no se lee.
  */
 @Service(Service.Level.APP)
 @State(
@@ -38,9 +41,6 @@ class AgentSettings : PersistentStateComponent<AgentSettings.AgentState> {
 
         @Attribute
         var prompt: String? = null
-
-        @Attribute
-        var moveToWorking: Boolean = true
     }
 
     private var state = AgentState()
@@ -57,13 +57,6 @@ class AgentSettings : PersistentStateComponent<AgentSettings.AgentState> {
         get() = state.prompt ?: AgentRequest.DEFAULT_PROMPT
         set(value) {
             state.prompt = value.trim().takeUnless { it.isEmpty() || it == AgentRequest.DEFAULT_PROMPT }
-        }
-
-    /** Si al encargarla pasa a *en curso*. Ver [AgentRequest.workingState]. */
-    var moveToWorking: Boolean
-        get() = state.moveToWorking
-        set(value) {
-            state.moveToWorking = value
         }
 
     override fun getState(): AgentState = state

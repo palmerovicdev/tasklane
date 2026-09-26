@@ -64,6 +64,7 @@ import com.tasklane.service.SearchService
 import com.tasklane.service.TaskService
 import com.tasklane.service.ViewService
 import com.tasklane.ui.actions.TasklaneDataKeys
+import com.tasklane.ui.common.FirstStepTips
 import com.tasklane.ui.common.GroupLabels
 import com.tasklane.ui.editor.AddTagsDialog
 import com.tasklane.ui.editor.DueDateDialog
@@ -74,6 +75,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
@@ -359,6 +362,13 @@ internal class TasklanePanel(
     private var followTries = 0
 
     /**
+     * Las tareas que acaban de ganar su primera captura, a la espera de verse aquí para
+     * enseñar el *Got It* de la captura (P35). Ver [showImageTip].
+     */
+    private var imageTip: Set<TaskId> = emptySet()
+    private var imageTipTries = 0
+
+    /**
      * Scope propio porque la vida de este panel es más corta que la del proyecto.
      * Se cancela en [dispose], que la tool window invoca vía Disposer.
      */
@@ -401,6 +411,8 @@ internal class TasklanePanel(
         val outline: List<GroupOutline>,
         val counts: Map<StateId, Int>,
         val archived: Int,
+        /** Si el repositorio no tiene **ninguna** tarea, ni archivada: ver [FirstSteps]. */
+        val untouched: Boolean,
     )
 
     /**
@@ -526,23 +538,90 @@ internal class TasklanePanel(
                     // Se calientan aquí a propósito: es donde vive el O(n log n) de
                     // ordenar y agrupar. Lo que el EDT pida después son sublistas de
                     // algo ya ordenado y una cuenta ya hecha.
-                    Built(pager, pager.outline(stateId), pager.counts(), pager.archived(stateId))
+                    val counts = pager.counts()
+                    // Lo archivado no cuenta en las pestañas, pero un repositorio que sólo
+                    // tiene eso no es uno nuevo. Sólo se pregunta si todo lo demás es cero.
+                    val untouched = counts.values.all { it == 0 } &&
+                        snap.config.states.none { it.terminal && pager.archived(it.id) > 0 }
+                    Built(pager, pager.outline(stateId), counts, pager.archived(stateId), untouched)
                 }
                 withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
                     // RENDER va aparte de SECTIONS porque es lo unico de los dos que
                     // ocurre en el EDT, y por tanto lo unico que tiene un techo duro
                     // de 16 ms. Mezclarlos daria una cifra que no se puede juzgar.
                     metrics.time(TasklaneMetrics.Op.RENDER) {
-                        render(snap, found, filter, built.pager, built.outline, built.counts)
+                        render(snap, found, filter, built.pager, built.outline, built.counts, built.untouched)
                         updateArchiveFooter(snap, found, archive, built.archived)
                     }
                 }
             }
         }
 
+        // Los atajos que enseña la lista vacía siguen al Keymap sin reabrir la ventana.
+        onKeymapChange(this) { updateEmptyText() }
+        listenForFirstImage()
+
         // En el tablero no hay buscador en la columna, ni se atiende «enséñame esta tarea»:
         // eso abre la tool window, y lo hacen sus pestañas.
         if (board == null) listenToWindow()
+    }
+
+    /**
+     * La primera captura se explica sobre su miniatura (P35): que se amplía, que se fija
+     * encima del editor y dónde se guarda. Se espera a que su tarjeta esté en esta lista y se
+     * vea —acaba de crearse, y el repintado puede llegar antes o después que el aviso—, y se
+     * deja de escuchar en cuanto se ha dicho *Got It*. Ver [FirstStepTips].
+     */
+    private fun listenForFirstImage() {
+        if (!FirstStepTips.canShow(FirstStepTips.IMAGE)) return
+        uiScope.launch {
+            service.added
+                .filter { it.withImages.isNotEmpty() }
+                .takeWhile { withContext(Dispatchers.EDT) { FirstStepTips.canShow(FirstStepTips.IMAGE) } }
+                // Sin modalidad a propósito: con el diálogo abierto la lista no es lo que se mira.
+                .collect { additions ->
+                    withContext(Dispatchers.EDT) {
+                        imageTip = additions.withImages
+                        imageTipTries = FOLLOW_TRIES
+                        showImageTip()
+                    }
+                }
+        }
+    }
+
+    private fun showImageTip() {
+        val ids = imageTip.ifEmpty { return }
+        val node = if (tree.isShowing) taskNodes().firstOrNull { it.task.id in ids } else null
+        val spot = node?.let { imageSpot(it.task.id) }
+        if (node != null && spot != null) {
+            // Se mide la miniatura una vez y luego sólo la fila, que es lo que se mueve: el
+            // globo vuelve a preguntar dónde está cada vez que la lista se desplaza.
+            val id = node.task.id
+            val offset = rowOf(id)?.let { Point(spot.x - it.x, spot.y - it.y) } ?: Point()
+            val shown = FirstStepTips.show(FirstStepTips.IMAGE, project, this, tree) {
+                rowOf(id)?.let { Point(it.x + offset.x, it.y + offset.y) }
+            }
+            if (shown) {
+                imageTip = emptySet()
+                return
+            }
+        }
+        if (--imageTipTries <= 0) imageTip = emptySet()
+    }
+
+    private fun rowOf(id: TaskId): Rectangle? {
+        val node = taskNodes().firstOrNull { it.task.id == id } ?: return null
+        return tree.getPathBounds(TreePath(node.path))
+    }
+
+    /** Debajo de la captura de la tarjeta de [id], en medio: la miniatura o su contador. */
+    private fun imageSpot(id: TaskId): Point? {
+        val node = taskNodes().firstOrNull { it.task.id == id } ?: return null
+        val row = tree.getRowForPath(TreePath(node.path)).takeIf { it >= 0 } ?: return null
+        val spot = renderer.hotspots(tree, row).firstOrNull {
+            it.hotspot is TaskTreeRenderer.Hotspot.Image || it.hotspot is TaskTreeRenderer.Hotspot.Images
+        } ?: return null
+        return Point(spot.bounds.centerX.toInt(), spot.bounds.y + spot.bounds.height)
     }
 
     private fun listenToWindow() {
@@ -1162,6 +1241,7 @@ internal class TasklanePanel(
         pager: TaskPager,
         outline: List<GroupOutline>,
         counts: Map<StateId, Int>,
+        untouched: Boolean,
     ) {
         snapshot = snap
         list.pager = pager
@@ -1185,7 +1265,8 @@ internal class TasklanePanel(
         renderer.brokenAnchors = snap.brokenAnchors
         renderer.reorderable = snap.config.state(stateId)?.manualOrder == true && !found.active
 
-        updateEmptyText(found, filter)
+        empty = EmptyInput(found, filter, untouched)
+        updateEmptyText()
 
         // Otra lista es otra ventana, y se empieza por el principio. Cambiar de
         // agrupación cambia además la identidad de los grupos, así que lo que el
@@ -1207,6 +1288,7 @@ internal class TasklanePanel(
             reveal(pending, retry = false)
         }
         if (following.isNotEmpty()) chase()
+        if (imageTip.isNotEmpty()) showImageTip()
     }
 
     private fun updateArchiveFooter(snap: TasklaneSnapshot, found: SearchResults, archive: ViewService.Archive, hidden: Int) {
@@ -1261,18 +1343,36 @@ internal class TasklanePanel(
             TasklaneBundle.message("group.today.empty.open")
         }
 
+    /** Lo que decide el texto de la lista vacía, guardado para rehacerlo si cambia el Keymap. */
+    private data class EmptyInput(val found: SearchResults, val filter: TaskFilter, val untouched: Boolean)
+
+    private var empty: EmptyInput? = null
+
     /**
      * «Sin tareas», «sin resultados» y «nada pasa el filtro» no son lo mismo, y decir
      * el primero cuando pasa cualquiera de los otros dos hace pensar que la búsqueda
      * —o el filtro— borró algo.
+     *
+     * Y un repositorio **sin ninguna tarea** no es un estado vacío: es alguien empezando, y
+     * la lista enseña por dónde (P35, ver [FirstSteps]). Sólo en la ventana: el tablero
+     * repetiría los mismos enlaces en cada columna.
      */
-    private fun updateEmptyText(found: SearchResults, filter: TaskFilter) {
+    private fun updateEmptyText() {
+        val (found, filter, untouched) = empty ?: return
         tree.emptyText.clear()
         when {
             found.active -> tree.emptyText.text = TasklaneBundle.message("toolwindow.tree.noMatches")
 
             filter != TaskFilter.ALL ->
                 tree.emptyText.text = TasklaneBundle.message("toolwindow.tree.noFilterMatches")
+
+            untouched && board == null && isEditable() -> FirstSteps.fill(
+                tree.emptyText,
+                project,
+                tree,
+                newTaskShortcut = KeymapShortcut(ACTION_NEW_TASK, menuKey(KeyEvent.VK_N)).shortcuts.firstOrNull()
+                    ?.let { KeymapUtil.getShortcutText(it) },
+            ) { createTask() }
 
             else -> {
                 tree.emptyText.text = TasklaneBundle.message("toolwindow.tree.empty")
