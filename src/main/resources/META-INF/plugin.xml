@@ -264,7 +264,8 @@
         <h3>In the editor</h3>
         <ul>
             <li><b>Tasks that point at the code.</b> <i>New Tasklane Task from Here</i>, in the
-                editor's context menu and the <b>Tools</b> menu, opens the dialog with the file,
+                editor's context menu and the <b>Tools</b> menu &mdash; or
+                <code>&#8984;&#8997;&#8679;R</code> / <code>Ctrl+Alt+Shift+R</code> &mdash;, opens the dialog with the file,
                 the line and the exact character already attached; a selection within a line comes
                 in as the body. With a file selected in the Project view instead, the task points at
                 the file.</li>
@@ -403,10 +404,16 @@
                 <i>Plugins &rarr; Tasklane</i>, so anything you use daily can get its own key.</li>
             <li><b>Fully usable from the keyboard</b>: <code>Tab</code> walks the state row
                 (<code>Space</code> or <code>Enter</code> opens a tab), the search field and the
-                list; <code>Delete</code> removes the selected tasks and <code>&#8984;Z</code> /
-                <code>Ctrl+Z</code> brings them back; <code>&#8984;&#8679;&uarr;/&darr;</code>
-                moves a task in a manually ordered state. The list, the search field and the
-                dialog fields have names for screen readers.</li>
+                list &mdash; and, inside the selected card, its links, checkboxes, anchors,
+                priority and tags, which <code>Enter</code> or <code>Space</code> activates. In the
+                list, <code>&#8984;N</code> creates a task, <code>Space</code> completes,
+                the IDE's bookmark key bookmarks, <code>1</code>&hellip;<code>9</code> set the
+                priority, <code>&#8984;&#8629;</code> expands the card and <code>&#8984;C</code>
+                copies it; <code>Delete</code> removes the selected tasks and
+                <code>&#8984;Z</code> / <code>Ctrl+Z</code> brings them back;
+                <code>&#8984;&#8679;&uarr;/&darr;</code> moves a task in a manually ordered state.
+                Reassigning any of them in the Keymap applies at once. The list, the search field
+                and the dialog fields have names for screen readers.</li>
             <li><b>Search Everywhere</b> (<code>&#8679;&#8679;</code>) finds tasks without opening
                 the tool window.</li>
         </ul>
@@ -559,12 +566,18 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
 
-        <!-- Crear apuntando al codigo. Sin atajo por defecto: vive en el menu
-             contextual del editor, que es donde se esta mirando cuando hace falta, y
-             quien lo use a diario le asigna uno desde el Keymap. -->
+        <!-- Crear apuntando al codigo. Vive en el menu contextual del editor, y desde la
+             P34 con ⌘⌥⇧R / Ctrl+Alt+Shift+R: pegado a ⌘⌥R porque es la misma accion con el
+             sitio puesto (docs/plan-atajos.md). En los keymaps de macOS la tecla es tambien
+             la de ForceRefresh, una EmptyAction de plantilla que el despachador global
+             ignora: solo la copian algunos componentes para su propio «refrescar», y ahi
+             dentro gana el suyo. -->
         <action id="Tasklane.NewTaskFromCode"
                 class="com.tasklane.ui.quickadd.NewTaskFromCodeAction"
                 icon="AllIcons.General.Add">
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt shift R"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt shift R" replace-all="true"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt shift R" replace-all="true"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
@@ -690,6 +703,36 @@
         <action id="Tasklane.SearchAllRepos"
                 class="com.tasklane.ui.actions.SearchAllReposAction"
                 icon="AllIcons.Nodes.ModuleGroup"/>
+
+        <!-- El teclado, entero (P34): lo que solo se alcanzaba con el raton o vivia en un
+             desplegable construido en codigo, que el Keymap no conoce. Sin atajo global: los
+             de la lista -⌘↵ desplegar, ⌘C copiar- los pone TasklanePanel con
+             localShortcut, que lee primero el Keymap. Ver docs/plan-atajos.md. -->
+        <action id="Tasklane.ToggleExpand"
+                class="com.tasklane.ui.actions.ToggleExpandAction"
+                icon="AllIcons.General.ArrowDown"/>
+        <action id="Tasklane.CopyTaskText"
+                class="com.tasklane.ui.actions.CopyTaskTextAction"
+                icon="AllIcons.Actions.Copy"/>
+        <action id="Tasklane.GroupByPriority"
+                class="com.tasklane.ui.actions.GroupByPriorityAction"/>
+        <action id="Tasklane.GroupByTag"
+                class="com.tasklane.ui.actions.GroupByTagAction"/>
+        <action id="Tasklane.Ungroup"
+                class="com.tasklane.ui.actions.UngroupAction"/>
+        <action id="Tasklane.ManualOrder"
+                class="com.tasklane.ui.actions.ManualOrderAction"/>
+        <action id="Tasklane.ShowAllTasks"
+                class="com.tasklane.ui.actions.ShowAllTasksAction"/>
+        <action id="Tasklane.ShowOpenTasks"
+                class="com.tasklane.ui.actions.ShowOpenTasksAction"/>
+        <action id="Tasklane.ShowOverdueTasks"
+                class="com.tasklane.ui.actions.ShowOverdueTasksAction"/>
+        <action id="Tasklane.ShowBookmarkedTasks"
+                class="com.tasklane.ui.actions.ShowBookmarkedTasksAction"/>
+        <action id="Tasklane.NextRepository"
+                class="com.tasklane.ui.actions.NextRepositoryAction"
+                icon="AllIcons.Vcs.Branch"/>
         <action id="Tasklane.Settings"
                 class="com.tasklane.ui.actions.TasklaneSettingsAction"
                 icon="AllIcons.General.Settings"/>

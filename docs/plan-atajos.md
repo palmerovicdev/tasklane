@@ -1,5 +1,9 @@
 # Plan de atajos
 
+> **Hecho en la `2.25.0`** (P34 de [`roadmap.md`](roadmap.md)): los tres cambios de
+> [Lo que hay que tocar](#lo-que-hay-que-tocar), y lo que la P34 añadió encima. Lo que se
+> apartó del plan está en [Cómo salió](#cómo-salió), al final.
+
 Qué se puede hacer con el teclado hoy, qué falta, y cuánto de eso debería llevar tecla
 de fábrica. Escrito para decidirlo de una vez: hoy hay funciones que sólo existen con el
 ratón y otras que tienen tecla pero no aparecen en *Settings → Keymap*, que son dos
@@ -134,3 +138,37 @@ Tres cambios, en este orden:
 `⌘N`, `Espacio` y `F11`. Son las tres cosas que se hacen muchas veces seguidas en la
 lista —crear, tachar, fijar— y las tres únicas que hoy obligan a soltar el teclado sin
 ninguna razón. El resto puede esperar a que alguien lo pida desde el Keymap.
+
+## Cómo salió
+
+En la `2.25.0`, con estas diferencias respecto a lo de arriba:
+
+- **El marcador no es `F11` fijo**, sino la tecla que tenga el `ToggleBookmark` del IDE en
+  el keymap activo: `F3` en los de macOS, `F11` en los demás. Era la razón del plan —«la
+  tecla del marcador de la plataforma»—, y en macOS esa tecla no es `F11`.
+- **`⌘⌥⇧R` no está libre en macOS**: la tiene `ForceRefresh`. Es una `EmptyAction` de
+  plantilla —el despachador global la ignora— que sólo copian algunos paneles para su
+  propio «refrescar», y ahí dentro gana la suya. Se dejó la tecla, como con `QuickAdd`.
+- **El espacio ya completaba**, por el `CheckboxTree`, pero tarea a tarea: un comando y un
+  paso de `⌘Z` por fila. Ahora es `Toggle Completed` sobre toda la selección.
+- **Las agrupaciones se declararon aparte** del desplegable: *Group by Priority* y *Group by
+  Tag* son interruptores como *Group by Date*, más *Don't Group*, y el desplegable sigue con
+  sus nombres cortos. El orden manual sí es la misma acción en los dos sitios.
+- **Los filtros de vista** son interruptores —otra vez vuelve a *All tasks*— y no necesitan
+  pestaña, así que funcionan desde cualquier sitio. *Next Repository* da la vuelta al final.
+- **Copiar la tarjeta** es *Copy Task Text*, lo del botón de copiar, y `⌘C` en la lista cuando
+  no hay texto marcado; con texto marcado sigue copiando lo marcado.
+
+Y lo que añadió la P34:
+
+- **`1…9`** cambian la prioridad de la selección, en el orden de *Priority ▸* (`1`, la más
+  alta), y el menú enseña la tecla de cada una. Sin acción declarada: dependen de cuántas
+  prioridades haya.
+- **`Tab` / `⇧Tab` recorren los distintivos de la tarjeta** seleccionada —enlaces, casillas,
+  anclas, prioridad, etiquetas, capturas— con un anillo de foco, y `Enter` o `Espacio` pulsa
+  el que lo tiene. La lista se saca barriendo la fila con la misma pregunta que contesta un
+  clic, así que el teclado llega exactamente a lo que llega el ratón. Pasado el último, la
+  acción se apaga y el tabulador sigue su camino de siempre.
+- **Los atajos de la lista se leen del Keymap en cada pulsación** (`KeymapShortcut`), no una
+  vez al abrir: reasignar uno se nota al momento, y quitarle la asignación devuelve el de la
+  lista. La pista del buscador (`⌘K`) se rehace al cambiar el Keymap.

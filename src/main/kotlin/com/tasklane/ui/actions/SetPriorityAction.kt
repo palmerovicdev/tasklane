@@ -4,9 +4,12 @@ import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.project.DumbAware
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.ui.common.PriorityDot
+import java.awt.event.KeyEvent
+import javax.swing.KeyStroke
 
 /**
  * *Priority ▸*: cambiar la prioridad de la selección sin abrir el diálogo.
@@ -41,7 +44,7 @@ internal class SetPriorityActionGroup : ActionGroup(), DumbAware {
      */
     override fun getChildren(e: AnActionEvent?): Array<AnAction> {
         val panel = e?.let { TasklaneDataKeys.PANEL.getData(it.dataContext) } ?: return EMPTY_ARRAY
-        return panel.priorities.map(::SetPriorityAction).toTypedArray()
+        return panel.priorities.mapIndexed(::SetPriorityAction).toTypedArray()
     }
 }
 
@@ -49,12 +52,17 @@ internal class SetPriorityActionGroup : ActionGroup(), DumbAware {
  * La prioridad que ya tienen **todas** las tareas seleccionadas sale apagada: no hay
  * nada que cambiar. Con la selección repartida entre varias, en cambio, todas las
  * entradas siguen vivas, porque cualquiera de ellas las unifica.
+ *
+ * Cada una de las nueve primeras enseña su tecla, del `1` al `9` (P34): es la que la cambia
+ * desde la lista sin abrir el menú, y el menú es donde se descubre. Sólo se enseña; quien la
+ * atiende es la lista.
  */
-private class SetPriorityAction(private val target: TaskPriority) : PanelAction() {
+private class SetPriorityAction(position: Int, private val target: TaskPriority) : PanelAction() {
 
     init {
         templatePresentation.text = target.name
         templatePresentation.icon = PriorityDot.menu(target)
+        if (position < DIGITS) shortcutSet = CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_1 + position, 0))
     }
 
     override fun update(e: AnActionEvent) {
@@ -66,5 +74,9 @@ private class SetPriorityAction(private val target: TaskPriority) : PanelAction(
 
     override fun actionPerformed(e: AnActionEvent) {
         panelOf(e)?.setPrioritySelected(target.id)
+    }
+
+    private companion object {
+        const val DIGITS = 9
     }
 }

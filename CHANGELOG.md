@@ -9,6 +9,40 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.25.0]
+
+Menor sin cambio de formato: la ventana, entera con el teclado. Es la P34 de
+[`docs/roadmap.md`](docs/roadmap.md), y hace lo que dejó escrito
+[`docs/plan-atajos.md`](docs/plan-atajos.md).
+
+### Añadido
+- **Atajos en la lista**: `⌘N` crea una tarea en el estado, `Espacio` completa o reabre la
+  selección, la tecla del marcador del IDE —`F3` en macOS, `F11` en los demás— la marca, `⌘↵`
+  despliega o pliega la tarjeta, y `⌘C` sin texto marcado copia el texto de las tareas
+  seleccionadas, como el botón de copiar.
+- **`1`…`9` cambian la prioridad** de la selección, en el orden de *Priority ▸*: `1` es la más
+  alta. El menú enseña la tecla de cada una.
+- **`Tab` recorre la tarjeta seleccionada**: sus enlaces, casillas, anclas, prioridad, etiquetas
+  y capturas, en el orden en que se leen y con un anillo de foco alrededor. `Enter` o `Espacio`
+  hace lo que haría un clic, `⇧Tab` vuelve atrás, `Escape` devuelve el foco a la tarjeta, y
+  pasado el último el tabulador sigue su camino de siempre.
+- **`⌘⌥⇧R` / `Ctrl+Alt+Shift+R`** para *New Tasklane Task from Here*, pegado a `⌘⌥R`.
+- **Nuevas acciones del Keymap**, que también salen en *Search Everywhere*: *Group by Priority*,
+  *Group by Tag*, *Don't Group*, *Manual Order*, *Show All / Open / Overdue / Bookmarked Tasks*,
+  *Next Repository*, *Expand Card* y *Copy Task Text*.
+
+### Cambiado
+- **Reasignar un atajo de la lista en el Keymap se nota al momento**: hasta ahora se leía una
+  vez, al abrir la ventana, y quitarle la asignación la dejaba sin ninguno. La pista del
+  buscador (`⌘K`) cambia con él.
+- **El espacio completa toda la selección de una vez**: un solo paso de `⌘Z`. Antes lo atendía
+  la casilla del árbol, tarea a tarea.
+
+### Detalles
+- En los keymaps de macOS, `⌘⌥⇧R` es también la tecla de *Force Refresh*, una plantilla que
+  sólo usan algunos paneles para refrescar: dentro de ellos gana la suya.
+- **Formato:** ninguno. Sólo acciones y atajos.
+
 ## [2.24.0]
 
 Menor sin cambio de formato: el vencimiento y las etiquetas, desde el menú y sobre una

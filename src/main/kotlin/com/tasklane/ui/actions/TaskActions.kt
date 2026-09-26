@@ -1,6 +1,7 @@
 package com.tasklane.ui.actions
 
 import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -106,7 +107,7 @@ internal class FocusSearchAction : PanelAction() {
  * escribe en la configuración del proyecto y el cambio vuelve por el snapshot. Es lo
  * que hace que quede recordada al reabrir y que se comparta con el equipo.
  */
-internal class GroupByDateAction : DumbAwareToggleAction() {
+internal abstract class GroupByAction(private val target: Grouping) : DumbAwareToggleAction() {
 
     override fun getActionUpdateThread() = ActionUpdateThread.EDT
 
@@ -116,11 +117,36 @@ internal class GroupByDateAction : DumbAwareToggleAction() {
     }
 
     override fun isSelected(e: AnActionEvent): Boolean =
-        TasklaneDataKeys.PANEL.getData(e.dataContext)?.grouping == Grouping.BY_DATE
+        TasklaneDataKeys.PANEL.getData(e.dataContext)?.grouping == target
 
     override fun setSelected(e: AnActionEvent, selected: Boolean) {
         TasklaneDataKeys.PANEL.getData(e.dataContext)
-            ?.setGrouping(if (selected) Grouping.BY_DATE else Grouping.NONE)
+            ?.setGrouping(if (selected) target else Grouping.NONE)
+    }
+}
+
+internal class GroupByDateAction : GroupByAction(Grouping.BY_DATE)
+
+/**
+ * Las otras dos agrupaciones, declaradas como la de fecha (P34): sólo estaban dentro del
+ * desplegable, construidas en código, así que el Keymap no las conocía. Son interruptores
+ * como aquélla —pulsar otra vez desagrupa—, y el desplegable sigue con sus nombres cortos.
+ */
+internal class GroupByPriorityAction : GroupByAction(Grouping.BY_PRIORITY)
+
+internal class GroupByTagAction : GroupByAction(Grouping.BY_TAG)
+
+/** Sin grupos (P34): la cuarta opción del desplegable, para quien la quiera en una tecla. */
+internal class UngroupAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        val panel = panelOf(e)
+        e.presentation.isVisible = panel != null
+        e.presentation.isEnabled = panel != null && panel.grouping != Grouping.NONE
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        panelOf(e)?.setGrouping(Grouping.NONE)
     }
 }
 
@@ -144,9 +170,16 @@ internal class GroupingActionGroup : ActionGroup(), DumbAware {
      * creada en cada apertura del desplegable no tiene de dónde heredar la suya. La
      * lista sí se reagrupaba; el visto seguía en la agrupación anterior.
      */
-    private val children: Array<AnAction> =
-        (Grouping.entries.map<Grouping, AnAction>(::SelectGroupingAction) + Separator.getInstance() + ManualOrderAction())
+    private val children: Array<AnAction> by lazy {
+        // El orden manual es la acción declarada (P34), la misma que se asigna en el Keymap.
+        val manual = ActionManager.getInstance().getAction(MANUAL_ORDER)
+        (Grouping.entries.map<Grouping, AnAction>(::SelectGroupingAction) + listOfNotNull(Separator.getInstance(), manual))
             .toTypedArray()
+    }
+
+    private companion object {
+        const val MANUAL_ORDER = "Tasklane.ManualOrder"
+    }
 
     init {
         isPopup = true
@@ -222,13 +255,7 @@ internal class TasklaneSettingsAction : DumbAwareAction() {
  * el mismo desplegable porque las dos cosas responden a «cómo se lista este estado», y
  * como la agrupación es del estado y se guarda en la configuración del proyecto.
  */
-private class ManualOrderAction :
-    ToggleAction(
-        TasklaneBundle.message("toolwindow.order.manual"),
-        TasklaneBundle.message("toolwindow.order.manual.description"),
-        null,
-    ),
-    DumbAware {
+internal class ManualOrderAction : DumbAwareToggleAction() {
 
     override fun getActionUpdateThread() = ActionUpdateThread.EDT
 
@@ -237,5 +264,40 @@ private class ManualOrderAction :
 
     override fun setSelected(e: AnActionEvent, state: Boolean) {
         TasklaneDataKeys.PANEL.getData(e.dataContext)?.setManualOrder(state)
+    }
+}
+
+/**
+ * Desplegar o plegar la tarjeta seleccionada (P34): el chevrón de la derecha, que sólo se
+ * alcanzaba con el ratón. En la lista va con `⌘↵`: «`Enter` abre la tarea, `⌘Enter` la
+ * enseña aquí». Apagada si la tarjeta ya se ve entera, como el chevrón, que ni sale.
+ */
+internal class ToggleExpandAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        val panel = panelOf(e)
+        e.presentation.isEnabled = panel?.canToggleExpandSelected() == true
+        e.presentation.text = TasklaneBundle.message(
+            if (panel?.isSelectedExpanded() == true) "action.Tasklane.ToggleExpand.collapse" else "action.Tasklane.ToggleExpand.text",
+        )
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        panelOf(e)?.toggleExpandSelected()
+    }
+}
+
+/**
+ * El texto de las tareas seleccionadas, como el botón de copiar de la tarjeta (P34). En la
+ * lista va con `⌘C` cuando no hay texto marcado: con texto marcado, `⌘C` copia lo marcado.
+ */
+internal class CopyTaskTextAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = panelOf(e)?.selectedTasks()?.isNotEmpty() == true
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        panelOf(e)?.copySelectedText()
     }
 }

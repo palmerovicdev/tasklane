@@ -78,7 +78,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Imágenes a su tamaño** | Guardadas sin duplicar, con miniaturas en la lista, su peso a la vista, limpieza en un botón y aviso por umbral |
 | **Configurable por proyecto** | Estados y prioridades con nombre, orden arrastrando, colores, triggers y agrupación; plantilla para proyectos nuevos |
 | **Datos a salvo** | Base local, copia diaria, comprobación tras un cierre inesperado, reparación automática de una base dañada y *Tasklane: Diagnostics* |
-| **Teclado y accesibilidad** | La ventana se maneja entera con el teclado, y lista, buscador y diálogo tienen nombre para un lector de pantalla |
+| **Teclado y accesibilidad** | La ventana se maneja entera con el teclado —crear, tachar, marcar, la prioridad con `1…9`, desplegar, y `Tab` recorre los enlaces, casillas y distintivos de la tarjeta—, y lista, buscador y diálogo tienen nombre para un lector de pantalla |
 | **Hecho para listas enormes** | Un millón de tareas se abren, se buscan y se recorren sin congelar el IDE |
 
 - **Repositorio:** [palmerovicdev/tasklane](https://github.com/palmerovicdev/tasklane)
@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.24.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.25.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -196,7 +196,7 @@ tarea de una frase sigue midiendo una línea.
 | Título | Hasta **tres** líneas; lo que no cabe se recorta. Una tarea cerrada sale tachada. Doble clic o `Enter` abre la tarea entera |
 | Descripción | Si hay cuerpo bajo el título. Una línea, recortada; buscando, [la que casa](#búsqueda) |
 | Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas** —un clic filtra por ella y otro lo quita—, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
-| Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas |
+| Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas. Con el teclado, `⌘↵` |
 | Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
 
 **Con la ventana estrecha nada importante se cae.** Si el distintivo de prioridad o el de un
@@ -421,8 +421,9 @@ de tareas dentro del IDE y una lista de tareas *del* IDE: hasta la `1.0.0` las t
 vivían junto al código pero no apuntaban a él, y volver a «¿dónde era esto?» era trabajo
 de quien escribió la nota.
 
-*New Tasklane Task from Here*, en el **menú contextual del editor** y en el menú **Tools**,
-abre el diálogo de siempre con el sitio ya puesto. Con **varias líneas seleccionadas**, el
+*New Tasklane Task from Here*, en el **menú contextual del editor** y en el menú **Tools**
+—y con `⌘⌥⇧R` / `Ctrl+Alt+Shift+R` desde la 2.25.0—, abre el diálogo de siempre con el sitio
+ya puesto. Con **varias líneas seleccionadas**, el
 ancla abarca el bloque entero (2.15.0); con una selección dentro de una línea, ese texto
 entra como cuerpo. Con un fichero seleccionado en la vista del proyecto en vez de un
 editor, la tarea apunta al fichero.
@@ -942,7 +943,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.24.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.25.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -963,8 +964,16 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | Atajo | Acción | Nota |
 |---|---|---|
 | `⌘⌥R` | Quick Add | Global. Choca con *Resume Program* en el keymap de macOS — decisión consciente, reasignable en *Settings → Keymap* |
+| `⌘⌥⇧R` | New Tasklane Task from Here | Global (2.25.0): la misma de Quick Add, con el sitio puesto. En los keymaps de macOS es también la de *Force Refresh*, una plantilla que sólo usan algunos paneles para refrescar: ahí dentro gana la suya |
 | `⌘K` | Foco en la búsqueda | Sólo dentro de la Tool Window, así que no compite con *Commit* |
 | `Enter` | Editar la tarea seleccionada | Dentro del árbol. Sobre «N more», trae la página siguiente |
+| `⌘N` | Nueva tarea en este estado | Dentro del árbol (2.25.0): lo que hace `⌘N` en cualquier lista del IDE |
+| `Espacio` | Completar / reabrir las seleccionadas | Dentro del árbol. Toda la selección es una operación y un paso de `⌘Z` |
+| `F3` (macOS) / `F11` | Marcar las seleccionadas | Dentro del árbol: la tecla del marcador del IDE, sea cual sea en tu keymap |
+| `1` … `9` | Cambiar la prioridad de la selección | Dentro del árbol, en el orden de *Priority ▸*: `1` es la más alta. El menú enseña la de cada una |
+| `⌘↵` | Desplegar / plegar la tarjeta | Dentro del árbol, si la tarjeta esconde algo |
+| `Tab` / `⇧Tab` | Recorrer los distintivos de la tarjeta | Dentro del árbol: enlaces, casillas, anclas, prioridad, etiquetas y capturas, en el orden en que se leen. `Enter` o `Espacio` pulsa el que tiene el foco, `Escape` vuelve a la tarjeta, y pasado el último el tabulador sigue su camino |
+| `⌘C` sin texto marcado | Copiar el texto de las tareas seleccionadas | Dentro del árbol, como el botón de copiar de la tarjeta. Con texto marcado, copia lo marcado |
 | `Supr` | Borrar las seleccionadas | Dentro del árbol |
 | `⌘V` | Crear tareas con lo copiado: una por línea, o con la captura o los ficheros | Dentro del árbol, y sólo si hay algo que sirva: si no, sigue siendo el de siempre |
 | `⌘Z` / `⌘⇧Z` | Deshacer / rehacer lo último del repositorio | Dentro del árbol, y sólo si hay algo que devolver: si no, siguen siendo los de siempre |
@@ -981,12 +990,18 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | `⇧⌥←/→` | Mover la selección a esa pestaña | Mismo eje, y `Shift` significa «llévate esto contigo». No da la vuelta al llegar al extremo. En el tablero, la selección se va con las tareas a su columna |
 
 Todas las acciones están declaradas en `plugin.xml`, así que aparecen en *Settings →
-Keymap* y en *Search Everywhere* aunque no traigan atajo por defecto. Las de la Tool
-Window leen el keymap primero y sólo caen al valor local si no tienen asignación.
+Keymap* y en *Search Everywhere* aunque no traigan atajo por defecto: desde la 2.25.0
+también las cuatro agrupaciones y el orden manual, los cuatro filtros de vista, *Next
+Repository*, *Expand Card* y *Copy Task Text*. Las de la Tool Window leen el keymap primero
+y sólo caen al valor local si no tienen asignación, y lo leen **en cada pulsación**:
+reasignar un atajo se nota al momento, sin reabrir la ventana. Los que van sin acción
+declarada son los que no tendría sentido reasignar: `1…9`, el tabulador, `←`/`→` y
+`Escape`.
 
 La ventana se maneja **entera con el teclado**: el tabulador recorre la fila de
-estados —que se activan con Espacio o Intro—, el buscador y la lista, y `←`/`→`
-pliegan y despliegan los grupos. El árbol, el buscador y los campos del diálogo dicen
+estados —que se activan con Espacio o Intro—, el buscador y la lista y, dentro de la
+tarjeta seleccionada, lo que se puede pulsar en ella, con un anillo de foco alrededor; y
+`←`/`→` pliegan y despliegan los grupos. El árbol, el buscador y los campos del diálogo dicen
 su nombre a un lector de pantalla.
 
 ## Fases y versiones

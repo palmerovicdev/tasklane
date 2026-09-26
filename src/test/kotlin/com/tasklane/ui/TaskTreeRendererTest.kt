@@ -480,6 +480,56 @@ class TaskTreeRendererTest {
         assertEquals(setOf("api", "urgente"), tags.map { it.name }.toSet())
     }
 
+    // ------------------------------------------- recorrer con el teclado (P34)
+
+    private fun kind(hotspot: TaskTreeRenderer.Hotspot?): String? = hotspot?.let { it::class.simpleName }
+
+    /**
+     * Lo que recorre el tabulador es **lo que se pulsa**: cada distintivo de la lista está
+     * donde un clic lo encontraría, no falta ninguno de los que encuentra el ratón, y van en
+     * el orden en que se leen —de arriba abajo y de izquierda a derecha—.
+     */
+    @Test
+    fun `el tabulador recorre lo que se pulsa, en el orden en que se lee`() {
+        val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {")
+        val task = task(
+            "Revisar https://example.com/login\n- [ ] probar en local\n- [x] subir la rama",
+            anchors = listOf(anchor),
+            tags = listOf("api"),
+        )
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val placed = renderer.hotspots(tree, 0)
+
+        for (badge in placed) {
+            val center = Point(badge.bounds.x + badge.bounds.width / 2, badge.bounds.y + badge.bounds.height / 2)
+            assertEquals("el foco se pinta donde respondería el clic", kind(badge.hotspot), kind(renderer.hotspotAt(tree, center)))
+        }
+        assertEquals(
+            "en el orden en que se lee",
+            placed.sortedWith(compareBy({ it.bounds.y }, { it.bounds.x })).map { it.bounds },
+            placed.map { it.bounds },
+        )
+        val kinds = placed.map { kind(it.hotspot) }
+        assertEquals("una por casilla de la lista", 2, kinds.count { it == "Check" })
+        val byMouse = scanAll(tree, painted(tree, 0)) { kind(renderer.hotspotAt(tree, it)) }.toSet()
+        assertEquals("el teclado llega a todo lo que llega el ratón", byMouse, kinds.toSet())
+        assertTrue(kinds.containsAll(listOf("Links", "Check", "Priority", "Anchor", "Tag")))
+    }
+
+    /** `⌘↵` sólo despliega lo que el chevrón desplegaría, esté o no el ratón encima. */
+    @Test
+    fun `desplegar con el teclado solo si la tarjeta esconde algo`() {
+        val long = task("Comprar pan\nen la panaderia\ny pagar en efectivo")
+        assertFalse(renderer.isExpandable(treeWith(task("Comprar pan")), 0))
+
+        val tree = treeWith(long)
+        assertTrue(renderer.isExpandable(tree, 0))
+        expand(tree, long)
+        assertTrue("desplegada se puede volver a plegar", renderer.isExpandable(tree, 0))
+    }
+
     // ------------------------------------------------------ desplegar la tarjeta
 
     /**

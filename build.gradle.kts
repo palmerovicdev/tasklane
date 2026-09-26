@@ -125,6 +125,23 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.25.0 &mdash; the whole window from the keyboard</h3>
+            <ul>
+              <li><b>In the list</b>: <code>&#8984;N</code> creates a task, <code>Space</code>
+                  completes the selection, the IDE's bookmark key bookmarks it,
+                  <code>1</code>&hellip;<code>9</code> set its priority, <code>&#8984;&#8629;</code>
+                  expands the card and <code>&#8984;C</code> copies its text.</li>
+              <li><b><code>Tab</code> walks the selected card</b>: links, checkboxes, code anchors,
+                  priority, tags and images, with a focus ring; <code>Enter</code> or
+                  <code>Space</code> does what a click would.</li>
+              <li><b><code>&#8984;&#8997;&#8679;R</code> / <code>Ctrl+Alt+Shift+R</code></b> for
+                  <i>New Tasklane Task from Here</i>.</li>
+              <li><b>New Keymap actions</b>: every grouping, manual order, the four view filters,
+                  <i>Next Repository</i>, <i>Expand Card</i> and <i>Copy Task Text</i>. Reassigning
+                  a list shortcut now applies at once.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.24.0 &mdash; due dates and tags from the menu</h3>
             <ul>
               <li><b><i>Due &#9656;</i></b> in the card menu: <i>Today</i>, <i>Tomorrow</i>,

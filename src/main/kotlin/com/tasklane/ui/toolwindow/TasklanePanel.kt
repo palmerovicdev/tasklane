@@ -10,6 +10,7 @@ import com.intellij.openapi.actionSystem.CommonShortcuts
 import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.actionSystem.DataSink
 import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.KeyboardShortcut
 import com.intellij.openapi.actionSystem.ShortcutSet
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
@@ -997,8 +998,8 @@ internal class TasklanePanel(
                 }
             }.registerCustomShortcutSet(
                 CustomShortcutSet(
-                    KeyStroke.getKeyStroke(KeyEvent.VK_0 + n, 0),
-                    KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0 + n, 0),
+                    KeyboardShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_0 + n, 0), null),
+                    KeyboardShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0 + n, 0), null),
                 ),
                 tree,
                 this,

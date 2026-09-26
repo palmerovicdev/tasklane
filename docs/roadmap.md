@@ -40,6 +40,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P26 · Encargar una tarea a un agente                    | `2.22.0` |
 | ✅ | P30 · Etiquetas de verdad                               | `2.23.0` |
 | ✅ | P31 · Vencimiento y etiquetas desde el menú             | `2.24.0` |
+| ✅ | P34 · El teclado, entero de verdad                      | `2.25.0` |
 
 ---
 
@@ -436,7 +437,7 @@ Propuesta: *Move To Repository ▸* —sólo con más de uno—, también sobre 
 lleva las capturas al almacén del otro repositorio; las anclas valen tal cual, porque son
 relativas al proyecto. Y `repository` en `tasklane_update_task`.
 
-### P34 · El teclado, entero de verdad 👾
+### P34 · El teclado, entero de verdad ✅ `2.25.0`
 
 `docs/plan-atajos.md` dejó escrito «lo que hay que tocar» y no se hizo, y el README promete
 que la ventana «se maneja entera con el teclado», pero desplegar una tarjeta o pulsar un
@@ -447,6 +448,17 @@ declaradas, así que no se pueden asignar en el *Keymap*. Propuesta: lo que dice
 desplegar, marcar y cambiar la prioridad (`1…9`); recorrer los distintivos de la tarjeta con
 el teclado; y que un cambio en el *Keymap* se aplique sin reabrir la ventana (hoy se lee una
 sola vez).
+
+Salió así, con el detalle en la sección *Cómo salió* de `docs/plan-atajos.md`: `⌘N`, `Espacio`
+—sobre toda la selección, un paso de `⌘Z`—, la tecla del `ToggleBookmark` del IDE (`F3` en
+macOS, no `F11`), `⌘↵`, `⌘C` sin texto marcado y `1…9` en la lista; `⌘⌥⇧R` global, que en
+macOS comparte con la plantilla `ForceRefresh`. `Tab`/`⇧Tab` recorren lo pulsable de la
+tarjeta seleccionada (`TaskTreeRenderer.hotspots`, que barre la fila con la misma pregunta que
+un clic, y `BadgeWalk`), con anillo de foco; `Enter`/`Espacio` lo pulsan por `RowClicks.activate`
+y, sin nada adonde ir, la acción se apaga y el tabulador sigue su camino. Declaradas: *Group by
+Priority/Tag*, *Don't Group*, *Manual Order*, los cuatro *Show … Tasks*, *Next Repository*,
+*Expand Card* y *Copy Task Text*. Los atajos se leen del Keymap en cada pulsación
+(`KeymapShortcut`).
 
 ### P35 · Primeros pasos en una lista vacía 👾
 
