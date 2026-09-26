@@ -34,6 +34,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P15 · Deshacer todo, no sólo el borrado                 | `2.16.0` |
 | ✅ | P19 · Tablero en una pestaña del editor                 | `2.17.0` |
 | ✅ | P24 · Las capturas, también para el agente              | `2.18.0` |
+| ✅ | P27 · Pegar y soltar en la lista                        | `2.19.0` |
 
 ---
 
@@ -298,7 +299,7 @@ cualquier otro: `codex`, `gemini`…— y pasa la tarea a *Doing*. Sin comando c
 La terminal va como dependencia opcional, como Git y MCP; `TerminalToolWindowManager` ya
 abre una pestaña con un comando. No es P17: no cambia tu contexto, delega la tarea.
 
-### P27 · Pegar y soltar en la lista 👾
+### P27 · Pegar y soltar en la lista ✅ `2.19.0`
 
 Tasklane existe para capturar, pero la lista no acepta nada: `⌘V` sobre ella no hace nada y
 soltar algo tampoco (el único `DropTarget` es el del diálogo). Propuesta: pegar **varias
@@ -307,6 +308,14 @@ si son muchas—, que es copiar la lista de una reunión o de un chat y tenerla;
 captura** crea una tarea con ella, y **una URL**, la tarea con su enlace. Soltar ficheros
 desde el Finder o la vista del proyecto: una imagen da una tarea con la captura, y un
 fichero de código, una tarea anclada a él. `TaskCommand.CreateMany` ya existe.
+
+Salió así (`ListIntake`, y `PastedLines` para partir el texto): `⌘V` con el atajo de *Paste*
+del keymap y apagado si no hay nada que sirva; soltar por un `DropTarget` en el árbol, que
+recibe también lo que se arrastra desde la vista del proyecto. **Todo se crea sin diálogo** y
+queda seleccionado, con aviso en la barra de estado y un solo paso de `⌘Z`; la captura y el
+fichero también, aunque nazcan sin título que no sea la imagen o el nombre del fichero. Se
+pregunta sólo **por encima de diez**, y al texto se le ofrece entonces una sola tarea con todo.
+Se lee en el orden del diálogo —ficheros, imagen, texto— y se saltan carpetas y binarios.
 
 ### P28 · La búsqueda enseña por qué casa 👾
 

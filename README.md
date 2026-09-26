@@ -247,6 +247,29 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
   (`☑ 2/5`), porque plegada la tarjeta sólo enseña la primera. En el diálogo, el botón
   *Checklist* convierte en casillas las líneas seleccionadas.
 
+### Pegar y soltar en la lista
+
+Desde la `2.19.0`, la lista acepta lo que se le pega o se le suelta, y lo convierte en
+tareas del estado que se está mirando —en el tablero, de esa columna— **sin pasar por el
+diálogo**:
+
+- **`⌘V` con texto: una tarea por línea.** Se quitan la viñeta (`-`, `*`, `+`, `•`), la
+  numeración (`1.`, `2)`) y la casilla (`[ ]`, `[x]`), y se saltan las líneas vacías o de
+  sólo rayas: copiar la lista de una reunión o de un chat es tenerla. Una URL es una línea
+  más, y la tarea nace con su enlace.
+- **`⌘V` con una captura**: una tarea con ella.
+- **Soltar** desde el Finder, la vista del proyecto, el navegador o el editor —o pegar
+  ficheros copiados—: una imagen da una tarea con la captura; un fichero de texto o de
+  código, una tarea **anclada** a él, con su nombre de título; y un texto, una tarea por
+  línea. Las carpetas y los binarios se saltan. La lista se recuadra mientras hay algo encima
+  que se puede soltar.
+
+Lo creado queda **seleccionado** —`Enter` y se le escribe el título—, la barra de estado
+dice cuántas y dónde, y **un `⌘Z` lo quita entero**. Sólo se pregunta antes si son **más de
+diez**: al texto se le ofrece entonces también **una sola tarea** con todo, que es lo que se
+quería al pegar un párrafo o un log. Pegar lee lo mismo y en el mismo orden que el cuerpo del
+diálogo: ficheros, imagen y texto.
+
 ### Orden manual
 
 Cada estado puede ir **a mano**: *Group By ▸ Manual Order*. Entonces la lista deja de
@@ -855,6 +878,7 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | `⌘K` | Foco en la búsqueda | Sólo dentro de la Tool Window, así que no compite con *Commit* |
 | `Enter` | Editar la tarea seleccionada | Dentro del árbol. Sobre «N more», trae la página siguiente |
 | `Supr` | Borrar las seleccionadas | Dentro del árbol |
+| `⌘V` | Crear tareas con lo copiado: una por línea, o con la captura o los ficheros | Dentro del árbol, y sólo si hay algo que sirva: si no, sigue siendo el de siempre |
 | `⌘Z` / `⌘⇧Z` | Deshacer / rehacer lo último del repositorio | Dentro del árbol, y sólo si hay algo que devolver: si no, siguen siendo los de siempre |
 | `⌘⇧↑/↓` | Subir / bajar la tarea un puesto | Dentro del árbol, en un estado con orden manual |
 | `⇧⇧` | Buscar tareas en *Search Everywhere* | Global, pestaña *Tasklane* |

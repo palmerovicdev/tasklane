@@ -121,6 +121,23 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.19.0 &mdash; paste and drop into the list</h3>
+            <ul>
+              <li><b><code>&#8984;V</code> on the list creates tasks</b> from the clipboard, in the
+                  state you are looking at &mdash; on the board, in that column. <b>Text becomes one
+                  task per line</b>, without its bullets, numbers or checkboxes: copy the list from
+                  a meeting or a chat and it is there. A URL is one more line, and the task gets its
+                  link. A screenshot becomes a task with it.</li>
+              <li><b>Drop onto the list</b> from Finder, the Project view, the browser or the editor:
+                  an image gives a task with the screenshot, a code or text file a task anchored to
+                  it, and text one task per line.</li>
+              <li>No dialog and no question unless there are more than ten: what was created is
+                  selected &mdash; press <code>Enter</code> to write its title &mdash; and one
+                  <code>&#8984;Z</code> removes it all. Past ten lines you can also make it a single
+                  task with the whole text.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.18.0 &mdash; screenshots for AI agents</h3>
             <ul>
               <li><b>Agents see the screenshots</b>: <code>tasklane_get_task</code> now gives the

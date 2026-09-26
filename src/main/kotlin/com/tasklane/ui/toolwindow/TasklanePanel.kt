@@ -306,6 +306,22 @@ internal class TasklanePanel(
 
     private var landing: Landing? = null
 
+    /** Si hay encima algo de fuera que se puede soltar: la lista se recuadra igual. Ver [intake]. */
+    private var dropping = false
+
+    /** Pegar y soltar en la lista: tareas nuevas de este estado, sin diálogo. Ver [ListIntake]. */
+    private val intake = ListIntake(
+        project,
+        target = { if (isEditable()) ListIntake.Target(snapshot.activeRepo, stateId) else null },
+        onCreated = ::follow,
+        onHover = { over ->
+            if (over != dropping) {
+                dropping = over
+                repaint()
+            }
+        },
+    )
+
     /** Lo que se pidió seleccionar en cuanto llegue a esta columna. Ver [follow]. */
     private var following: Set<TaskId> = emptySet()
     private var followTries = 0
@@ -463,6 +479,7 @@ internal class TasklanePanel(
         RowClicks.install(tree, renderer, project, cardSnippets)
         TaskRowActions.install(tree, renderer, this)
         CardTextSelection.install(tree, renderer)
+        intake.install(tree)
 
         uiScope.launch {
             combine(service.snapshot, search.results, view.filter, view.archive, view.windowHidden, ::ViewInput).collect { input ->
@@ -670,6 +687,7 @@ internal class TasklanePanel(
         installGroupToggle()
         installTextSelection()
         installUndo()
+        installPaste()
     }
 
     /**
@@ -702,6 +720,23 @@ internal class TasklanePanel(
 
             override fun actionPerformed(e: AnActionEvent) = run(snapshot.activeRepo)
         }.registerCustomShortcutSet(ideShortcut(id, key, shift), tree, this)
+    }
+
+    /**
+     * `⌘V` en la lista crea tareas con lo que haya en el portapapeles: ver [ListIntake]. Con
+     * el atajo de *Paste* del keymap, y **apagada** cuando no hay nada que sirva o el
+     * repositorio es de sólo lectura, como `⌘Z`: así el atajo sigue siendo de quien fuera.
+     */
+    private fun installPaste() {
+        object : DumbAwareAction() {
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = intake.canPaste()
+            }
+
+            override fun actionPerformed(e: AnActionEvent) = intake.paste()
+        }.registerCustomShortcutSet(ideShortcut(IdeActions.ACTION_PASTE, KeyEvent.VK_V, shift = false), tree, this)
     }
 
     private fun ideShortcut(id: String, key: Int, shift: Boolean): ShortcutSet =
@@ -1621,10 +1656,13 @@ internal class TasklanePanel(
         tree.requestFocusInWindow()
     }
 
-    /** El recuadro de la columna sobre la que se van a soltar tarjetas de otra. Ver [carryOver]. */
+    /**
+     * El recuadro de la columna sobre la que se van a soltar tarjetas de otra —ver
+     * [carryOver]— o algo de fuera: ver [intake].
+     */
     override fun paintChildren(g: Graphics) {
         super.paintChildren(g)
-        if (landing == null) return
+        if (landing == null && !dropping) return
         val g2 = g.create() as Graphics2D
         try {
             val config = GraphicsUtil.setupAAPainting(g2)

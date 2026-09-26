@@ -9,6 +9,39 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.19.0]
+
+Menor sin cambio de formato: pegar y soltar en la lista. Es la P27 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **`⌘V` sobre la lista crea tareas** con lo que haya en el portapapeles, en el estado que se
+  está mirando —en el tablero, en esa columna—:
+  - **Texto: una tarea por línea**, sin la viñeta (`-`, `*`, `+`, `•`), la numeración (`1.`,
+    `2)`) ni la casilla (`[ ]`, `[x]`) de delante, y sin las líneas vacías o de sólo rayas. Es
+    copiar la lista de una reunión o de un chat y tenerla. Una URL es una línea más: la tarea
+    nace con su enlace.
+  - **Una captura**: una tarea con ella.
+  - **Ficheros copiados**: lo mismo que al soltarlos.
+- **Soltar en la lista** lo que se arrastra desde el Finder, la vista del proyecto, el
+  navegador o el editor: una imagen da una tarea con la captura; un fichero de texto o de
+  código, una tarea anclada a él, con su nombre de título; y un texto, una tarea por línea. La
+  lista se recuadra mientras hay encima algo que se puede soltar.
+- **Sin diálogo y sin preguntar**, salvo si son más de diez: lo creado queda seleccionado
+  —`Enter` y se le escribe el título— y un `⌘Z` lo quita entero. Con más de diez líneas se
+  pregunta si una tarea por línea o **una sola con todo el texto**, que es lo que se quería al
+  pegar un párrafo o un log.
+
+### Detalles
+- Pegar lee lo mismo y en el mismo orden que el cuerpo del diálogo: primero ficheros, luego
+  una imagen y por último texto. Unas celdas copiadas de una hoja de cálculo que traigan
+  también su imagen se pegan como imagen, igual que en el diálogo.
+- Las carpetas y los ficheros binarios que no son imagen se saltan sin avisar, como en la
+  franja de adjuntar del diálogo.
+- `⌘V` sólo se queda con la pulsación con el foco en la lista, algo que sirva en el
+  portapapeles y un repositorio que se pueda escribir; si no, sigue siendo el de siempre.
+- **Formato:** ninguno.
+
 ## [2.18.0]
 
 Menor sin cambio de formato: las capturas, también para el agente. Es la P24 de
