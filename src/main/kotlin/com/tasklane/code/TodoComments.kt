@@ -2,9 +2,9 @@ package com.tasklane.code
 
 import com.intellij.lang.CodeDocumentationAwareCommenter
 import com.intellij.lang.LanguageCommenters
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.util.TextRange
@@ -85,10 +85,9 @@ object TodoComments {
      * que sí hay.
      */
     fun all(project: Project, indicator: ProgressIndicator): List<Found> {
-        val dumb = DumbService.getInstance(project)
         val helper = PsiTodoSearchHelper.getInstance(project)
         val fileIndex = ProjectFileIndex.getInstance(project)
-        val files = dumb.runReadActionInSmartMode<List<VirtualFile>> {
+        val files = smartRead<List<VirtualFile>>(project, indicator) {
             val out = ArrayList<VirtualFile>()
             helper.processFilesWithTodoItems { psi ->
                 psi.virtualFile?.takeIf { it.isInLocalFileSystem && fileIndex.isInContent(it) }?.let(out::add)
@@ -101,11 +100,11 @@ object TodoComments {
             indicator.checkCanceled()
             indicator.fraction = index.toDouble() / files.size.coerceAtLeast(1)
             indicator.text2 = file.name
-            found += dumb.runReadActionInSmartMode<List<Found>> {
+            found += smartRead<List<Found>>(project, indicator) {
                 val psi = file.takeIf { it.isValid }?.let { PsiManager.getInstance(project).findFile(it) }
-                    ?: return@runReadActionInSmartMode emptyList()
+                    ?: return@smartRead emptyList()
                 val document = PsiDocumentManager.getInstance(project).getDocument(psi)
-                    ?: return@runReadActionInSmartMode emptyList()
+                    ?: return@smartRead emptyList()
                 helper.findTodoItemsLight(psi)
                     .sortedBy { it.textRange.startOffset }
                     .mapNotNull { found(project, psi, document, it) }
@@ -113,6 +112,18 @@ object TodoComments {
         }
         return found
     }
+
+    /**
+     * Una read action que **espera a que acabe la indexación** y cede ante las escrituras
+     * del IDE: si una llega a mitad, se aparta y [read] vuelve a empezar, así que no puede
+     * tener efectos. Es lo que hacía `DumbService.runReadActionInSmartMode`, deprecada
+     * porque no garantiza nada dentro de otra read action.
+     */
+    private fun <T> smartRead(project: Project, indicator: ProgressIndicator, read: () -> T): T =
+        ReadAction.nonBlocking<T> { read() }
+            .inSmartMode(project)
+            .wrapProgress(indicator)
+            .executeSynchronously()
 
     /**
      * Quita el comentario de [found] del documento y devuelve el ancla que le toca a la

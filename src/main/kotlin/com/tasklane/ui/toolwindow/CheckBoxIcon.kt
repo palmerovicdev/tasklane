@@ -1,6 +1,7 @@
 package com.tasklane.ui.toolwindow
 
 import com.intellij.ui.JBColor
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
 import java.awt.BasicStroke
@@ -37,7 +38,7 @@ internal class CheckBoxIcon(private val checked: Boolean) : Icon {
                 g2.color = FILL
                 g2.fill(box)
                 g2.color = MARK
-                g2.stroke = BasicStroke(JBUI.scale(1.6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+                g2.stroke = BasicStroke(JBUIScale.scale(1.6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
                 val mark = Path2D.Float()
                 mark.moveTo(x + size * 0.27f, y + size * 0.52f)
                 mark.lineTo(x + size * 0.44f, y + size * 0.69f)
@@ -45,7 +46,7 @@ internal class CheckBoxIcon(private val checked: Boolean) : Icon {
                 g2.draw(mark)
             } else {
                 g2.color = BORDER
-                g2.stroke = BasicStroke(JBUI.scale(1f))
+                g2.stroke = BasicStroke(JBUIScale.scale(1f))
                 g2.draw(box)
             }
         } finally {

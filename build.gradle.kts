@@ -125,6 +125,17 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.26.1 &mdash; ready for the Marketplace</h3>
+            <ul>
+              <li><b>The plugin description is up to date</b>: <i>Hand Off to Agent</i> no longer
+                  moves the task to <i>Doing</i>, code anchors can be typed, and it now covers
+                  undo and redo, pasting and dropping into the list, TODO comments, the matching
+                  line in search, pinned images and the first steps.</li>
+              <li>Two deprecated platform APIs replaced. Importing TODO comments still waits for
+                  indexing, and now yields to the IDE's writes instead of holding them back.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.26.0 &mdash; first steps</h3>
             <ul>
               <li><b>An empty repository shows where to start</b>: links to create a task

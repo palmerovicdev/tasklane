@@ -1,13 +1,34 @@
 # Changelog
 
 Todas las versiones publicables del plugin. El formato sigue
-[Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado, semver:
-hasta la `1.0.0` la versión media era **la fase cerrada** (fase N → `0.N.0`); a partir
-de ahí manda semver sobre lo publicado.
+[Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado, la regla del
+README (§ *Fases y versiones*): hasta la `1.0.0` la versión media era **la fase cerrada**
+(fase N → `0.N.0`); a partir de ahí el primer número sube con una funcionalidad
+**grande**, el segundo con una **pequeña** y el tercero sólo con **correcciones**.
 
 > Al subir la versión hay que tocar tres sitios: `pluginVersion` en `gradle.properties`,
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
+
+## [2.26.1]
+
+Sólo correcciones, antes de subirla al Marketplace.
+
+### Corregido
+- **La ficha del Marketplace, al día.** Decía que *Hand Off to Agent* pasa la tarea a *Doing*
+  y que los ajustes tienen una casilla para ello —las dos cosas se fueron en la 2.25.1—, y que
+  un ancla de código nunca se escribe a mano, cuando se puede desde la 2.8.0. Y le faltaba lo
+  que trajeron la 2.6.1, la 2.8.0, la 2.16.0, la 2.19.0, la 2.20.0 y la 2.26.0: fijar una
+  captura encima del editor, los bloques de código, los TODO del código, deshacer y rehacer
+  todo, pegar y soltar en la lista, la línea que casa al buscar y los primeros pasos.
+- **Dos APIs deprecadas menos**, que el Plugin Verifier del Marketplace marcaría.
+  *Import TODO Comments…* lee el índice con `ReadAction.nonBlocking(…).inSmartMode(…)` en vez
+  de `DumbService.runReadActionInSmartMode`: sigue esperando a que acabe la indexación y,
+  además, cede ante una escritura del IDE en vez de hacerla esperar. La casilla de las listas
+  de comprobación escala su trazo con `JBUIScale.scale(float)` en vez de `JBUI.scale(float)`.
+
+### Detalles
+- **Formato:** ninguno.
 
 ## [2.26.0]
 

@@ -65,6 +65,12 @@
                 <code>&larr;</code>/<code>&rarr;</code>, and shows how many tasks it holds.
                 <i>Today</i> is shown even when empty &mdash; <i>No tasks today &middot; You're
                 all caught up!</i> &mdash; because that is exactly what you came to check.</li>
+            <li><b>An empty repository shows where to start</b>: links to create a task, quick-add
+                from anywhere, anchor a task to the code at the editor's caret, import the
+                project's <code>TODO</code> comments and, with the IDE's MCP Server plugin, connect
+                an AI agent &mdash; each with its shortcut from the Keymap. The first code anchor
+                and the first screenshot get a <i>Got It</i> that explains them, right where they
+                appear.</li>
             <li><b>Archive what is done</b>: hide tasks completed more than N days ago, if you
                 want to. Only in the list of a done state &mdash; search still finds them
                 &mdash; and never silently: the list says how many are hidden, with a link to
@@ -112,7 +118,8 @@
             <li><b>Markdown in place</b>: <b>bold</b>, <i>italics</i>, <code>code</code> and
                 strikethrough show their style, not their marks. Underscores are left alone,
                 because <code>a_name_like_this</code> is an identifier far more often than it is
-                italics. Completed tasks are struck through.</li>
+                italics. Fenced code blocks are drawn as code, in the editor font, with nothing
+                inside them interpreted. Completed tasks are struck through.</li>
             <li><b>Links open with a single click</b>, in the title or anywhere in the body
                 &mdash; even in its greyed-out lines. Plain URLs, <code>www.</code> addresses
                 and Markdown links are recognised, shown shortened
@@ -145,8 +152,8 @@
         <ul>
             <li><b>A context menu</b> with <i>New Task</i>, <i>Edit</i>, <i>Toggle
                 Completed</i>, <i>Bookmark</i>, <i>Move To &#9656;</i>, <i>Priority &#9656;</i>,
-                <i>Due &#9656;</i>, <i>Tags &#9656;</i>, <i>Export</i> and <i>Delete</i> &mdash;
-                the same one as the row's <i>&vellip;</i> menu.</li>
+                <i>Due &#9656;</i>, <i>Tags &#9656;</i>, <i>Hand Off to Agent</i>, <i>Export</i>
+                and <i>Delete</i> &mdash; the same one as the row's <i>&vellip;</i> menu.</li>
             <li><b>Move tasks between states</b> with <i>Move To &#9656;</i>, or one tab at a time
                 with <code>&#8679;&#8997;&larr;/&rarr;</code>, without opening a dialog.
                 <code>&#8997;&larr;/&rarr;</code> just switches the tab you are looking at.</li>
@@ -158,10 +165,20 @@
                 priority, due date or tags, delete. Many tasks at once are one operation and one repaint; above ten
                 it runs in the background with a progress bar, and <b>cancelling undoes
                 it</b>.</li>
-            <li><b>Deleting can be undone</b>: a <i>3 tasks deleted &mdash; Undo</i>
-                notification, or <code>&#8984;Z</code> / <code>Ctrl+Z</code> in the list, brings
-                the last deletion back exactly as it was &mdash; same dates, same place, same
-                images.</li>
+            <li><b>Undo anything</b>: <code>&#8984;Z</code> / <code>Ctrl+Z</code> in the list
+                undoes the last thing you did &mdash; complete, move, reprioritise, reorder, tick a
+                checkbox, edit, create or delete &mdash;, on one task or a whole selection at once,
+                and <code>&#8984;&#8679;Z</code> / <code>Ctrl+Shift+Z</code> redoes it. The status
+                bar says what was undone. Each repository keeps its own history, and what an AI
+                agent does through MCP is not in it. A deletion also offers a <i>3 tasks deleted
+                &mdash; Undo</i> notification that brings them back exactly as they were &mdash;
+                same dates, same place, same images.</li>
+            <li><b>Paste or drop into the list</b>: <code>&#8984;V</code> creates tasks from the
+                clipboard in the state you are looking at &mdash; one per line of text, without
+                its bullets, numbers or checkboxes; a screenshot becomes a task with it &mdash;,
+                and dropping images, files or text from your file manager, the Project view, a
+                browser or the editor does the same. No dialog, and one <code>&#8984;Z</code>
+                takes it all back.</li>
             <li><b>The checkbox</b> &mdash; or <i>Toggle Completed</i> &mdash; moves a task to the
                 done state and back to the default one. Entering a done state stamps the completion
                 date, which is what grouping <i>Done</i> by date uses.</li>
@@ -194,8 +211,9 @@
                 <code>#api</code>. <b>The field suggests the repository's tags</b> as you type,
                 with how many tasks each has, so <code>#api</code> and <code>#apis</code> do not
                 grow side by side.</li>
-            <li><b>Code anchors as chips</b>, each one removable. They are captured from the
-                editor, never typed.</li>
+            <li><b>Code anchors as chips</b>, each one removable: captured from the editor, or
+                typed as <code>path:line</code> with the path completed as you type. A GitHub
+                <code>#L42</code> link or a stack trace's <code>(42)</code> works too.</li>
             <li><b>Priority triggers</b>: typing <code>!!! Fix the login</code> creates <i>Fix the
                 login</i> at <i>High</i>. The prefix moves the priority dropdown as you type and is
                 never saved. The longest match wins, a trailing space is required, deleting the
@@ -218,8 +236,8 @@
                 its own.</li>
             <li><b>Hand Off to Agent</b> in the card menu opens a tab of the IDE's terminal in the
                 task's repository, with your agent working on that task &mdash; <code>claude</code>
-                out of the box &mdash; and moves it to <i>Doing</i>. The command and the prompt are
-                yours in <i>Settings &#9656; Tools &#9656; Tasklane &#9656; AI agent</i>
+                out of the box. The task stays where it is while the agent works, and the agent
+                completes it when it is done. The command and the prompt are yours in <i>Settings &#9656; Tools &#9656; Tasklane &#9656; AI agent</i>
                 (<code>codex {prompt}</code>, <code>gemini -i {prompt}</code>&hellip;), and the
                 request is quoted for your shell, so a task title never runs as a command.
                 <b>Copy Agent Prompt</b> copies the same request for an agent's chat, and <b>Copy
@@ -233,6 +251,9 @@
                 both directions: <i>autenticacion</i> finds <i>autenticaci&oacute;n</i>. Results are
                 ranked by relevance, with matches in the title weighing more, and the list shows
                 the 200 best.</li>
+            <li><b>A folded card shows the body line that matched</b>, not the first one, with
+                every term highlighted &mdash; accents ignored, like the search. In a narrow tool
+                window the line is cut at the front so the match stays in sight.</li>
             <li><b>Operators</b>: <code>state:doing</code>, <code>p:high</code>,
                 <code>repo:backend</code>, <code>is:open</code> / <code>is:done</code> /
                 <code>is:overdue</code> / <code>is:bookmarked</code>,
@@ -290,6 +311,12 @@
                 your code; or an <b>inline chip</b> on the exact character, carrying the task's
                 state in capitals (<code>TODO</code>, <code>DOING</code>) and showing the task's
                 <b>screenshots</b> in its tooltip. Or no mark at all.</li>
+            <li><b>TODO comments become tasks.</b> <code>Alt+Enter</code> on a <code>TODO</code>
+                offers <i>Move TODO to Tasklane</i>: the task is anchored to that line and tagged
+                with the keyword, and the comment leaves the code &mdash; <code>&#8984;Z</code> in
+                the editor puts it back. <i>Import TODO Comments&hellip;</i> turns every TODO in
+                the project into a task in one go, without touching the code, and never imports
+                one twice. Both use the IDE's own TODO patterns.</li>
             <li><b>Only open tasks are marked</b>, and a mark goes the moment its task is done.
                 Several tasks on one line share a mark coloured by the highest priority, and the
                 tooltip lists them. Marks work in any file, <code>.txt</code> included.</li>
@@ -343,6 +370,9 @@
                 stored once.</li>
             <li><b>The list paints thumbnails</b> and never decodes a large original; the full image
                 opens on click, loaded in the background.</li>
+            <li><b>Pin an image over the editor</b>: the enlarged view has a pin that keeps it on
+                top while you code &mdash; the bug to reproduce, the design to copy. The
+                <code>1 img</code> counter on a card opens it too, and previews it on hover.</li>
             <li><b>Unused images are cleaned up on their own</b>, a day after the last task stopped
                 pointing at them.</li>
             <li><b>Settings shows how much the active repository's images weigh</b>, with
@@ -388,8 +418,8 @@
                 a done state, or show them all (the default). Yours alone.</li>
             <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
                 the warning threshold.</li>
-            <li><b>AI agent</b>: the command and the prompt of <i>Hand Off to Agent</i>, whether the
-                task moves to in progress, and the button that copies the instructions for
+            <li><b>AI agent</b>: the command and the prompt of <i>Hand Off to Agent</i>, and the
+                button that copies the instructions for
                 <code>CLAUDE.md</code>. Yours alone, for every project.</li>
             <li><b>Save as template for new projects</b>, so configuring per project does not mean
                 configuring every project, and a direct link to the Keymap.</li>
@@ -405,7 +435,7 @@
             <li><b>Fully usable from the keyboard</b>: <code>Tab</code> walks the state row
                 (<code>Space</code> or <code>Enter</code> opens a tab), the search field and the
                 list &mdash; and, inside the selected card, its links, checkboxes, anchors,
-                priority and tags, which <code>Enter</code> or <code>Space</code> activates. In the
+                priority, tags and images, which <code>Enter</code> or <code>Space</code> activates. In the
                 list, <code>&#8984;N</code> creates a task, <code>Space</code> completes,
                 the IDE's bookmark key bookmarks, <code>1</code>&hellip;<code>9</code> set the
                 priority, <code>&#8984;&#8629;</code> expands the card and <code>&#8984;C</code>
