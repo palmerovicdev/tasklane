@@ -50,7 +50,7 @@ class VisibleTasksTest {
 
     /** Con `matches` a null no hay consulta: pasa todo. Con un mapa, sólo lo que está. */
     private fun found(vararg ids: String) =
-        SearchResults("q", TaskQuery.EMPTY, ids.associate { TaskId(it) to 1 }, highlighter = null)
+        SearchResults("q", TaskQuery.EMPTY, ids.associate { TaskId(it) to 1 })
 
     private fun counted(tasks: List<Task>, found: SearchResults, filter: TaskFilter, state: StateId) =
         VisibleTasks.countsByState(tasks, found, filter, now)[state] ?: 0

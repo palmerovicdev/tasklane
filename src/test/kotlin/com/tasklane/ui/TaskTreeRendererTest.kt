@@ -13,6 +13,7 @@ import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.query.QueryParser
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.LinkExtractor
 import com.tasklane.ui.toolwindow.CardImageView
@@ -24,6 +25,7 @@ import com.tasklane.ui.toolwindow.GroupNode
 import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
 import com.tasklane.ui.toolwindow.TextPos
+import com.tasklane.ui.toolwindow.TitleWrap
 import com.tasklane.ui.toolwindow.paintedRowBounds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -906,6 +908,121 @@ class TaskTreeRendererTest {
         }
 
         assertEquals(task.id, hit?.task?.id)
+    }
+
+    // ------------------------------------------- la búsqueda enseña por qué casa (P28)
+
+    private fun search(query: String) {
+        renderer.searchTerms = QueryParser.parse(query).terms
+    }
+
+    /** Lo que pedía la P28: si `token` está en la cuarta línea, la tarjeta enseña la cuarta. */
+    @Test
+    fun `buscando la tarjeta plegada ensena la linea que casa`() {
+        val task = task("Revisar el login\nprimera nota\nsegunda nota\nel token caduca pronto")
+        search("token")
+        val tree = treeWith(task)
+
+        assertEquals(listOf("Revisar el login", "el token caduca pronto"), renderer.cardText(tree, 0))
+        assertEquals(listOf(emptyList(), listOf("token")), renderer.cardMatches(tree, 0))
+
+        search("")
+        remeasure(tree)
+        assertEquals(listOf("Revisar el login", "primera nota"), renderer.cardText(tree, 0))
+    }
+
+    /** Con varios términos gana la línea que casa más; si ninguna casa, la de siempre. */
+    @Test
+    fun `gana la linea que casa mas terminos y si no casa ninguna la primera`() {
+        val task = task("Revisar el login\nel token\nnada\nel token expira")
+        search("token expira")
+        val tree = treeWith(task)
+        assertEquals("el token expira", renderer.cardText(tree, 0)[1])
+
+        search("login")
+        remeasure(tree)
+        assertEquals(listOf("Revisar el login", "el token"), renderer.cardText(tree, 0))
+        assertEquals(listOf(listOf("login"), emptyList()), renderer.cardMatches(tree, 0))
+    }
+
+    /**
+     * A ancho mínimo una línea de cuerpo se ve hasta la quinta o sexta palabra: sin cortar
+     * por delante, la tarjeta elegiría la línea que casa para recortarla justo antes.
+     */
+    @Test
+    fun `la coincidencia se ve aunque caiga mas alla del ancho`() {
+        val body = "uno dos tres cuatro cinco seis siete ocho nueve diez once doce trece token catorce quince"
+        val task = task("Titulo\n$body")
+        search("token")
+        val tree = treeWith(task, MIN_WIDTH)
+
+        val line = renderer.cardText(tree, 0)[1]
+        assertTrue("se corta por delante: $line", line.startsWith(TitleWrap.ELLIPSIS))
+        assertTrue("y se ve lo que casa: $line", "token" in line)
+        assertEquals(listOf("token"), renderer.cardMatches(tree, 0)[1])
+
+        search("")
+        remeasure(tree)
+        assertFalse("sin buscar se recorta como siempre", renderer.cardText(tree, 0)[1].startsWith(TitleWrap.ELLIPSIS))
+    }
+
+    /** Hasta la 2.17 `autenticacion` encontraba `autenticación` pero no la resaltaba. */
+    @Test
+    fun `el resaltado ignora los acentos como la busqueda`() {
+        val task = task("Revisar la autenticación\ncon el móvil")
+        search("autenticacion movil")
+        val tree = treeWith(task)
+
+        assertEquals(listOf(listOf("autenticación"), listOf("móvil")), renderer.cardMatches(tree, 0))
+    }
+
+    /** El resaltado es propio desde la P28 y llega a los enlaces, que se siguen pulsando. */
+    @Test
+    fun `un enlace resaltado se sigue pulsando`() {
+        val tree = treeWith(task("Revisar https://ejemplo.com/a antes del viernes"))
+        search("ejemplo")
+        remeasure(tree)
+
+        assertEquals(listOf("ejemplo"), renderer.cardMatches(tree, 0)[0])
+        assertEquals(setOf(listOf("https://ejemplo.com/a")), sweep(tree, 0).values.toSet())
+    }
+
+    /** En un bloque de código, la línea que casa; y cortada por delante si no se vería. */
+    @Test
+    fun `en un bloque de codigo ensena la linea que casa`() {
+        val code = "val resultado = calcularAlgoMuyLargo(entrada, opciones, token)"
+        val task = task("Titulo\n```\nval a = 1\n$code\n```")
+        search("token")
+
+        val wide = treeWith(task, 900)
+        assertEquals(code, renderer.cardText(wide, 0)[1])
+
+        val narrow = treeWith(task, MIN_WIDTH)
+        val line = renderer.cardText(narrow, 0)[1]
+        assertTrue("se corta por delante: $line", line.startsWith(TitleWrap.ELLIPSIS))
+        assertTrue("y se ve lo que casa: $line", "token" in line)
+    }
+
+    /** La línea elegida se recuerda por tarea, pero no más allá de su cuerpo: editarla la vuelve a elegir. */
+    @Test
+    fun `editar la tarea vuelve a elegir la linea`() {
+        val task = task("Titulo\nuna nota\nel token viejo")
+        search("token")
+        assertEquals("el token viejo", renderer.cardText(treeWith(task), 0)[1])
+
+        val edited = task.copy(body = "Titulo\nel token nuevo\nuna nota")
+        assertEquals("el token nuevo", renderer.cardText(treeWith(edited), 0)[1])
+    }
+
+    /** Desplegada se ve todo el cuerpo, y se resalta en todas las líneas. */
+    @Test
+    fun `desplegada se resalta en todo el cuerpo`() {
+        val task = task("Revisar el token\nuna nota\nel token caduca")
+        search("token")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        assertEquals(listOf(listOf("token"), emptyList(), listOf("token")), renderer.cardMatches(tree, 0))
     }
 
     // ------------------------------------------------------ el ancho de la fila

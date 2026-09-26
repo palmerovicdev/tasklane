@@ -194,7 +194,7 @@ tarea de una frase sigue midiendo una línea.
 | Franja de color a la izquierda | Siempre — es la prioridad, dentro de la tarjeta y recortada por ella |
 | Casilla | Siempre. Marcarla lleva la tarea al estado terminal; desmarcarla, al de por defecto |
 | Título | Hasta **tres** líneas; lo que no cabe se recorta. Una tarea cerrada sale tachada. Doble clic o `Enter` abre la tarea entera |
-| Descripción | Si hay cuerpo bajo el título. Una línea, recortada |
+| Descripción | Si hay cuerpo bajo el título. Una línea, recortada; buscando, [la que casa](#búsqueda) |
 | Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas**, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
 | Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas |
 | Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
@@ -532,6 +532,12 @@ vaciar la lista, y un prefijo desconocido (`https:`) se busca como texto.
 **Alcance.** Sólo el repositorio activo, salvo que se active *Search All Repositories*
 en la barra — que sólo aparece cuando hay más de uno. Las filas de otro repositorio se
 etiquetan con su nombre.
+
+**Por qué ha salido.** Lo que casa se resalta en la tarjeta —en el título, en el cuerpo y en
+los enlaces—, sin distinguir acentos, igual que se busca. Plegada, bajo el título va **la
+línea del cuerpo que casa**, y no la primera: si `token` está en la línea doce, se ve la doce.
+Con varios términos, la que casa más; y si la coincidencia quedaría detrás del recorte, la
+línea se corta por delante —`…caduca el token de`— para que se vea con la ventana estrecha.
 
 **Desde cualquier sitio, con `⇧⇧`.** Las tareas salen en *Search Everywhere*, en la
 pestaña *All* y en una propia, *Tasklane*, con la misma sintaxis y el mismo alcance que el

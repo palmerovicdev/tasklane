@@ -3,7 +3,6 @@ package com.tasklane.ui.toolwindow
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.openapi.util.IconLoader
-import com.intellij.psi.codeStyle.MinusculeMatcher
 import com.intellij.ui.CheckboxTree
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.ColoredTreeCellRenderer
@@ -11,7 +10,6 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleColoredComponent
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.render.RenderingUtil
-import com.intellij.ui.speedSearch.SpeedSearchUtil
 import com.intellij.util.text.DateFormatUtil
 import com.intellij.util.ui.EmptyIcon
 import com.intellij.util.ui.GraphicsUtil
@@ -28,6 +26,7 @@ import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskLink
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.query.TermHits
 import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.InlineMarkdown
 import com.tasklane.ui.common.GroupLabels
@@ -95,7 +94,7 @@ import javax.swing.plaf.basic.BasicTreeUI
  * **Por qué el título se envuelve aquí y no en un `JTextArea`.** Envolviéndolo a
  * mano se conserva lo que hace falta para lo demás: los fragmentos etiquetados con
  * su [TaskLink] —que es como se resuelve el clic sin volver a medir texto—, el
- * resaltado de la búsqueda de la plataforma y el tachado de las tareas cerradas.
+ * resaltado de la búsqueda y el tachado de las tareas cerradas.
  * Un área de texto los perdería los tres. El troceado vive en [TitleWrap]; aquí
  * sólo se mide, porque la fuente de cada tramo la conoce el componente que pinta.
  *
@@ -118,8 +117,26 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      */
     var showStateName: Boolean = false
 
-    /** Matcher de la búsqueda en curso, o `null`. Lo construye `SearchService`. */
-    var highlighter: MinusculeMatcher? = null
+    /**
+     * Los términos de texto libre de la búsqueda en curso, ya normalizados, o nada. Es lo
+     * que se resalta —ver [marked]— y lo que elige la línea del cuerpo de la tarjeta
+     * plegada —ver [focusOf]— (2.20.0).
+     */
+    var searchTerms: List<String> = emptyList()
+        set(value) {
+            if (value != field) focuses.clear()
+            field = value
+        }
+
+    /**
+     * La línea que resume cada tarea en la búsqueda en curso, con el cuerpo del que se sacó.
+     * Encontrarla es recorrer el cuerpo entero, y la fila se repinta con cada movimiento del
+     * ratón: sin esto, una tarea con un fichero pegado dentro se recorrería en cada uno. Se
+     * vacía al cambiar la búsqueda; el tope es el de sus resultados.
+     */
+    private val focuses = object : LinkedHashMap<TaskId, Pair<String, Focus>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<TaskId, Pair<String, Focus>>): Boolean = size > MAX_FOCUSES
+    }
 
     /**
      * Nombres de repositorio, para etiquetar las filas que no son del activo. Sólo
@@ -382,10 +399,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private fun ensureLines(count: Int) {
         while (extraLines.size < count) {
             val index = extraLines.size
-            val extra = line { tree, selected ->
+            val extra = line { tree, _ ->
                 val runs = pendingCard.getOrNull(index + 1).orEmpty()
                 useCodeFont(this, runs.any { it.code })
-                appendRuns(tree, this, runs, selected)
+                appendRuns(tree, this, runs)
             }
             // Detrás de la primera línea y de las que ya hay, delante de las
             // imágenes y de los distintivos.
@@ -553,7 +570,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         pendingCard = highlighted(tree, task, title.lines + body.lines + blocks.lines, selected)
         ensureLines(pendingCard.size - 1)
         extraLines.forEachIndexed { index, extra -> extra.isVisible = index < pendingCard.size - 1 }
-        appendRuns(tree, textRenderer, pendingCard.firstOrNull().orEmpty(), selected)
+        appendRuns(tree, textRenderer, pendingCard.firstOrNull().orEmpty())
 
         pendingImagesShown = renderImages(task, available, open)
 
@@ -622,6 +639,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * resto del cuerpo no se pinta nada. Desplegada se pintan todas las líneas del
      * cuerpo, cada una envuelta con el mismo troceado que el título.
      *
+     * Buscando, la línea del resumen es **la que casa** (2.20.0), y no la primera: si
+     * `token` está en la línea doce, la tarjeta enseña la doce, con el término resaltado
+     * y a la vista aunque caiga más allá de lo que cabe. Ver [focusOf] y [window].
+     *
      * Devuelve también si se quedó algo fuera, y ahí entra lo que no se ve por ancho
      * **y** lo que no se ve por número de líneas: una tarea con tres párrafos cabe
      * perfectamente en una línea de resumen y aun así esconde dos.
@@ -630,10 +651,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val gray = SimpleTextAttributes.GRAYED_ATTRIBUTES
         val blocks = task.detailBlocks.filterNot { it is DetailBlock.Image }
         if (!open) {
-            val first = blocks.firstOrNull() ?: return TitleWrap.Fit(emptyList(), false)
-            val one = when (first) {
-                is DetailBlock.Code -> codeLines(first, available, 1)
-                else -> ellipsize(bodyRuns(first as DetailBlock.Text, gray), available)
+            val focus = focusOf(task, blocks) ?: return TitleWrap.Fit(emptyList(), false)
+            val one = when (val block = focus.block) {
+                is DetailBlock.Code -> codeLines(block, available, 1, from = focus.line, matched = true, window = true)
+                else -> ellipsize(window(bodyRuns(block as DetailBlock.Text, gray), available), available)
             }
             return TitleWrap.Fit(one.lines, one.clipped || blocks.size > 1)
         }
@@ -647,7 +668,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 break
             }
             if (block is DetailBlock.Code) {
-                val fit = codeLines(block, available, budget)
+                val fit = codeLines(block, available, budget, matched = true)
                 out += fit.lines
                 clipped = clipped || fit.clipped
                 continue
@@ -662,6 +683,112 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         return TitleWrap.Fit(out, clipped)
     }
 
+    /** El trozo del cuerpo que resume la tarjeta plegada y, si es un bloque de código, cuál de sus líneas. */
+    private class Focus(val block: DetailBlock, val line: Int = 0)
+
+    /**
+     * Qué enseña la tarjeta plegada bajo el título: el primer trozo del cuerpo o, buscando,
+     * **el que casa más términos** (2.20.0), el primero si empatan. Si no casa ninguno
+     * —lo que casó fue el título, una etiqueta o la ruta de un ancla—, el primero, como sin
+     * buscar.
+     *
+     * Se casa contra el texto escrito y no contra el que se pinta, porque es lo que buscó el
+     * índice: un enlace acortado en la tarjeta sigue entero en el cuerpo.
+     */
+    private fun focusOf(task: Task, blocks: List<DetailBlock>): Focus? {
+        val first = blocks.firstOrNull() ?: return null
+        val terms = searchTerms
+        if (terms.isEmpty()) return Focus(first)
+        focuses[task.id]?.takeIf { it.first == task.body }?.let { return it.second }
+        return bestOf(blocks, terms).also { focuses[task.id] = task.body to it }
+    }
+
+    /** El trozo de [blocks] que casa más [terms]; el primero si empatan o si no casa ninguno. */
+    private fun bestOf(blocks: List<DetailBlock>, terms: List<String>): Focus {
+        val all = terms.distinct().size
+        var best = Focus(blocks.first())
+        var most = 0
+        for (block in blocks) {
+            val lines = when (block) {
+                is DetailBlock.Text -> listOf(block.text)
+                is DetailBlock.Code -> block.lines
+                is DetailBlock.Image -> continue
+            }
+            for ((index, line) in lines.withIndex()) {
+                val count = TermHits.count(line, terms)
+                if (count <= most) continue
+                best = Focus(block, index)
+                most = count
+                // Más no se puede casar: el resto del cuerpo no hace falta leerlo.
+                if (most == all) return best
+            }
+        }
+        return best
+    }
+
+    /**
+     * La línea del resumen con su primera coincidencia **a la vista** (2.20.0).
+     *
+     * Con la ventana estrecha, de una línea de cuerpo se ven cinco o seis palabras, y si lo
+     * que casó es la duodécima, [ellipsize] la recortaría justo antes: la tarjeta habría
+     * elegido la línea que casa para no enseñar por qué. Si la coincidencia no cabe, la
+     * línea se corta **por delante**, por el principio de una palabra y con puntos
+     * suspensivos, dejando delante todo el contexto que quepa; lo que sobre por detrás lo
+     * recorta [ellipsize] como siempre. La casilla de una lista de comprobación se queda:
+     * es el icono de la línea.
+     */
+    private fun window(runs: List<Run>, available: Int): List<Run> {
+        val terms = searchTerms
+        if (terms.isEmpty() || available <= 0 || runs.isEmpty()) return runs
+        val text = runs.joinToString("") { it.text }
+        val hit = TermHits.find(text, terms).firstOrNull() ?: return runs
+        val dots = measure(TitleWrap.ELLIPSIS, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+        if (spanWidth(runs, 0, hit.last + 1) + dots <= available) return runs
+
+        val check = runs.first().takeIf { it.style === CHECK_STYLE }
+        val lead = check?.text?.length ?: 0
+        val icon = if (check == null) 0 else measure(check.text, CHECK_STYLE)
+        // Del corte más temprano al más tardío: el primero que deja ver la coincidencia es el
+        // que más contexto enseña. Si ni cortando justo delante cabe, se corta justo delante.
+        val cut = (lead + 1..hit.first).firstOrNull { at ->
+            text[at - 1].isWhitespace() && !text[at].isWhitespace() &&
+                icon + dots + spanWidth(runs, at, hit.last + 1) + dots <= available
+        } ?: hit.first
+        if (cut <= lead) return runs
+        return listOfNotNull(check) + Run(TitleWrap.ELLIPSIS, SimpleTextAttributes.GRAYED_ATTRIBUTES) +
+            slice(runs, cut, text.length)
+    }
+
+    /** Lo que miden los caracteres `[from, to)` de la línea [runs], cada tramo con su fuente. */
+    private fun spanWidth(runs: List<Run>, from: Int, to: Int): Int {
+        var at = 0
+        var width = 0
+        for (run in runs) {
+            val start = at
+            at += run.text.length
+            val a = (from - start).coerceIn(0, run.text.length)
+            val b = (to - start).coerceIn(0, run.text.length)
+            if (a >= b) continue
+            width += if (run.style === CHECK_STYLE) measure(run.text, run.style) else widthOf(run, run.text.substring(a, b))
+        }
+        return width
+    }
+
+    /** Los caracteres `[from, to)` de la línea [runs], cada trozo con su tramo. */
+    private fun slice(runs: List<Run>, from: Int, to: Int): List<Run> {
+        val out = mutableListOf<Run>()
+        var at = 0
+        for (run in runs) {
+            val start = at
+            at += run.text.length
+            val a = (from - start).coerceIn(0, run.text.length)
+            val b = (to - start).coerceIn(0, run.text.length)
+            if (a >= b) continue
+            out += if (a == 0 && b == run.text.length) run else run.withText(run.text.substring(a, b))
+        }
+        return out
+    }
+
     /**
      * Un bloque de código entre vallas, una línea de tarjeta por línea de código
      * (2.8.0).
@@ -672,8 +799,21 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * —o hasta lo que quepa—, y como la fuente es monoespaciada el fondo de código de
      * cada una se junta con el de las demás en un recuadro, que es como se ve un bloque
      * en cualquier visor de Markdown.
+     *
+     * [from] es la primera línea que se enseña, y [window] pide que la coincidencia de la
+     * búsqueda se vea aunque caiga más allá del recorte (2.20.0): la línea se corta por
+     * delante. Sólo plegada, que enseña una; desplegada, mover una línea la sacaría de la
+     * columna de las demás. [matched] distingue el código del cuerpo, que se resalta, del
+     * de un bloque anclado, que no es lo que se buscó.
      */
-    private fun codeLines(block: DetailBlock.Code, available: Int, budget: Int): TitleWrap.Fit {
+    private fun codeLines(
+        block: DetailBlock.Code,
+        available: Int,
+        budget: Int,
+        from: Int = 0,
+        matched: Boolean = false,
+        window: Boolean = false,
+    ): TitleWrap.Fit {
         val background = codeColor
         val style = if (background == null) {
             SimpleTextAttributes.REGULAR_ATTRIBUTES
@@ -684,12 +824,29 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // Una columna de aire a la derecha de la línea más larga: sin ella el recuadro
         // acaba pegado a la última letra.
         val width = minOf(block.lines.maxOf { it.length } + 1, columns)
-        val shown = block.lines.take(budget)
+        val shown = block.lines.drop(from).take(budget)
         val lines = shown.map { line ->
-            val text = if (line.length >= width) line.take(width - 1) + TitleWrap.ELLIPSIS else line.padEnd(width)
-            listOf(Run(text, style, code = true))
+            val text = when {
+                line.length < width -> line.padEnd(width)
+                window -> shifted(line, width)
+                else -> line.take(width - 1) + TitleWrap.ELLIPSIS
+            }
+            listOf(Run(text, style, matched = matched, code = true))
         }
-        return TitleWrap.Fit(lines, block.lines.size > budget || shown.any { it.length >= width })
+        return TitleWrap.Fit(lines, block.lines.size > shown.size || shown.any { it.length >= width })
+    }
+
+    /**
+     * Una línea de código que no cabe en [width] columnas, recortada de forma que se vea su
+     * primera coincidencia: por detrás si ya se ve, y si no, también por delante. Se ven las
+     * `width - 1` primeras columnas; la última es para los puntos suspensivos.
+     */
+    private fun shifted(line: String, width: Int): String {
+        val hit = TermHits.find(line, searchTerms).firstOrNull()
+        if (hit == null || hit.last < width - 1 || hit.first == 0) return line.take(width - 1) + TitleWrap.ELLIPSIS
+        val shift = minOf(hit.last + 3 - width, hit.first)
+        val text = TitleWrap.ELLIPSIS + line.substring(shift)
+        return if (text.length >= width) text.take(width - 1) + TitleWrap.ELLIPSIS else text.padEnd(width)
     }
 
     /**
@@ -740,8 +897,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val links = text.links
         val check = text.check
         val base = if (check?.checked == true) checkedStyle(style) else style
-        val runs = if (links.isEmpty()) markdownRuns(text.text, base)
-        else markdownRuns(text.text, base) { index -> links.firstOrNull { it.range.first == index } }
+        // Pasa por el resaltado de la búsqueda como el título (2.20.0): es donde se ve por
+        // qué ha salido una tarea que no lo dice en el título.
+        val runs = if (links.isEmpty()) markdownRuns(text.text, base, matched = true)
+        else markdownRuns(text.text, base, matched = true) { index -> links.firstOrNull { it.range.first == index } }
         return if (check == null) runs else listOf(checkRun(check)) + runs
     }
 
@@ -772,9 +931,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      *
      * Cada tramo de enlace sale como **un** [Run] con su [TaskLink]: es lo que
      * permite resolver el clic con `getFragmentTagAt` sin volver a medir texto ni
-     * recalcular posiciones. Ese tramo no pasa por el resaltado de la búsqueda —la
-     * API de la plataforma que resalta no admite etiqueta— y es un intercambio
-     * consciente: subrayar una URL importa menos que poder abrirla.
+     * recalcular posiciones. Hasta la 2.17 ese tramo no pasaba por el resaltado de la
+     * búsqueda —la API de la plataforma que resaltaba no admitía etiqueta—; desde la
+     * 2.20.0 el resaltado es propio y cada trozo lleva la etiqueta del enlace. Ver [marked].
      */
     private fun titleRuns(task: Task, style: SimpleTextAttributes): List<Run> {
         val title = task.title
@@ -848,7 +1007,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             if (link != null) {
                 flush()
                 current = null
-                runs += Run(link.display, linkStyle(base), link)
+                runs += Run(link.display, linkStyle(base), link, matched = matched)
                 index = link.range.last + 1
                 continue
             }
@@ -889,35 +1048,75 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         return SimpleTextAttributes(background, base.fgColor, null, style or SimpleTextAttributes.STYLE_OPAQUE)
     }
 
-    private fun appendRuns(tree: JTree, target: SimpleColoredComponent, runs: List<Run>, selected: Boolean) {
+    private fun appendRuns(tree: JTree, target: SimpleColoredComponent, runs: List<Run>) {
         // Sólo se llama con líneas de tarjeta, así que el icono de la línea es de la
         // casilla o de nadie.
         target.icon = null
         lineChecks.remove(target)
-        for (run in runs) {
+        for ((run, hit) in marked(runs)) {
             when {
                 run.style === CHECK_STYLE -> {
                     target.icon = if (run.text == CHECKED) CheckBoxIcon.CHECKED else CheckBoxIcon.UNCHECKED
                     run.tag?.let { lineChecks[target] = it }
                 }
+                // Con el estilo de coincidencia de la plataforma, que es el que se ve bien en
+                // los dos temas y sobre una fila seleccionada. El trozo de un enlace sigue
+                // llevando su enlace: resaltado, se pulsa igual.
+                hit -> target.append(run.text, hitStyle(tree, run.style), run.link ?: run.tag)
                 run.link != null -> target.append(run.text, run.style, run.link)
                 run.tag != null -> target.append(run.text, run.style, run.tag)
-                // El subrayado de coincidencias lo pone la plataforma, que es la única
-                // forma de que salga correcto en ambos temas y sobre una fila
-                // seleccionada.
-                run.matched -> SpeedSearchUtil.appendColoredFragmentForMatcher(
-                    run.text,
-                    target,
-                    run.style,
-                    highlighter,
-                    RenderingUtil.getSelectionBackground(tree),
-                    selected,
-                )
-
                 else -> target.append(run.text, run.style)
             }
         }
     }
+
+    /**
+     * La línea [runs] partida por donde casa la búsqueda, y cada trozo con si casa (2.20.0).
+     *
+     * Hasta la 2.17 esto lo hacía el matcher de la plataforma tramo a tramo: con acentos
+     * —`autenticacion` encontraba `autenticación` y no la resaltaba—, con el texto libre
+     * entero como un solo patrón y sin poder cruzar de un tramo a otro. Ahora se casa la
+     * línea entera con [TermHits], que sigue las reglas del índice, y sólo se resalta dentro
+     * de lo que es texto de la tarea —`matched`—: no la fecha, ni la ficha de un bloque.
+     */
+    private fun marked(runs: List<Run>): List<Pair<Run, Boolean>> {
+        val terms = searchTerms
+        if (terms.isEmpty() || runs.none { it.matched }) return runs.map { it to false }
+        val hits = TermHits.find(runs.joinToString("") { it.text }, terms)
+        if (hits.isEmpty()) return runs.map { it to false }
+
+        val out = ArrayList<Pair<Run, Boolean>>(runs.size + 2 * hits.size)
+        var at = 0
+        for (run in runs) {
+            val start = at
+            at += run.text.length
+            if (!run.matched || run.style === CHECK_STYLE) {
+                out += run to false
+                continue
+            }
+            var cursor = 0
+            for (hit in hits) {
+                val from = (hit.first - start).coerceIn(0, run.text.length)
+                val to = (hit.last + 1 - start).coerceIn(0, run.text.length)
+                if (from >= to) continue
+                if (from > cursor) out += run.withText(run.text.substring(cursor, from)) to false
+                out += run.withText(run.text.substring(from, to)) to true
+                cursor = to
+            }
+            if (cursor == 0) out += run to false
+            else if (cursor < run.text.length) out += run.withText(run.text.substring(cursor)) to false
+        }
+        return out
+    }
+
+    /** El de `SpeedSearchUtil`: el estilo del tramo con la marca de coincidencia encima. */
+    private fun hitStyle(tree: JTree, base: SimpleTextAttributes): SimpleTextAttributes =
+        SimpleTextAttributes(
+            base.bgColor ?: RenderingUtil.getSelectionBackground(tree),
+            base.fgColor,
+            null,
+            base.style or SimpleTextAttributes.STYLE_SEARCH_MATCH,
+        )
 
     // --------------------------------------------------- selección de texto: pintado
 
@@ -1712,6 +1911,17 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         }
     }
 
+    /**
+     * Lo que se resalta de la tarjeta [row], línea a línea: los trozos que se pintan como
+     * coincidencia de la búsqueda (2.20.0). Es lo que miran los tests.
+     */
+    fun cardMatches(tree: JTree, row: Int): List<List<String>> {
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
+        val bounds = paintedRowBounds(tree, row) ?: return emptyList()
+        prepare(tree, node, row, bounds)
+        return pendingCard.map { runs -> marked(runs).filter { it.second }.map { it.first.text } }
+    }
+
     /** Deja el renderer montado y medido para la fila [row], que es el único estado que tiene. */
     private fun prepare(tree: JTree, node: TaskNode, row: Int, bounds: Rectangle) {
         getTreeCellRendererComponent(tree, node, tree.isRowSelected(row), false, true, row, false)
@@ -1858,6 +2068,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
          * que el usuario vaya a echar de menos.
          */
         const val MAX_EXPANDED = 128
+
+        /** Cuántas líneas de resumen se recuerdan buscando. Una búsqueda trae 200 como mucho. */
+        const val MAX_FOCUSES = 256
 
         /** Etiqueta del contador del indicador: representa *todos* los enlaces de la fila. */
         val LINKS = Any()

@@ -121,6 +121,21 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.20.0 &mdash; search shows why a task matched</h3>
+            <ul>
+              <li><b>While searching, a folded card shows the body line that matched</b>, not the
+                  first one: if <code>token</code> is on line twelve, you see line twelve, with the
+                  term highlighted. With several terms, the line that matches the most.</li>
+              <li><b>The match stays in sight</b> in a narrow tool window: if it would fall past the
+                  cut, the line is cut at the front instead &mdash; <code>&hellip;caduca el token
+                  de</code>.</li>
+              <li><b>Highlighting ignores accents, like the search</b>: <code>autenticacion</code>
+                  already found <code>autenticaci&oacute;n</code>, and now highlights it too. It also
+                  reaches the body, code blocks and links, and each term is highlighted on its own,
+                  in any order.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.19.0 &mdash; paste and drop into the list</h3>
             <ul>
               <li><b><code>&#8984;V</code> on the list creates tasks</b> from the clipboard, in the

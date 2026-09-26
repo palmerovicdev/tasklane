@@ -924,7 +924,9 @@ internal class TasklanePanel(
         // Y un fichero que vuelve, o un ancla que cambió de sitio, otro bloque de código.
         cardSnippets.refresh()
         renderer.config = snap.config
-        renderer.highlighter = found.highlighter
+        // Se resalta sólo el texto libre: las letras de `state:` en el título serían ruido,
+        // porque ese operador no es lo que se buscaba.
+        renderer.searchTerms = found.query.terms
         renderer.activeRepo = snap.activeRepo
         renderer.repoNames = snap.repositories.associate { it.key to it.displayName }
         renderer.brokenAnchors = snap.brokenAnchors

@@ -3,8 +3,6 @@ package com.tasklane.service
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
-import com.intellij.psi.codeStyle.MinusculeMatcher
-import com.intellij.psi.codeStyle.NameUtil
 import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.diagnostics.TasklaneMetrics
 import com.tasklane.domain.model.TaskId
@@ -51,12 +49,6 @@ data class SearchResults(
      * doscientas filas que acaba de devolver.
      */
     val tasks: List<com.tasklane.domain.model.Task> = emptyList(),
-    /**
-     * Matcher para resaltar, construido una vez por consulta y no una por fila. Va
-     * aquí y no en el renderer porque construirlo cuesta, y el renderer se invoca
-     * una vez por fila visible en cada repintado.
-     */
-    val highlighter: MinusculeMatcher?,
 ) {
     val active: Boolean get() = matches != null
 
@@ -65,7 +57,7 @@ data class SearchResults(
     fun accepts(id: TaskId): Boolean = matches?.containsKey(id) ?: true
 
     companion object {
-        val NONE = SearchResults("", TaskQuery.EMPTY, null, emptyList(), null)
+        val NONE = SearchResults("", TaskQuery.EMPTY, null, emptyList())
     }
 }
 
@@ -181,11 +173,6 @@ class SearchService(
             // Buscando, el universo de la ventana ES el resultado: quien lo tiene ya
             // leído es el índice, así que se pasa en vez de volver a pedirlo.
             tasks = found.map { it.task },
-            // Se resalta sólo el texto libre: subrayar las letras de `state:` dentro
-            // del título sería ruido, porque ese operador no es lo que se buscaba.
-            highlighter = query.text
-                .takeIf(String::isNotEmpty)
-                ?.let { NameUtil.buildMatcher("*$it").build() },
         )
     }
 

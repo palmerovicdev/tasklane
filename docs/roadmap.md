@@ -35,6 +35,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P19 · Tablero en una pestaña del editor                 | `2.17.0` |
 | ✅ | P24 · Las capturas, también para el agente              | `2.18.0` |
 | ✅ | P27 · Pegar y soltar en la lista                        | `2.19.0` |
+| ✅ | P28 · La búsqueda enseña por qué casa                   | `2.20.0` |
 
 ---
 
@@ -317,13 +318,21 @@ fichero también, aunque nazcan sin título que no sea la imagen o el nombre del
 pregunta sólo **por encima de diez**, y al texto se le ofrece entonces una sola tarea con todo.
 Se lee en el orden del diálogo —ficheros, imagen, texto— y se saltan carpetas y binarios.
 
-### P28 · La búsqueda enseña por qué casa 👾
+### P28 · La búsqueda enseña por qué casa ✅ `2.20.0`
 
 Se busca en el cuerpo entero, pero la tarjeta plegada enseña siempre **la primera línea**
 del cuerpo y sólo resalta en el título: si `token` casa en la línea doce, la tarjeta no dice
 por qué ha salido. Propuesta: con una búsqueda activa, la línea del cuerpo que se enseña es
 la que casa, con el término resaltado, y el resaltado también ignora los acentos, como la
 búsqueda (hoy `autenticacion` encuentra `autenticación` pero no la resalta).
+
+Salió así (`TermHits`): se casa **con las reglas del índice** —cada término por su cuenta,
+por palabra y prefijo, sin acentos— y no con el matcher de la plataforma, que casaba el texto
+libre entero como un solo patrón. Plegada, la línea es **la que casa más términos**, también
+dentro de un bloque de código; si la coincidencia caería detrás del recorte, la línea se corta
+**por delante** —`…caduca el token de`— para que se vea. El resaltado llega al cuerpo entero
+de la tarjeta desplegada y a los enlaces, que se siguen pulsando. Lo que casa en una etiqueta
+o en la ruta de un ancla no elige línea: ahí se ve el distintivo.
 
 ### P29 · El lenguaje de consulta, completo 👾
 

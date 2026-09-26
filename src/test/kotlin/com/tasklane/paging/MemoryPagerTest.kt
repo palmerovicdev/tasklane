@@ -234,7 +234,7 @@ class MemoryPagerTest {
 
     @Test
     fun `enseñar algo escondido por la busqueda no encuentra nada`() {
-        val visible = SearchResults("q", TaskQuery.EMPTY, mapOf(TaskId("t00000") to 1), highlighter = null)
+        val visible = SearchResults("q", TaskQuery.EMPTY, mapOf(TaskId("t00000") to 1))
         val pager = pager(many(10), found = visible)
 
         assertNotNull(pager.reveal(todo, TaskId("t00000")))

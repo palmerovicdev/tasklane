@@ -9,6 +9,34 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.20.0]
+
+Menor sin cambio de formato: la búsqueda enseña por qué casa. Es la P28 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Buscando, la tarjeta plegada enseña la línea del cuerpo que casa**, no la primera: si
+  `token` está en la línea doce, se ve la doce, con el término resaltado. Con varios
+  términos, la que casa más; si lo que casó fue el título, una etiqueta o la ruta de un
+  ancla, la de siempre. En un bloque de código, la línea del bloque que casa.
+- **Lo que casa se ve aunque caiga lejos**: con la ventana estrecha, si la coincidencia
+  quedaría detrás del recorte, la línea se corta **por delante** —`…caduca el token de`—,
+  por el principio de una palabra y con todo el contexto que quepa.
+- **Se resalta también en el cuerpo**, no sólo en el título: en la línea del resumen y, con
+  la tarjeta desplegada, en todas. Y en los enlaces, que se siguen pulsando.
+
+### Cambiado
+- **El resaltado ignora los acentos, como la búsqueda**: `autenticacion` ya encontraba
+  `autenticación`, y ahora además la resalta.
+- **Se resalta lo mismo que busca el índice**: cada término por su cuenta y en cualquier
+  orden, por palabras y prefijo de palabra. Hasta ahora el texto libre entero era un solo
+  patrón difuso: `token expira` no resaltaba nada en «expira el token», y `fb` podía
+  resaltar letras sueltas de «FooBar».
+
+### Detalles
+- Sólo cambia lo que se pinta: qué tareas salen y en qué orden sigue igual.
+- **Formato:** ninguno.
+
 ## [2.19.0]
 
 Menor sin cambio de formato: pegar y soltar en la lista. Es la P27 de
