@@ -95,13 +95,24 @@ internal class Fts5Index(private val sql: Sql) : TaskSearchIndex {
             selective = true
         }
         for (facet in query.has) {
-            where.append(
-                when (facet) {
-                    TaskQuery.Facet.LINK -> " AND t.has_link = 1"
-                    TaskQuery.Facet.IMAGE -> " AND t.has_image = 1"
-                    TaskQuery.Facet.CODE -> " AND t.has_anchor = 1"
-                },
-            )
+            when (facet) {
+                TaskQuery.Facet.LINK -> where.append(" AND t.has_link = 1")
+                TaskQuery.Facet.IMAGE -> where.append(" AND t.has_image = 1")
+                TaskQuery.Facet.CODE -> where.append(" AND t.has_anchor = 1")
+                // Las rotas (2.13.0) no son una columna de la fila: las dice el disco y
+                // llegan con el corpus. Como los nombres de estado, una lista cerrada, y
+                // ninguna rota es ningún resultado. En un solo parámetro JSON y no en un
+                // `IN (?, ?…)` porque pueden ser más que las variables que admite una
+                // sentencia: basta con borrar un directorio con anclas dentro.
+                TaskQuery.Facet.BROKEN_ANCHOR -> {
+                    if (context.brokenAnchors.isEmpty()) return emptyList()
+                    where.append(
+                        " AND t.has_anchor = 1 AND t.id IN " +
+                            "(SELECT task_id FROM anchor WHERE path IN (SELECT value FROM json_each(?)))",
+                    )
+                    params += jsonArray(context.brokenAnchors)
+                }
+            }
             selective = true
         }
 
@@ -179,6 +190,26 @@ internal class Fts5Index(private val sql: Sql) : TaskSearchIndex {
      * **fuera** de las comillas, que es donde FTS5 lo lee como operador.
      */
     private fun quote(term: String): String = "\"" + term.replace("\"", "\"\"") + "\""
+
+    /**
+     * Una lista de cadenas en JSON, para `json_each`. Las rutas son casi siempre letras y
+     * `/`, pero un nombre de fichero puede llevar comillas, y una ruta mal escapada sería
+     * una consulta que falla en vez de una que no encuentra.
+     */
+    private fun jsonArray(values: Collection<String>): String = values.joinToString(",", "[", "]") { value ->
+        buildString(value.length + 2) {
+            append('"')
+            for (ch in value) {
+                when {
+                    ch == '"' -> append("\\\"")
+                    ch == '\\' -> append("\\\\")
+                    ch < ' ' -> append("\\u%04x".format(ch.code))
+                    else -> append(ch)
+                }
+            }
+            append('"')
+        }
+    }
 
     /** Los operadores de nombre casan por prefijo, igual que en `LinearScanIndex`. */
     private fun matchesName(name: String, prefixes: Set<String>): Boolean {

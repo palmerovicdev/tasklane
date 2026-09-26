@@ -63,6 +63,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
 | **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
 | **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas |
+| **En la barra de estado** | *ToDo 3 · Doing 1 · 2 overdue* del repositorio activo, con lo vencido en rojo. Qué estados cuenta y si cuenta las vencidas, a elegir; cada cuenta abre su pestaña o sus tareas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic |
 | **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
@@ -91,7 +92,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.12.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.14.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -109,7 +110,7 @@ Git es opcional: sin él, la raíz del proyecto hace de repositorio único.
 | `.idea/tasklane/tasklane.db.corrupt-<fecha>` | una base dañada que se reparó; se conserva y se puede borrar a mano | no |
 | `.idea/tasklane/repos/<repo>/attachments/` | las imágenes de cada repositorio | no |
 | `.idea/tasklane/layout.xml` | el registro de repositorios | no |
-| `workspace.xml` | tus preferencias: pestaña abierta, filtro, repositorio activo, buscar en todos, formato de copia, marca del editor, aviso de vencimientos y archivo de lo terminado | no |
+| `workspace.xml` | tus preferencias: pestaña abierta, filtro, repositorio activo, buscar en todos, formato de copia, marca del editor, aviso de vencimientos, archivo de lo terminado y qué cuenta la barra de estado | no |
 | `tasklane-defaults.xml` (config del IDE) | plantilla para proyectos nuevos | n/a — es lo único que roamea |
 
 Un proyecto sin `.idea/tasklane.xml` se siembra desde la plantilla al abrirse, así que
@@ -321,10 +322,29 @@ cuerpo: no hay forma de teclear «esto vence el viernes» sin inventar una sinta
   repositorio y cada media hora, y sólo si hay algo de lo que no se haya avisado ya hoy.
   Se apaga desde el propio aviso o en *Settings → Tools → Tasklane → Due dates*; es
   preferencia de cada uno y va a `workspace.xml`.
+- **En la barra de estado**, siempre a la vista: ver [La barra de estado](#la-barra-de-estado).
 - **Etiquetas** como fichas: se escriben separadas por coma o espacio y se quitan con
   su aspa, o con `Retroceso` desde el campo vacío. En el buscador son `#api`.
 - **Marcador**: sube la tarea al principio de su grupo pase lo que pase, porque
   marcar es precisamente decir «que no se me pierda esto». Se pulsa en la propia fila.
+
+### La barra de estado
+
+Un widget con los recuentos del **repositorio activo** —*ToDo 3 · Doing 1 · 2 overdue*—
+para no tener que abrir la ventana para saber cómo va la lista (2.14.0).
+
+| | |
+|---|---|
+| Qué cuenta | Los estados que se elijan en *Settings → Tools → Tasklane → Status bar*, en el orden de las pestañas, y las vencidas si se quiere. De fábrica, los estados no terminales —lo que queda por hacer— y las vencidas |
+| Cómo cuenta | Como las pestañas con el filtro *All tasks*: con el archivo de lo terminado aplicado, pero no el filtro de vista, que es una forma pasajera de mirar la lista |
+| Las vencidas | **En rojo**, y sólo cuando las hay. Se cuentan en el momento en que vencen, sin esperar a que se escriba nada |
+| Un clic | En un estado abre su pestaña; en las vencidas lleva a esas tareas, como el *Show* del aviso; en el icono o en cualquier otro sitio abre Tasklane |
+| Esconderlo | Clic derecho sobre la barra de estado, como cualquier widget del IDE. Escondido no cuenta nada |
+
+**Un estado nuevo entra solo** mientras no se haya tocado la elección: lo de fábrica sigue a
+la configuración. En cuanto se marca o se desmarca una casilla, la elección es la que se
+hizo, y un estado nuevo no sale hasta marcarlo. Es de cada uno y va a `workspace.xml`, como
+el aviso de vencimientos.
 
 ## Anclas de código
 
@@ -344,7 +364,8 @@ tarea apunta al fichero.
 | En la tarjeta | Un distintivo `Auth.kt:42` con color de enlace. Un clic abre el fichero por ahí —en la línea y el carácter exactos—; la ruta entera va al tooltip. Si no cabe entero se queda en su icono, que lleva al mismo sitio |
 | En el editor | La línea marcada, con el color de la prioridad. Ver [La marca en el editor](#la-marca-en-el-editor) |
 | Quitarla | En el diálogo de la tarea, con el aspa de su ficha. No se pueden añadir a mano: un ancla es un sitio del editor, y teclear una ruta y un número es lo que esto viene a evitar |
-| Buscar | `file:AuthService` por un trozo de la ruta, `has:code` por tenerla. La ruta entra además en el texto libre |
+| Buscar | `file:AuthService` por un trozo de la ruta, `has:code` por tenerla y `has:broken-anchor` por tenerla rota. La ruta entra además en el texto libre |
+| Si el fichero se mueve | Renombrarlo o moverlo **desde el IDE** —a mano o con una refactorización, él o su directorio— se lleva el ancla. Si desaparece de otra forma, el distintivo sale tachado y con icono de aviso |
 
 **La ruta es relativa al proyecto, no al repositorio de la tarea.** Por lo mismo que las
 claves de repositorio: mover el proyecto entero no rompe ninguna ancla. Y una tarea de
@@ -358,6 +379,17 @@ mover la función unas líneas no rompen nada. Si la línea desapareció del tod
 fichero se abre igualmente por donde estaba: el contexto de alrededor dice enseguida si
 la nota sigue teniendo sentido. Y si el fichero ya no existe, se avisa — un clic que no
 hace nada se lee como un fallo del plugin.
+
+**Y el nombre del fichero tampoco se guarda a secas** (2.13.0). Renombrar `Login.kt` a
+`SignIn.kt`, moverlo a otro paquete o renombrar el directorio entero desde el IDE
+reescribe las anclas que apuntaban ahí, de cualquier repositorio y sin tocar la fecha de
+las tareas: mover un fichero no es editarlas. Lo que el IDE no ve como un movimiento —un
+`mv` en el terminal, un `git checkout` que se lo lleva, un borrado— deja el ancla
+**rota**: tachada, con el icono de aviso en lugar del de fichero y el motivo en el
+tooltip, también en el diálogo de la tarea, que es donde se quita. `has:broken-anchor`
+las junta todas. Se comprueba al abrir el proyecto —el disco cambia con el IDE cerrado—
+y con cada cambio del sistema de ficheros, así que si el fichero vuelve el ancla se
+arregla sola.
 
 ### La marca en el editor
 
@@ -429,7 +461,7 @@ el foco a la lista; `Escape` la borra.
 | `p:` | `p:high` |
 | `repo:` | `repo:backend` |
 | `is:` | `is:done`, `is:open` |
-| `has:` | `has:link`, `has:image`, `has:code` |
+| `has:` | `has:link`, `has:image`, `has:code`, `has:broken-anchor` —un ancla cuyo fichero ya no está— |
 | `file:` | `file:AuthService`, `file:main/kotlin` — por un trozo de la ruta anclada |
 | `#tag` | `#api #urgente` — se piden todas las etiquetas |
 
@@ -669,6 +701,7 @@ actúan al pulsarlos.
 | **Repositories** | Hasta qué profundidad se detectan repositorios bajo la raíz. Un filtro de vista, nunca un borrado |
 | **Code anchors** | Marca en el margen, pastilla en la línea o ninguna. Es **tuyo**: va a `workspace.xml` |
 | **Due dates** | Encender o apagar el aviso de vencimientos. Tuyo, en `workspace.xml` |
+| **Status bar** | Qué estados cuenta el widget de la barra de estado y si cuenta las vencidas. Las casillas siguen en vivo a la tabla de estados. Tuyo, en `workspace.xml`. Ver [La barra de estado](#la-barra-de-estado) |
 | **Completed tasks** | Esconder de la lista de un estado terminal lo cerrado hace más de N días, o verlo todo (de fábrica). Tuyo, en `workspace.xml`. Ver [Archivar lo terminado](#archivar-lo-terminado) |
 | **Images** | El peso de las imágenes del repositorio activo, *Delete Unused Images*, *Delete All Images…* y el umbral del aviso. Ver [Imágenes](#imágenes) |
 | Enlaces | *Save as template for new projects* y *Configure shortcuts in Keymap* |
@@ -752,7 +785,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.12.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.14.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

@@ -87,7 +87,7 @@ class LinearScanIndex : TaskSearchIndex {
         val matches = ArrayList<ScoredTask>()
         for (task in tasks) {
             val document = documentOf(task)
-            if (!matches(task, document, query, config, stateNames, priorityNames, repoNames)) continue
+            if (!matches(task, document, query, config, stateNames, priorityNames, repoNames, snapshot.brokenAnchors)) continue
             matches += ScoredTask(task, score(document, query, matcher))
         }
         matches.sortByDescending { it.score }
@@ -121,6 +121,7 @@ class LinearScanIndex : TaskSearchIndex {
         stateNames: Map<StateId, String>,
         priorityNames: Map<PriorityId, String>,
         repoNames: Map<RepoKey, String>,
+        broken: Set<String>,
     ): Boolean {
         for (term in query.terms) {
             if (!document.haystack.contains(term)) return false
@@ -156,6 +157,7 @@ class LinearScanIndex : TaskSearchIndex {
                 TaskQuery.Facet.LINK -> task.links.isNotEmpty()
                 TaskQuery.Facet.IMAGE -> task.attachments.isNotEmpty()
                 TaskQuery.Facet.CODE -> task.anchors.isNotEmpty()
+                TaskQuery.Facet.BROKEN_ANCHOR -> task.anchors.any { it.path in broken }
             }
             if (!present) return false
         }

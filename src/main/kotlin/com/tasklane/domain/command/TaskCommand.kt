@@ -1,5 +1,6 @@
 package com.tasklane.domain.command
 
+import com.tasklane.domain.model.AnchorMove
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
@@ -176,6 +177,18 @@ sealed interface TaskCommand {
     data class ReassignState(val from: StateId, val to: StateId) : TaskCommand
 
     data class ReassignPriority(val from: PriorityId, val to: PriorityId) : TaskCommand
+
+    /**
+     * Un fichero o un directorio cambió de sitio dentro del IDE, y las anclas de [ids] se
+     * van con él (2.13.0). Lo emite `AnchorFiles` al ver el evento de mover o renombrar;
+     * [ids] son las tareas que apuntaban debajo de algún `from`, que el almacén encuentra
+     * por `anchor_by_path`.
+     *
+     * De alcance de proyecto porque un fichero no sabe de repositorios: una tarea de
+     * `backend` puede apuntar a uno de `frontend`, y renombrarlo tiene que arrastrarla.
+     * Ver [AnchorMove].
+     */
+    data class RelinkAnchors(val ids: List<TaskId>, val moves: List<AnchorMove>) : TaskCommand
 
     /**
      * Pasar un estado a orden manual sin que la lista se mueva (2.11.0): su orden empieza

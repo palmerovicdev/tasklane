@@ -10,12 +10,15 @@ import com.intellij.openapi.project.Project
 import com.intellij.util.xmlb.annotations.Attribute
 import com.tasklane.domain.export.ExportFormat
 import com.tasklane.domain.model.AnchorMarkerStyle
+import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.StatusBarChoice
 import com.tasklane.domain.model.TaskFilter
 
 /**
  * Estado de UI del proyecto: qué repositorio y qué estado estaban seleccionados, si
  * la búsqueda miraba a todos los repositorios, qué filtro de vista estaba puesto, en
- * qué formato se exporta y cómo se marcan las anclas en el editor.
+ * qué formato se exporta, cómo se marcan las anclas en el editor y qué cuenta la barra
+ * de estado.
  *
  * Va a `workspace.xml` y no a `tasklane.xml` porque no es una decisión que se
  * comparta con el equipo, sino dónde estaba mirando **esta** persona en **esta**
@@ -58,6 +61,13 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
 
         @Attribute
         var archiveDays: Int = 0
+
+        /** Los ids separados por comas; `null` es «lo de fábrica». Ver [StatusBarChoice]. */
+        @Attribute
+        var statusBarStates: String? = null
+
+        @Attribute
+        var statusBarOverdue: Boolean = true
     }
 
     private var state = WorkspaceState()
@@ -132,6 +142,21 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
         get() = state.archiveDays.coerceAtLeast(0)
         set(value) {
             state.archiveDays = value.coerceAtLeast(0)
+        }
+
+    /**
+     * Qué cuenta el widget de la barra de estado (2.14.0). De la persona, como el aviso de
+     * vencimientos. Una cadena vacía es «ningún estado», que no es lo mismo que `null`: lo
+     * de fábrica sigue a la configuración y la elección vacía no.
+     */
+    var statusBar: StatusBarChoice
+        get() = StatusBarChoice(
+            states = state.statusBarStates?.split(',')?.filter { it.isNotBlank() }?.mapTo(LinkedHashSet(), ::StateId),
+            overdue = state.statusBarOverdue,
+        )
+        set(value) {
+            state.statusBarStates = value.states?.joinToString(",") { it.value }
+            state.statusBarOverdue = value.overdue
         }
 
     /** Formato del portapapeles. Markdown por defecto: es lo que entiende el destino habitual. */

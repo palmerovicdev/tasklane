@@ -100,6 +100,27 @@ class Fts5IndexTest {
         }
     }
 
+    /**
+     * `has:broken-anchor` (2.13.0): qué rutas están rotas lo dice el disco, y llega con el
+     * corpus. Las dos implementaciones tienen que leerlo igual, y una ruta con comillas o
+     * barras invertidas no puede romper la consulta.
+     */
+    @Test
+    fun `las anclas rotas se buscan con la lista del corpus`() = withStore { store, db ->
+        store.importBatch(corpus, CONFIG)
+        val broken = setOf("src/auth/AuthService.kt", "raro/\"com\\illas\".kt")
+        val fts = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(CONFIG, repositories, brokenAnchors = broken)) }
+        val linear = LinearScanIndex().apply { setCorpus(SearchCorpus(CONFIG, repositories, corpus, broken)) }
+
+        for (index in listOf(fts, linear)) {
+            assertEquals(listOf("c"), index.find("has:broken-anchor"))
+            assertEquals(listOf("c"), index.find("login has:broken"))
+            assertEquals(emptyList<String>(), index.find("has:broken is:open"))
+        }
+        val sano = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(CONFIG, repositories)) }
+        assertEquals("sin rutas rotas no hay nada que encontrar", emptyList<String>(), sano.find("has:broken-anchor"))
+    }
+
     @Test
     fun `el alcance de todos los repositorios llega al otro`() = withIndex { fts ->
         assertEquals(setOf("a", "c"), fts.find("token").toSet())

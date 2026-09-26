@@ -4,6 +4,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.ui.content.ContentFactory
 import com.tasklane.data.config.TasklaneWorkspaceService
@@ -64,6 +65,9 @@ internal class TasklaneWindow(
 
         val content = ContentFactory.getInstance().createContent(root, "", false)
         content.isCloseable = false
+        // Para que quien sólo tiene la tool window —el widget de la barra de estado— pueda
+        // pedirle un estado. Ver `TaskReveal.showState`.
+        content.putUserData(KEY, this)
         Disposer.register(content, this)
         toolWindow.contentManager.addContent(content)
 
@@ -143,5 +147,9 @@ internal class TasklaneWindow(
     override fun dispose() {
         scope.cancel()
         panels.clear()
+    }
+
+    companion object {
+        internal val KEY: Key<TasklaneWindow> = Key.create("Tasklane.window")
     }
 }

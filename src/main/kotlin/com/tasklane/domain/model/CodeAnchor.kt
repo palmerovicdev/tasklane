@@ -64,6 +64,17 @@ data class CodeAnchor(
          */
         const val MAX_TEXT = 200
 
+        /**
+         * La ruta que se guarda para el fichero que está en [absolute]: relativa a [base]
+         * si cae dentro, tal cual si no. Es la correspondencia de `CodeAnchors.pathOf`,
+         * pero sobre texto: los eventos del sistema de ficheros traen rutas y no
+         * ficheros, y el de un borrado ya no existe cuando se atiende (2.13.0).
+         */
+        fun pathOf(base: String?, absolute: String): String {
+            val root = base?.trimEnd('/') ?: return absolute
+            return if (absolute.startsWith("$root/")) absolute.substring(root.length + 1) else absolute
+        }
+
         /** Normaliza lo que venga del editor: separadores, posición negativa y texto largo. */
         fun of(path: String, line: Int, column: Int = 0, text: String = ""): CodeAnchor = CodeAnchor(
             path = path.replace('\\', '/'),

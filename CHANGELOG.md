@@ -9,6 +9,60 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.14.0]
+
+Menor sin cambio de formato: los recuentos en la barra de estado. Es la P4 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **La lista, en la barra de estado.** *ToDo 3 · Doing 1 · 2 overdue* del repositorio
+  activo, con lo vencido **en rojo**. Cuenta como las pestañas con el filtro *All tasks*
+  —el archivo de lo terminado se aplica; el filtro de vista, no—, y cambia al escribir, al
+  cambiar de repositorio y **en el momento en que algo vence**, sin esperar a nada.
+- **Qué cuenta, a elegir** en *Settings → Tools → Tasklane → Status bar*: una casilla por
+  estado —siguen en vivo a la tabla de estados de encima— y otra para las vencidas, que
+  sólo salen cuando las hay. De fábrica, los estados no terminales y las vencidas, y un
+  estado nuevo entra solo mientras no se haya tocado la elección. Es de cada uno y va a
+  `workspace.xml`.
+- **Cada cuenta se pulsa.** Un estado abre la ventana en su pestaña; las vencidas llevan a
+  esas tareas, como el *Show* del aviso; el icono o cualquier otro sitio abre Tasklane.
+- Se enseña o se esconde con el clic derecho sobre la barra, como los widgets del IDE.
+  Escondido no cuenta nada.
+
+### Detalles
+- Un índice parcial nuevo, `task_due`, con sólo lo abierto que tiene fecha: la cuenta
+  cuesta lo que hay por vencer y no lo que hay en el repositorio. Se crea al abrir el
+  proyecto la primera vez; el esquema sigue en la versión 1 y una versión anterior lo
+  ignora. De paso, el filtro *Overdue* y el aviso de vencimientos ya no ordenan en memoria.
+
+## [2.13.0]
+
+Menor sin cambio de formato: las anclas sobreviven a renombrar y mover ficheros. Es la
+P1 de [`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Las anclas se van con su fichero.** Renombrar o mover un fichero desde el IDE —a
+  mano, con una refactorización o renombrando la clase que le da nombre— reescribe las
+  anclas que apuntaban a él. Con un **directorio** pasa lo mismo con todo lo que tiene
+  dentro. Vale para las tareas de cualquier repositorio, y **no toca su fecha**: mover
+  un fichero no es editar la tarea, así que ninguna salta al grupo de hoy.
+- **Anclas rotas a la vista.** Si el fichero desaparece de otra forma —un `mv` o un `rm`
+  en el terminal, un `git checkout` que se lo lleva—, el distintivo sale **tachado y con
+  el icono de aviso**, en el mismo sitio y con el mismo ancho, y el tooltip dice por qué.
+  También en el diálogo de la tarea, que es donde se quita. Si el fichero vuelve, el
+  ancla se arregla sola.
+- **`has:broken-anchor`** (o `has:broken`) en el buscador, en `⇧⇧` y en
+  `tasklane_list_tasks`: las tareas con alguna ancla rota.
+
+### Detalles
+- Se comprueba al abrir el proyecto —el disco cambia con el IDE cerrado—, al terminar de
+  importar o de recuperar la base, y después sólo lo que toca cada cambio del sistema de
+  ficheros y cada comando. Qué anclas están rotas **no se guarda** en la base: es un dato
+  del disco, no de la tarea.
+- Lo que se renombra desde fuera del IDE no se sigue: llega como un borrado y una
+  creación sin nada que los una, y ahí lo honesto es marcar el ancla como rota, no
+  adivinar adónde fue.
+
 ## [2.12.0]
 
 Menor sin cambio de formato: Tasklane para agentes de IA. Es la P16 de

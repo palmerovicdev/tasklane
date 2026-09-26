@@ -5,8 +5,12 @@ import com.tasklane.data.sqlite.StoreFixture.REPO
 import com.tasklane.data.sqlite.StoreFixture.task
 import com.tasklane.data.sqlite.StoreFixture.withStore
 import com.tasklane.domain.command.Mutation
+import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
+import com.tasklane.domain.model.AnchorMove
 import com.tasklane.domain.model.CodeAnchor
+import com.tasklane.domain.model.DueCount
+import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskPriority
@@ -405,6 +409,62 @@ class TaskStoreTest {
         assertTrue(store.anchorsIn("src/NoExiste.kt").isEmpty())
     }
 
+    /**
+     * Renombrar un directorio (2.13.0): qué tareas apuntan debajo —de cualquier
+     * repositorio—, sin confundir un hermano con el mismo principio, y qué rutas hay que
+     * mirar en el disco. Todo por `anchor_by_path`, con la exacta y el rango `ruta/…ruta0`.
+     */
+    @Test
+    fun `las anclas bajo una ruta se encuentran por el indice`() = withStore { store, _ ->
+        val web = RepoKey("web")
+        store.put(
+            task("a", anchors = listOf(CodeAnchor.of("src/auth/Login.kt", 1))),
+            task("b", anchors = listOf(CodeAnchor.of("src/authz/Api.kt", 1))),
+            task("c", anchors = listOf(CodeAnchor.of("src/auth", 0), CodeAnchor.of("src/auth/jwt/Token.kt", 3))),
+            task("d", repo = web, anchors = listOf(CodeAnchor.of("src/auth/Login.kt", 9))),
+            task("e", anchors = listOf(CodeAnchor.of("src/auth_old/X.kt", 1), CodeAnchor.of("src/auth.kt", 1))),
+            task("f"),
+        )
+
+        assertEquals(
+            setOf(TaskId("a") to REPO, TaskId("c") to REPO, TaskId("d") to web),
+            store.anchoredUnder(listOf("src/auth")).toSet(),
+        )
+        assertEquals(listOf(TaskId("b") to REPO), store.anchoredUnder(listOf("src/authz/Api.kt")))
+        assertEquals(
+            setOf("src/auth/Login.kt", "src/authz/Api.kt", "src/auth", "src/auth/jwt/Token.kt", "src/auth_old/X.kt", "src/auth.kt"),
+            store.anchorPaths().toSet(),
+        )
+        assertEquals(
+            listOf("src/auth", "src/auth/Login.kt", "src/auth/jwt/Token.kt", "src/authz/Api.kt"),
+            store.anchorPaths(listOf("src/auth", "src/authz")).sorted(),
+        )
+        assertTrue(store.anchorPaths(listOf("lib")).isEmpty())
+    }
+
+    /**
+     * Lo que escribe mover un fichero (2.13.0): la ruta nueva, reindexada para `file:` y
+     * para las marcas del editor, y la tarea con la misma fecha de antes.
+     */
+    @Test
+    fun `mover las anclas reindexa su ruta sin tocar la fecha`() = withStore { store, db ->
+        store.put(task("a", anchors = listOf(CodeAnchor.of("src/auth/Login.kt", 1, 0, "fun login()"))))
+        val before = store.task(TaskId("a"))!!
+
+        val command = TaskCommand.RelinkAnchors(listOf(TaskId("a")), listOf(AnchorMove("src/auth", "src/security")))
+        val plan = TaskReducer().plan(TaskReducer.Subject(CONFIG, store.tasks(listOf(TaskId("a")))), command)
+        store.apply(plan.config, plan.mutations)
+
+        val after = store.task(TaskId("a"))!!
+        assertEquals(CodeAnchor.of("src/security/Login.kt", 1, 0, "fun login()"), after.anchors.single())
+        assertEquals(before.updatedAt, after.updatedAt)
+        assertEquals(1, matches(db, "files_text:security"))
+        assertEquals(0, matches(db, "files_text:auth"))
+        assertTrue(store.anchorsIn("src/auth/Login.kt").isEmpty())
+        assertEquals(TaskId("a"), store.anchorsIn("src/security/Login.kt").single().task.id)
+        assertCountersMatch(db)
+    }
+
     // ------------------------------------------------------------- Fase 5
 
     /**
@@ -568,6 +628,31 @@ class TaskStoreTest {
         assertEquals(23, read.toSet().size)
         val orders = read.map { id -> tasks.single { it.id.value == id }.order }
         assertEquals("en orden manual", orders.sorted(), orders)
+    }
+
+    /**
+     * La cuenta de la barra de estado (2.14.0): lo abierto de este repositorio con la fecha
+     * ya pasada, y la primera fecha que todavía no. Vence lo que **ya pasó**: una tarea que
+     * vence justo ahora no está vencida, y es la siguiente.
+     */
+    @Test
+    fun `la cuenta de vencidas dice cuantas y cuando vence la siguiente`() = withStore { store, _ ->
+        val now = Instant.parse("2026-09-25T12:00:00Z")
+        store.put(
+            task("pasada", dueDate = now.minusSeconds(3_600)),
+            task("antigua", dueDate = now.minusSeconds(86_400)),
+            task("cerrada", state = TasklaneConfig.DONE, completedAt = now.minusSeconds(60), dueDate = now.minusSeconds(3_600)),
+            task("luego", dueDate = now.plusSeconds(7_200)),
+            task("manana", dueDate = now.plusSeconds(86_400)),
+            task("sin-fecha"),
+            task("de-otro", repo = RepoKey("otro"), dueDate = now.minusSeconds(60)),
+        )
+
+        assertEquals(DueCount(2, now.plusSeconds(7_200)), store.dueCount(REPO, now))
+        assertEquals(DueCount(2, now.plusSeconds(7_200)), store.dueCount(REPO, now.plusSeconds(7_200)))
+        assertEquals(DueCount(3, now.plusSeconds(86_400)), store.dueCount(REPO, now.plusSeconds(7_201)))
+        assertEquals(DueCount(1, null), store.dueCount(RepoKey("otro"), now))
+        assertEquals(DueCount(0, null), store.dueCount(RepoKey("vacio"), now))
     }
 
     private fun sortDateOf(db: TaskDb, id: String): Long =

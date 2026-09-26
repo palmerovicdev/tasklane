@@ -45,6 +45,8 @@ class QueryParserTest {
         assertEquals(setOf(TaskQuery.Facet.LINK), QueryParser.parse("has:link").has)
         assertEquals(setOf(TaskQuery.Facet.IMAGE), QueryParser.parse("has:image").has)
         assertEquals(setOf(TaskQuery.Facet.CODE), QueryParser.parse("has:code").has)
+        assertEquals(setOf(TaskQuery.Facet.BROKEN_ANCHOR), QueryParser.parse("has:broken-anchor").has)
+        assertEquals(setOf(TaskQuery.Facet.BROKEN_ANCHOR), QueryParser.parse("has:Broken").has)
     }
 
     @Test

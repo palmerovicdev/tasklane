@@ -245,6 +245,16 @@ internal object TaskSchema {
         // ConfigChanged —que se emite en CADA arranque y en cada paso por los ajustes—
         // cueste lo que cuestan ellas y no lo que cuesta el proyecto.
         "CREATE INDEX IF NOT EXISTS task_parked ON task(repo, state) WHERE extra <> ''",
+        // PARCIAL también (2.14.0): sólo lo abierto y con fecha, que es lo único que puede
+        // vencer. Lo pregunta el widget de la barra de estado con cada escritura mientras
+        // está a la vista, y sin él cada pregunta recorría el repositorio entero por
+        // cualquiera de los índices de la lista. De paso ordena el filtro de vencidas y el
+        // aviso, que hacían lo mismo y además ordenaban en memoria. La condición tiene que
+        // ser **literalmente** la de las consultas, o SQLite no lo usa.
+        """
+        CREATE INDEX IF NOT EXISTS task_due ON task(repo, due_date)
+         WHERE completed_at = $NO_DATE AND due_date <> $NO_DATE
+        """,
         """
         CREATE TABLE IF NOT EXISTS tag (
           task_id       TEXT    NOT NULL REFERENCES task(id) ON DELETE CASCADE,

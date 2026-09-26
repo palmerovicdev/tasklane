@@ -35,6 +35,11 @@ data class SearchCorpus(
     val repositories: List<RepositoryRef> = emptyList(),
     /** El corpus en memoria. Vacío con el índice de SQLite, que lee de su propia tabla. */
     val tasks: List<Task> = emptyList(),
+    /**
+     * Las rutas ancladas que ya no llevan a ningún fichero, para `has:broken-anchor`
+     * (2.13.0). Ver `TasklaneSnapshot.brokenAnchors`.
+     */
+    val brokenAnchors: Set<String> = emptySet(),
 )
 
 /**

@@ -43,6 +43,17 @@ data class TasklaneSnapshot(
     val loading: Set<RepoKey> = emptySet(),
     /** Sube con cada escritura. Ver el KDoc de la clase. */
     val revision: Long = 0,
+    /**
+     * Las rutas ancladas que ya no llevan a ningún fichero (2.13.0), como las guarda
+     * [CodeAnchor]. Las mantiene `AnchorFiles` y son pocas por definición: lo que se
+     * borró o se movió fuera del IDE.
+     *
+     * Van en la vista y no en el almacén porque no son un dato de la tarea sino del
+     * disco, y el disco cambia con el IDE cerrado. Van aquí y no en un servicio aparte
+     * porque las usan la tarjeta —que pinta el ancla rota— y el buscador —que la filtra
+     * con `has:broken-anchor`—, y que cambien tiene que repintar una y repetir el otro.
+     */
+    val brokenAnchors: Set<String> = emptySet(),
 ) {
     val activeRepository: RepositoryRef? get() = repositories.firstOrNull { it.key == activeRepo }
 

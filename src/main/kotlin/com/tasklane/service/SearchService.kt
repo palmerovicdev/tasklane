@@ -113,7 +113,7 @@ class SearchService(
                 // disco, así que lo que antes costaba 8 ms por tecla a 100.000 tareas
                 // ahora es copiar dos referencias.
                 metrics.time(TasklaneMetrics.Op.SEARCH) {
-                    index.setCorpus(SearchCorpus(input.snapshot.config, input.snapshot.repositories))
+                    index.setCorpus(corpusOf(input.snapshot))
                     compute(input)
                 }
             }
@@ -143,7 +143,7 @@ class SearchService(
         val query = QueryParser.parse(raw)
         if (query.isEmpty) return emptyList()
         val snapshot = tasks.snapshot.value
-        index.setCorpus(SearchCorpus(snapshot.config, snapshot.repositories))
+        index.setCorpus(corpusOf(snapshot))
         val searchScope = if (_allRepos.value) SearchScope.All else SearchScope.Repo(snapshot.activeRepo)
         return index.search(query, searchScope).map { it.task }
     }
@@ -155,9 +155,16 @@ class SearchService(
     internal fun find(query: TaskQuery, scope: SearchScope): List<com.tasklane.domain.model.Task> {
         if (query.isEmpty) return emptyList()
         val snapshot = tasks.snapshot.value
-        index.setCorpus(SearchCorpus(snapshot.config, snapshot.repositories))
+        index.setCorpus(corpusOf(snapshot))
         return index.search(query, scope).map { it.task }
     }
+
+    /**
+     * Lo que el índice necesita saber además de la consulta: los nombres que traducir a
+     * ids y, desde la 2.13.0, qué rutas ancladas están rotas —ver `has:broken-anchor`—.
+     */
+    private fun corpusOf(snapshot: TasklaneSnapshot) =
+        SearchCorpus(snapshot.config, snapshot.repositories, brokenAnchors = snapshot.brokenAnchors)
 
     private fun compute(input: Input): SearchResults {
         val query = QueryParser.parse(input.raw)

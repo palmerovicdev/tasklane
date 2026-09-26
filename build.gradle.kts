@@ -121,6 +121,36 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.14.0 &mdash; counts in the status bar</h3>
+            <ul>
+              <li><b>Your list in the status bar.</b> <i>ToDo 3 &middot; Doing 1 &middot; 2
+                  overdue</i> for the active repository, counted like its tabs, with what is
+                  overdue in red. It updates as you work and the moment something falls due.</li>
+              <li><b>You choose what it counts</b> in <i>Settings &#9656; Tools &#9656; Tasklane
+                  &#9656; Status bar</i>: any of your states, and overdue tasks or not. Out of the
+                  box, the states that are not done, plus overdue tasks.</li>
+              <li><b>Every count is a link.</b> A state opens its tab; the overdue count takes you
+                  to those tasks; anywhere else opens Tasklane. Hide or show it by right-clicking
+                  the status bar.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change. A new partial index on open tasks with a due
+               date is created the first time the project opens; earlier versions ignore it.</p>
+
+            <h3>2.13.0 &mdash; anchors that survive renames</h3>
+            <ul>
+              <li><b>Anchors follow their file.</b> Rename or move a file in the IDE &mdash; by
+                  hand, with a refactoring, or by renaming the class it is named after &mdash; and
+                  the tasks anchored to it point at the new path. Moving a folder takes everything
+                  inside with it. The tasks keep their dates: moving a file is not editing them.</li>
+              <li><b>Broken anchors show.</b> When a file disappears any other way (a
+                  <code>mv</code> or <code>rm</code> in the terminal, a <code>git checkout</code>),
+                  its badge is struck through with a warning icon, in the task dialog too, and it
+                  heals on its own if the file comes back.</li>
+              <li><b><code>has:broken-anchor</code></b> finds every task left pointing nowhere, in
+                  the search box, in Search Everywhere and through the MCP tools.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.12.0 &mdash; Tasklane for AI agents</h3>
             <ul>
               <li><b>Your tasks are now tools of the IDE's MCP server.</b> Turn it on in

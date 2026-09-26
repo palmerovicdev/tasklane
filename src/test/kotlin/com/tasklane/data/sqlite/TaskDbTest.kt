@@ -265,4 +265,46 @@ class TaskDbTest {
             db.close()
         }
     }
+
+    /**
+     * Lo que pregunta la barra de estado (2.14.0) y el filtro de vencidas tienen que ir por
+     * el índice parcial `task_due`, y el segundo sin ordenar en memoria. Con estadísticas,
+     * que es cuando el planificador podría preferir cualquiera de los de la lista: todos
+     * empiezan por `repo` y llevan `completed_at` y `due_date` en la cola.
+     */
+    @Test
+    fun `lo vencido va por su indice parcial`() = withDir { dir ->
+        TaskDb.open(dir)!!.let { db ->
+            val start = java.time.Instant.parse("2026-01-01T00:00:00Z")
+            TaskStore(db).importBatch(
+                (0 until 3_000).map {
+                    StoreFixture.task(
+                        "t$it",
+                        dueDate = if (it % 10 == 0) start.plusSeconds(it * 3_600L) else null,
+                        state = if (it % 3 == 0) TasklaneConfig.DONE else TasklaneConfig.TODO,
+                        completedAt = if (it % 3 == 0) start else null,
+                    )
+                },
+                StoreFixture.CONFIG,
+            )
+            db.writer.execute("ANALYZE")
+            db.close()
+        }
+
+        val db = TaskDb.open(dir)!!
+        try {
+            val open = "repo = 'root' AND completed_at = ${TaskSchema.NO_DATE} AND due_date <> ${TaskSchema.NO_DATE}"
+            val queries = listOf(
+                "SELECT coalesce(sum(due_date < 5), 0), min(CASE WHEN due_date >= 5 THEN due_date END) FROM task WHERE $open",
+                "SELECT seq FROM task WHERE $open AND due_date < 5 ORDER BY due_date LIMIT 50",
+            )
+            for (query in queries) {
+                val plan = db.reader.rows("EXPLAIN QUERY PLAN $query") { it.getString(3).orEmpty() }.joinToString(" | ")
+                assertTrue("tiene que ir por task_due, y el plan fue: $plan", plan.contains("task_due"))
+                assertFalse("no puede ordenar en memoria, y el plan fue: $plan", plan.contains("TEMP B-TREE"))
+            }
+        } finally {
+            db.close()
+        }
+    }
 }

@@ -162,6 +162,10 @@
                 for today is not born overdue; once past, the card shows it in red and the
                 <i>Overdue</i> filter finds it. <b>A reminder</b> tells you what in the active
                 repository is overdue or due today, once per task per day.</li>
+            <li><b>Counts in the status bar</b>: <i>ToDo 3 &middot; Doing 1 &middot; 2 overdue</i>
+                for the active repository, with what is overdue in red. You choose which states
+                it counts and whether it counts overdue tasks; click a count to open that tab, or
+                the overdue tasks. Hide it from the status bar's own menu.</li>
             <li><b>Tags as chips</b>, typed separated by comma or space, removed with their cross
                 or with <code>Backspace</code>. In the search field they are
                 <code>#api</code>.</li>
@@ -197,6 +201,7 @@
             <li><b>Operators</b>: <code>state:doing</code>, <code>p:high</code>,
                 <code>repo:backend</code>, <code>is:done</code> / <code>is:open</code>,
                 <code>has:link</code>, <code>has:image</code>, <code>has:code</code>,
+                <code>has:broken-anchor</code>,
                 <code>file:AuthService</code> (part of an anchored path) and
                 <code>#tag</code>. Values are prefixes, quoted when they have spaces
                 (<code>state:"In Review"</code>); several values of one operator mean
@@ -223,6 +228,10 @@
                 number, and found again by that text: an extra import, a re-indent or a moved
                 function break nothing. If the line is gone the file still opens where it was, and
                 if the file is gone you are told.</li>
+            <li><b>Anchors that survive renames.</b> Rename or move a file &mdash; or its whole
+                folder &mdash; in the IDE, by hand or with a refactoring, and the anchors follow it.
+                A file that disappears any other way shows its badge struck through with a warning
+                icon, and <code>has:broken-anchor</code> finds every task left pointing nowhere.</li>
             <li><b>The code points back.</b> A line with an open task is marked in the colour of the
                 task's priority. Hover the mark to see the title, state, priority, due date and
                 tags; click it to open the tool window with that task selected, switching
@@ -315,6 +324,8 @@
                 and is not shared with the project.</li>
             <li><b>Due dates</b>: turn the overdue / due-today reminder on or off. Yours alone,
                 like the anchor marks.</li>
+            <li><b>Status bar</b>: which states the widget counts, and whether it counts overdue
+                tasks. Yours alone too.</li>
             <li><b>Completed tasks</b>: hide tasks completed more than N days ago from the list of
                 a done state, or show them all (the default). Yours alone.</li>
             <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
@@ -412,9 +423,10 @@
              leidas: sin eso no sabria que esta referenciado. -->
         <postStartupActivity implementation="com.tasklane.startup.MaintenanceActivity"/>
 
-        <!-- Enciende las marcas de las anclas sobre el codigo. Es solo el empujon: el
-             servicio se suscribe al modelo y se pinta solo. Sin esto no existiria
-             hasta que alguien abriera la tool window. -->
+        <!-- Enciende las marcas de las anclas sobre el codigo, y quien las mueve con su
+             fichero y las marca rotas (2.13.0). Es solo el empujon: los servicios se
+             suscriben al modelo y trabajan solos. Sin esto no existirian hasta que
+             alguien abriera la tool window. -->
         <postStartupActivity implementation="com.tasklane.startup.AnchorMarkerActivity"/>
 
         <!-- El aviso de vencimientos (2.9.0): al abrir, al cambiar de repositorio y cada
@@ -433,6 +445,14 @@
 
         <!-- Las tareas en Search Everywhere (2.10.0), con su propia pestana. -->
         <searchEverywhereContributor implementation="com.tasklane.ui.search.TaskSearchContributor$Factory"/>
+
+        <!-- Los recuentos del repositorio activo en la barra de estado (2.14.0). Que se vea
+             o no lo decide el menu de la propia barra; que cuenta, los ajustes. El primero
+             por la izquierda: su ancho cambia con las cifras, y la barra se alinea a la
+             derecha, asi que en cualquier otro sitio empujaria a los del IDE. -->
+        <statusBarWidgetFactory id="Tasklane.StatusBar"
+                                implementation="com.tasklane.ui.statusbar.TasklaneStatusWidgetFactory"
+                                order="first"/>
 
         <projectConfigurable
             id="com.tasklane.settings"

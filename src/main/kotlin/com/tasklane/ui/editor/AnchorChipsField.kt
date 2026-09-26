@@ -12,6 +12,7 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComponentValidator
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.JBColor
 import com.intellij.util.textCompletion.TextFieldWithCompletion
 import com.intellij.util.ui.JBUI
@@ -20,6 +21,7 @@ import com.tasklane.TasklaneBundle
 import com.tasklane.code.CodeAnchors
 import com.tasklane.domain.model.AnchorReference
 import com.tasklane.domain.model.CodeAnchor
+import com.tasklane.service.TaskService
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -177,15 +179,26 @@ internal class AnchorChipsField(
     /**
      * El texto es `Fichero.kt:42` y la ruta entera va al tooltip: en el diálogo hay
      * sitio para el nombre, no para `src/main/kotlin/com/…/AuthService.kt`.
+     *
+     * Una rota (2.13.0) lleva el icono de aviso, como en la tarjeta: aquí es donde se
+     * quita, y quien abre la tarea para limpiarla tiene que ver cuál sobra.
      */
-    private fun chipFor(anchor: CodeAnchor) = Chip(
-        text = anchor.label,
-        icon = AllIcons.FileTypes.Any_type,
-        tooltip = "${anchor.path}:${anchor.line + 1}",
-        removeTooltip = TasklaneBundle.message("dialog.task.code.remove", anchor.label),
-    ) {
-        chips = chips - anchor
-        rebuild()
+    private fun chipFor(anchor: CodeAnchor): Chip {
+        val where = "${anchor.path}:${anchor.line + 1}"
+        val broken = anchor.path in TaskService.getInstance(project).snapshot.value.brokenAnchors
+        return Chip(
+            text = anchor.label,
+            icon = if (broken) AllIcons.General.Warning else AllIcons.FileTypes.Any_type,
+            tooltip = if (broken) {
+                TasklaneBundle.message("toolwindow.row.anchor.broken.tooltip", StringUtil.escapeXmlEntities(where))
+            } else {
+                where
+            },
+            removeTooltip = TasklaneBundle.message("dialog.task.code.remove", anchor.label),
+        ) {
+            chips = chips - anchor
+            rebuild()
+        }
     }
 
     private companion object {

@@ -3,6 +3,7 @@ package com.tasklane.ui.toolwindow
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.awt.RelativePoint
 import com.tasklane.TasklaneBundle
 import com.tasklane.code.CodeAnchors
@@ -70,7 +71,16 @@ internal object RowClicks {
                 // distintivo gris no consigue anunciar por su cuenta. Y el del contador
                 // de capturas no es texto: es la captura.
                 tree.toolTipText = when (hotspot) {
-                    is TaskTreeRenderer.Hotspot.Anchor -> hotspot.anchor.path
+                    is TaskTreeRenderer.Hotspot.Anchor ->
+                        if (hotspot.anchor.path in renderer.brokenAnchors) {
+                            TasklaneBundle.message(
+                                "toolwindow.row.anchor.broken.tooltip",
+                                StringUtil.escapeXmlEntities(hotspot.anchor.path),
+                            )
+                        } else {
+                            hotspot.anchor.path
+                        }
+
                     is TaskTreeRenderer.Hotspot.Links -> hotspot.links.singleOrNull()?.url
                     is TaskTreeRenderer.Hotspot.Priority ->
                         TasklaneBundle.message("toolwindow.row.priority.tooltip")

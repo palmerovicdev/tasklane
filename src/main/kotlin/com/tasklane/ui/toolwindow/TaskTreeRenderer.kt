@@ -129,6 +129,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     var repoNames: Map<RepoKey, String> = emptyMap()
     var activeRepo: RepoKey = RepoKey.ROOT
 
+    /** Las rutas ancladas cuyo fichero ya no está (2.13.0). Ver `TasklaneSnapshot.brokenAnchors`. */
+    var brokenAnchors: Set<String> = emptySet()
+
     /**
      * Cómo se escribe la fecha de la fila. Es un punto de inyección y no una llamada
      * directa porque `DateFormatUtil` necesita la `Application` del IDE: sin este
@@ -1003,12 +1006,19 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         // El sitio del código, detrás de la prioridad. Se pinta con el color de enlace
         // porque se pulsa como un enlace: lo que parece pulsable, lo es.
+        //
+        // Rota (2.13.0), tachada y con el icono de aviso en vez del de fichero: el mismo
+        // ancho, porque en la ventana estrecha no hay sitio para una palabra más, y el
+        // icono es lo que queda cuando el distintivo se encoge. Se sigue pudiendo pulsar
+        // —avisa de que el fichero no está— y el tooltip dice por qué.
         anchorChips.indices.forEach { index ->
             val anchor = task.anchors.getOrNull(index)
-            if (anchor == null) {
-                drop(anchorChips[index], anchorIcons[index])
-            } else {
-                keep(anchorChips[index], anchorIcons[index], anchor.label, AllIcons.FileTypes.Any_type, ANCHOR_STYLE, anchor, foreground)
+            when {
+                anchor == null -> drop(anchorChips[index], anchorIcons[index])
+                anchor.path in brokenAnchors ->
+                    keep(anchorChips[index], anchorIcons[index], anchor.label, AllIcons.General.Warning, BROKEN_ANCHOR_STYLE, anchor, foreground)
+
+                else -> keep(anchorChips[index], anchorIcons[index], anchor.label, AllIcons.FileTypes.Any_type, ANCHOR_STYLE, anchor, foreground)
             }
         }
         // Más anclas de las que tienen sitio garantizado: se cuentan, y se ven abriendo la tarea.
@@ -1796,6 +1806,15 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val ANCHOR_STYLE = SimpleTextAttributes(
             SimpleTextAttributes.STYLE_SMALLER,
             SimpleTextAttributes.LINK_ATTRIBUTES.fgColor,
+        )
+
+        /**
+         * El de un ancla rota (2.13.0): gris y tachado, como lo que ya no vale. Sin el
+         * color de enlace, que prometería llevar a un sitio que ya no existe.
+         */
+        val BROKEN_ANCHOR_STYLE = SimpleTextAttributes(
+            SimpleTextAttributes.STYLE_SMALLER or SimpleTextAttributes.STYLE_STRIKEOUT,
+            SimpleTextAttributes.GRAYED_ATTRIBUTES.fgColor,
         )
 
         /** Apagado es el mismo icono translúcido: la plataforma no trae variante hueca. */

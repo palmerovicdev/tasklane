@@ -47,8 +47,10 @@ import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
+import com.tasklane.domain.model.AnchorMove
 import com.tasklane.domain.model.AnchoredTask
 import com.tasklane.domain.model.AttachmentId
+import com.tasklane.domain.model.DueCount
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
@@ -64,6 +66,7 @@ import com.tasklane.paging.TaskPager
 import com.tasklane.repo.RepositoryRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -192,6 +195,19 @@ class TaskService(
      */
     private val _reveal = MutableSharedFlow<Set<TaskId>>(replay = 1, extraBufferCapacity = 8)
     val reveal: SharedFlow<Set<TaskId>> = _reveal.asSharedFlow()
+
+    /**
+     * Las rutas de las anclas que acaba de escribir un comando (2.13.0). Las escucha
+     * `AnchorFiles` para comprobar en el disco **sólo eso**, y no todas las rutas ancladas
+     * del proyecto después de cada edición.
+     *
+     * Casi siempre son rutas que ya se sabía que existían —capturar, escribir o pedir un
+     * ancla comprueba el fichero—. La que no es una tarea devuelta con *Undo*, que trae
+     * las anclas de cuando se borró. Sin límite de búfer: perder un aviso sería dejar sin
+     * marcar un ancla rota, y cada uno son un puñado de rutas.
+     */
+    private val _anchorsWritten = MutableSharedFlow<Set<String>>(extraBufferCapacity = Channel.UNLIMITED)
+    internal val anchorsWritten: SharedFlow<Set<String>> = _anchorsWritten.asSharedFlow()
 
     /**
      * Repos en los que no se escribe: su `tasks.xml` viene de una versión futura del
@@ -508,6 +524,7 @@ class TaskService(
 
         val repo = (command as? RepoScoped)?.repo ?: before.activeRepo
         var gone: List<Task> = emptyList()
+        var anchored: Set<String> = emptySet()
 
         // Leer el sujeto, planificar y escribir, todo dentro de la misma transacción.
         // Es lo que sustituye al bucle de compare-and-set: la atomicidad la da ahora
@@ -531,6 +548,11 @@ class TaskService(
                         val ids = plan.mutations.filterIsInstance<Mutation.Delete>().flatMapTo(HashSet()) { it.ids }
                         if (ids.isNotEmpty()) gone = subject.tasks.filter { it.id in ids }
                     }
+                    anchored = plan.mutations.asSequence()
+                        .filterIsInstance<Mutation.Upsert>()
+                        .flatMap { it.tasks }
+                        .flatMap { it.anchors }
+                        .mapTo(HashSet()) { it.path }
                     if (plan.isEmpty) null else store.apply(plan.config, plan.mutations, progress)
                 }
             } catch (e: Exception) {
@@ -547,6 +569,7 @@ class TaskService(
         _snapshot.value = if (touched) view.touched() else view
         applied?.parked?.takeIf { it.count > 0 }?.let(::reportParked)
         if (applied != null && gone.isNotEmpty()) onDeleted?.invoke(gone)
+        if (applied != null && anchored.isNotEmpty()) _anchorsWritten.tryEmit(anchored)
     }
 
     /** Un comando sobre un repositorio abierto en solo lectura no se aplica. */
@@ -607,6 +630,20 @@ class TaskService(
      * Lo pide el aviso de vencimientos —ver [DueReminders]— con [until] en el final de hoy.
      */
     fun dueBy(repo: RepoKey, until: Instant): List<Task> = store?.overdue(repo, until).orEmpty()
+
+    /** Cuántas de [repo] están vencidas y cuándo vence la siguiente. Ver [StatusCounts]. */
+    fun dueCount(repo: RepoKey, now: Instant): DueCount = store?.dueCount(repo, now) ?: DueCount(0, null)
+
+    /**
+     * Cuántas tareas hay en cada estado de [repo], como las cuentan las pestañas con el
+     * filtro *All tasks*: de `counter` —una fila por estado—, y con el archivo de lo
+     * terminado aplicado si [archivedBefore] lo dice. Lo pide la barra de estado.
+     */
+    internal fun stateCounts(repo: RepoKey, now: Instant, archivedBefore: Instant?): Map<StateId, Int> {
+        val db = db ?: return emptyMap()
+        return SqlitePager(db.reader, repo, _snapshot.value.config, TaskFilter.ALL, now, archivedBefore = archivedBefore)
+            .counts()
+    }
 
     /**
      * Las primeras [limit] tareas de [stateId] en [repo], en el orden en que las pinta la
@@ -677,6 +714,38 @@ class TaskService(
 
     /** Qué tareas cuelgan de un fichero. Es el §3.6: un salto de índice, no el modelo entero. */
     fun anchorsIn(path: String): List<AnchoredTask> = store?.anchorsIn(path).orEmpty()
+
+    /**
+     * Las anclas se van con el fichero que se movió o se renombró (2.13.0). Lo llama
+     * `AnchorFiles`, fuera del EDT.
+     *
+     * Las tareas se buscan aquí y no en el reducer porque para eso hace falta el índice:
+     * el reducer sólo recibe las tareas que el comando nombra. Las de un repositorio en
+     * solo lectura se quedan como están, igual que con cualquier otro comando.
+     */
+    fun relinkAnchors(moves: List<AnchorMove>) {
+        if (moves.isEmpty()) return
+        val store = store ?: return
+        val ids = store.anchoredUnder(moves.map { it.from })
+            .filter { (_, repo) -> repo !in readOnly }
+            .map { it.first }
+        if (ids.isNotEmpty()) apply(TaskCommand.RelinkAnchors(ids, moves))
+    }
+
+    /**
+     * Las rutas ancladas distintas —todas, o las que caen en [under]—, o `null` si todavía
+     * no hay base que preguntar: se está recuperando, y quien pregunta tiene que volver a
+     * hacerlo cuando esté. Ver `TaskStore.anchorPaths`.
+     */
+    fun anchorPaths(under: Collection<String>? = null): List<String>? = store?.anchorPaths(under)
+
+    /** Ver [TasklaneSnapshot.brokenAnchors]. Lo escribe `AnchorFiles`. */
+    fun setBrokenAnchors(paths: Set<String>) {
+        synchronized(gate) {
+            val current = _snapshot.value
+            if (current.brokenAnchors != paths) _snapshot.value = current.copy(brokenAnchors = paths)
+        }
+    }
 
     /**
      * Cuáles de estos adjuntos sigue nombrando alguna tarea. Lo pregunta el recolector,

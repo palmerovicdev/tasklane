@@ -2,6 +2,7 @@ package com.tasklane.ui.toolwindow
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
+import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.service.TaskService
 
@@ -26,5 +27,27 @@ internal object TaskReveal {
         val reveal = Runnable { TaskService.getInstance(project).revealTasks(tasks) }
         val window = ToolWindowManager.getInstance(project).getToolWindow(TasklanePanel.TOOL_WINDOW_ID)
         if (window == null) reveal.run() else window.activate(reveal, false)
+    }
+
+    /**
+     * Abre la ventana en la pestaña que tuviera. Aquí sí con el foco: lo pide un clic en
+     * la barra de estado (2.14.0), que es ir a la lista a propósito.
+     */
+    fun open(project: Project) {
+        ToolWindowManager.getInstance(project).getToolWindow(TasklanePanel.TOOL_WINDOW_ID)?.activate(null)
+    }
+
+    /**
+     * Abre la ventana en la pestaña de [state]. Por el mismo camino que [show]: la ventana
+     * que no existía se crea al abrirla, y la pestaña se pide en el `Runnable`, cuando ya
+     * hay a quién pedírsela.
+     */
+    fun showState(project: Project, state: StateId) {
+        val window = ToolWindowManager.getInstance(project).getToolWindow(TasklanePanel.TOOL_WINDOW_ID) ?: return
+        window.activate({
+            window.contentManager.contents
+                .firstNotNullOfOrNull { it.getUserData(TasklaneWindow.KEY) }
+                ?.select(state)
+        })
     }
 }

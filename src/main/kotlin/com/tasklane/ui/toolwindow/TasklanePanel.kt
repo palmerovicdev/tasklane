@@ -814,6 +814,7 @@ internal class TasklanePanel(
         renderer.highlighter = found.highlighter
         renderer.activeRepo = snap.activeRepo
         renderer.repoNames = snap.repositories.associate { it.key to it.displayName }
+        renderer.brokenAnchors = snap.brokenAnchors
         renderer.reorderable = snap.config.state(stateId)?.manualOrder == true && !found.active
 
         updateEmptyText(found, filter)

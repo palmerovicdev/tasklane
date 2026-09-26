@@ -3,6 +3,7 @@ package com.tasklane.domain
 import com.tasklane.data.sqlite.TaskStore
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
+import com.tasklane.domain.model.AnchorMove
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.PriorityId
@@ -145,6 +146,49 @@ class TaskReducerTest {
         val id = creada.activeTasks.single().id
 
         assertSame(creada, reducer.step(creada, TaskCommand.SetAnchors(repo, id, listOf(anchor))))
+    }
+
+    /**
+     * Renombrar el fichero no es editar la tarea (2.13.0): la ruta cambia y nada más. Ni
+     * `updatedAt` —la tarea se iría al grupo de hoy por una refactorización que nadie hizo
+     * sobre ella— ni la línea, la columna o el texto, que siguen siendo los del fichero.
+     */
+    @Test
+    fun `renombrar el fichero mueve el ancla sin tocar la tarea`() {
+        val auth = CodeAnchor.of("src/auth/Auth.kt", 41, 4, "fun login() {")
+        val other = CodeAnchor.of("src/Main.kt", 3, text = "fun main() {")
+        val creada = reducer.step(empty, TaskCommand.Create(repo, "Arreglar", anchors = listOf(auth, other)))
+        val tarea = creada.activeTasks.single()
+
+        val movida = TaskReducer(Clock.fixed(t0.plusSeconds(60), ZoneOffset.UTC))
+            .step(creada, TaskCommand.RelinkAnchors(listOf(tarea.id), listOf(AnchorMove("src/auth", "src/security"))))
+            .activeTasks.single()
+
+        assertEquals(listOf(auth.copy(path = "src/security/Auth.kt"), other), movida.anchors)
+        assertEquals("mover el fichero no es editar la tarea", tarea.updatedAt, movida.updatedAt)
+        assertEquals(tarea.copy(anchors = movida.anchors), movida)
+    }
+
+    @Test
+    fun `un movimiento que no toca sus anclas no escribe nada`() {
+        val anchor = CodeAnchor.of("src/Auth.kt", 41, text = "fun login() {")
+        val creada = reducer.step(empty, TaskCommand.Create(repo, "Arreglar", anchors = listOf(anchor)))
+        val id = creada.activeTasks.single().id
+
+        assertSame(creada, reducer.step(creada, TaskCommand.RelinkAnchors(listOf(id), listOf(AnchorMove("src/Authz.kt", "src/B.kt")))))
+    }
+
+    /** Dos anclas que acaban en el mismo sitio son una, como al crearlas. */
+    @Test
+    fun `dos anclas que caen en el mismo sitio se juntan`() {
+        val old = CodeAnchor.of("src/Old.kt", 1, text = "x")
+        val new = CodeAnchor.of("src/New.kt", 1, text = "x")
+        val creada = reducer.step(empty, TaskCommand.Create(repo, "Arreglar", anchors = listOf(old, new)))
+        val id = creada.activeTasks.single().id
+
+        val movida = reducer.step(creada, TaskCommand.RelinkAnchors(listOf(id), listOf(AnchorMove("src/Old.kt", "src/New.kt"))))
+
+        assertEquals(listOf(new), movida.activeTasks.single().anchors)
     }
 
     @Test

@@ -144,6 +144,17 @@ object CodeAnchors {
     }
 
     /**
+     * Si una ruta anclada ya no lleva a ningún fichero (2.13.0): es lo que pinta el ancla
+     * como rota y lo que busca `has:broken-anchor`. El mismo criterio que [open], para que
+     * lo que la tarjeta avisa sea lo que el clic se va a encontrar.
+     *
+     * Sin refrescar: lo pregunta [AnchorFiles] al llegarle un evento del sistema de
+     * ficheros, y a esas alturas el sistema virtual ya dice lo que hay.
+     */
+    fun isMissing(project: Project, path: String): Boolean =
+        find(project, path)?.takeUnless { it.isDirectory } == null
+
+    /**
      * Relativa a la raíz del proyecto siempre que se pueda, que es lo que hace que
      * mover el proyecto no rompa las anclas. Un fichero de fuera guarda su ruta
      * absoluta: es lo único que se puede guardar de él, y ya era igual de frágil.
@@ -153,11 +164,7 @@ object CodeAnchors {
      * es lo que hace `AnchorMarkers`. Calcularla dos veces por su cuenta es justo lo
      * que garantizaría que alguna vez dejaran de coincidir.
      */
-    fun pathOf(project: Project, file: VirtualFile): String {
-        val base = project.basePath?.trimEnd('/') ?: return file.path
-        val path = file.path
-        return if (path.startsWith("$base/")) path.substring(base.length + 1) else path
-    }
+    fun pathOf(project: Project, file: VirtualFile): String = CodeAnchor.pathOf(project.basePath, file.path)
 
     /** Lo que sale de [fromReference]: el ancla, o por qué no la hay. */
     sealed interface Lookup {
@@ -225,14 +232,16 @@ object CodeAnchors {
         return document.getText(TextRange(document.getLineStartOffset(line), document.getLineEndOffset(line)))
     }
 
-    private fun find(project: Project, anchor: CodeAnchor): VirtualFile? {
+    private fun find(project: Project, anchor: CodeAnchor): VirtualFile? = find(project, anchor.path)
+
+    private fun find(project: Project, path: String): VirtualFile? {
         val fs = LocalFileSystem.getInstance()
         val base = project.basePath?.trimEnd('/')
         // Relativa primero: es lo que se guarda salvo excepción, y buscar la absoluta
         // antes haría que una ruta como `src/Main.kt` pudiera resolverse contra el
         // directorio de trabajo del proceso, que no tiene nada que ver con el proyecto.
-        val relative = base?.let { fs.findFileByPath("$it/${anchor.path}") }
-        return relative ?: fs.findFileByPath(anchor.path)
+        val relative = base?.let { fs.findFileByPath("$it/$path") }
+        return relative ?: fs.findFileByPath(path)
     }
 
     private fun notifyMissing(project: Project, anchor: CodeAnchor) {

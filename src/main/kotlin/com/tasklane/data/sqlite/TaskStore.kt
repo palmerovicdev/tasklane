@@ -10,6 +10,7 @@ import com.tasklane.domain.model.AnchoredTask
 import com.tasklane.domain.model.AttachmentId
 import com.tasklane.domain.model.CodeAnchor
 import com.tasklane.domain.model.DateAnchor
+import com.tasklane.domain.model.DueCount
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
@@ -996,6 +997,30 @@ internal class TaskStore(private val db: TaskDb) {
         return hydrate(db.reader, rows)
     }
 
+    /**
+     * Cuántas tareas de [repo] están vencidas en [now], y cuándo vence la siguiente que
+     * todavía no lo está. Lo pide el widget de la barra de estado (2.14.0): lo primero
+     * es lo que enseña, lo segundo cuándo tiene que volver a preguntar —una tarea vence
+     * sin que nadie escriba nada—.
+     *
+     * Una sola pasada por el índice parcial `task_due`, que sólo tiene lo abierto con
+     * fecha: con él, la pregunta cuesta lo que hay por vencer y no lo que hay en el
+     * repositorio. La condición va escrita igual que la del índice por eso mismo.
+     */
+    fun dueCount(repo: RepoKey, now: Instant): DueCount {
+        val at = now.toEpochMilli()
+        return db.reader.first(
+            "SELECT coalesce(sum(due_date < ?), 0), coalesce(min(CASE WHEN due_date >= ? THEN due_date END), " +
+                "${TaskSchema.NO_DATE}) FROM task WHERE repo = ? AND completed_at = ${TaskSchema.NO_DATE} " +
+                "AND due_date <> ${TaskSchema.NO_DATE}",
+            at,
+            at,
+            repo.value,
+        ) {
+            val next = it.getLong(1)
+            DueCount(it.getInt(0), if (next == TaskSchema.NO_DATE) null else Instant.ofEpochMilli(next))
+        } ?: DueCount(0, null)
+    }
 
     /**
      * Qué tareas cuelgan de un fichero, para marcar sus líneas en el editor.
@@ -1024,6 +1049,46 @@ internal class TaskStore(private val db: TaskDb) {
         if (rows.isEmpty()) return emptyList()
         val hydrated = hydrate(db.reader, rows.map { it.first }).associateBy { it.id }
         return rows.map { (task, anchor) -> AnchoredTask(hydrated[task.id] ?: task, anchor) }
+    }
+
+    /**
+     * Las tareas que apuntan a alguna de [paths] **o a algo que cuelga de ellas**, con su
+     * repositorio (2.13.0). Es lo que pregunta renombrar un fichero o un directorio: qué
+     * anclas tienen que irse con él.
+     *
+     * Un salto por `anchor_by_path` por ruta: la exacta y el rango `ruta/ … ruta0`, que
+     * es «empieza por `ruta/`» dicho de forma que el índice lo entienda —`0` es el
+     * carácter que sigue a `/`—. Un `LIKE` no lo usaría, y además trataría `_` y `%` del
+     * nombre del fichero como comodines.
+     */
+    fun anchoredUnder(paths: Collection<String>): List<Pair<TaskId, RepoKey>> =
+        underPaths(
+            paths,
+            "SELECT DISTINCT a.task_id, t.repo FROM anchor a JOIN task t ON t.id = a.task_id WHERE",
+            "a.path",
+        ) { TaskId(it.getString(0).orEmpty()) to RepoKey(it.getString(1).orEmpty()) }
+
+    /**
+     * Las rutas ancladas distintas, todas o sólo las que caen en [under] (2.13.0). Lo que
+     * `AnchorFiles` comprueba en el disco para saber qué anclas están rotas: entero al
+     * abrir el proyecto, y bajo lo que se borró o se creó cuando llega un evento.
+     *
+     * Rutas y no anclas: diez tareas sobre el mismo fichero son una sola pregunta al
+     * disco. El `DISTINCT` lo resuelve el propio índice, que ya está ordenado por ruta.
+     */
+    fun anchorPaths(under: Collection<String>? = null): List<String> =
+        if (under == null) db.reader.rows("SELECT DISTINCT path FROM anchor") { it.getString(0).orEmpty() }
+        else underPaths(under, "SELECT DISTINCT path FROM anchor WHERE", "path") { it.getString(0).orEmpty() }
+
+    private fun <T> underPaths(paths: Collection<String>, select: String, column: String, read: (Sql.Row) -> T): List<T> {
+        val out = LinkedHashSet<T>()
+        // Tres variables por ruta: la exacta y los dos extremos del rango.
+        for (chunk in paths.distinct().chunked(Sql.MAX_VARIABLES / 3)) {
+            val where = chunk.joinToString(" OR ") { "$column = ? OR ($column >= ? AND $column < ?)" }
+            val params = chunk.flatMap { listOf(it, "$it/", "${it}0") }.toTypedArray<Any>()
+            out += db.reader.rows("$select ($where)", *params, read = read)
+        }
+        return out.toList()
     }
 
     /** El retrato de un repositorio para el informe de diagnóstico, en agregados. */

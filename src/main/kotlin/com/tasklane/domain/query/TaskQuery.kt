@@ -32,7 +32,11 @@ data class TaskQuery(
     val done: Boolean? = null,
     val has: Set<Facet> = emptySet(),
 ) {
-    enum class Facet { LINK, IMAGE, CODE }
+    /**
+     * [BROKEN_ANCHOR] (2.13.0) es la única que no sale de la tarea: si el fichero sigue
+     * ahí lo dice el disco, y quien busca lo recibe en `SearchCorpus.brokenAnchors`.
+     */
+    enum class Facet { LINK, IMAGE, CODE, BROKEN_ANCHOR }
 
     /** Una consulta vacía no filtra nada: la UI la usa para volver a la vista normal. */
     val isEmpty: Boolean

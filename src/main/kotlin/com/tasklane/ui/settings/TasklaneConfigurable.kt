@@ -22,6 +22,7 @@ import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
 import com.tasklane.code.AnchorMarkers
 import com.tasklane.data.config.TasklaneConfigService
@@ -36,13 +37,18 @@ import com.tasklane.domain.model.ConfigValidator
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.StatusBarChoice
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.service.AttachmentService
+import com.tasklane.service.StatusCounts
 import com.tasklane.service.TaskService
 import com.tasklane.service.ViewService
+import java.awt.FlowLayout
+import javax.swing.Box
 import javax.swing.JList
+import javax.swing.JPanel
 import javax.swing.SwingConstants
 
 /**
@@ -65,7 +71,24 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
     private val configService = TasklaneConfigService.getInstance(project)
 
-    private val statesTable = StatesTable(::updateProblems, ::confirmStateRemoval)
+    private val statusCounts = StatusCounts.getInstance(project)
+
+    /**
+     * Qué cuenta la barra de estado (2.14.0): una casilla por estado, que sigue **en vivo**
+     * a la tabla de encima —un estado recién añadido o renombrado sale ya, sin aplicar—, y
+     * otra para lo vencido. Van antes de la tabla porque la tabla los avisa al cambiar.
+     */
+    private val statusStatesPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { isOpaque = false }
+    private val statusOverdueCheckBox = JBCheckBox(TasklaneBundle.message("settings.statusBar.overdue"))
+
+    /**
+     * Los estados marcados, o `null` mientras nadie toque una casilla: entonces se marcan
+     * los no terminales de la tabla tal como esté, y lo que se guarda sigue siendo «lo de
+     * fábrica». Ver `StatusBarChoice`.
+     */
+    private var statusStates: MutableSet<StateId>? = null
+
+    private val statesTable = StatesTable(::onStatesChanged, ::confirmStateRemoval)
     private val prioritiesTable = PrioritiesTable(project, ::updateProblems, ::confirmPriorityRemoval)
     private val triggersCheckBox = JBCheckBox(TasklaneBundle.message("settings.triggers.enabled"))
 
@@ -191,6 +214,16 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             row { comment(TasklaneBundle.message("settings.due.comment")) }
         }
 
+        // Tuyo también, en `workspace.xml`. Encender o apagar el widget no está aquí: es el
+        // menú de la barra, que es donde el IDE lo hace con todos.
+        group(TasklaneBundle.message("settings.statusBar.title")) {
+            row(TasklaneBundle.message("settings.statusBar.show")) {
+                cell(statusStatesPanel)
+                cell(statusOverdueCheckBox)
+            }
+            row { comment(TasklaneBundle.message("settings.statusBar.comment")) }
+        }
+
         group(TasklaneBundle.message("settings.archive.title")) {
             row {
                 cell(archiveCheckBox)
@@ -236,6 +269,10 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         archiveCheckBox.isSelected = days > 0
         archiveSpinner.number = if (days > 0) days else DEFAULT_ARCHIVE_DAYS
         archiveSpinner.isEnabled = days > 0
+        val choice = statusCounts.choice.value
+        statusStates = choice.states?.toMutableSet()
+        statusOverdueCheckBox.isSelected = choice.overdue
+        syncStatusStates()
         stateReassign.clear()
         priorityReassign.clear()
         updateProblems()
@@ -247,7 +284,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             currentConfig() != configService.config.value ||
             stateReassign.isNotEmpty() ||
             priorityReassign.isNotEmpty() ||
-            archiveDays() != view.archive.value.days
+            archiveDays() != view.archive.value.days ||
+            statusChoice() != statusCounts.choice.value
 
     override fun apply() {
         val config = currentConfig()
@@ -257,6 +295,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
         val service = TaskService.getInstance(project)
         if (archiveDays() != view.archive.value.days) view.setArchiveDays(archiveDays())
+        if (statusChoice() != statusCounts.choice.value) statusCounts.setChoice(statusChoice())
 
         // 1. Reasignaciones explícitas ANTES de tocar la configuración: mientras el
         //    estado de origen siga existiendo, mover es un cambio de estado normal.
@@ -279,6 +318,44 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
     }
 
     private fun archiveDays(): Int = if (archiveCheckBox.isSelected) archiveSpinner.number else 0
+
+    // ------------------------------------------------------- barra de estado
+
+    private fun onStatesChanged() {
+        updateProblems()
+        syncStatusStates()
+    }
+
+    /**
+     * Una casilla por fila de la tabla, en su orden y con su nombre de ahora. Se rehacen
+     * enteras en cada cambio de la tabla: son media docena, y así un estado renombrado o
+     * movido sale como está sin tener que seguirles la pista.
+     */
+    private fun syncStatusStates() {
+        statusStatesPanel.removeAll()
+        for ((i, row) in statesTable.rows.withIndex()) {
+            if (i > 0) statusStatesPanel.add(Box.createHorizontalStrut(JBUI.scale(STATUS_GAP)))
+            val box = JBCheckBox(row.name, statusStates?.contains(row.id) ?: !row.terminal)
+            box.addActionListener {
+                // La primera casilla que se toca fija la elección entera: desde ahí ya no
+                // es «lo de fábrica».
+                val chosen = statusStates ?: statesTable.rows.filter { !it.terminal }.mapTo(mutableSetOf()) { it.id }
+                if (box.isSelected) chosen += row.id else chosen -= row.id
+                statusStates = chosen
+            }
+            statusStatesPanel.add(box)
+        }
+        statusStatesPanel.revalidate()
+        statusStatesPanel.repaint()
+    }
+
+    /**
+     * Lo elegido, tal cual. Un estado borrado puede quedarse en la elección sin hacer daño
+     * —`StatusBarChoice.statesIn` sólo cuenta los que existen—, y quitarlo aquí haría que la
+     * página se abriera ya «modificada» cuando lo guardado nombra uno que ya no está.
+     */
+    private fun statusChoice(): StatusBarChoice =
+        StatusBarChoice(statusStates?.toSet(), statusOverdueCheckBox.isSelected)
 
     private fun currentConfig(): TasklaneConfig =
         buildConfig(
@@ -597,6 +674,9 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
         /** Diez años: por encima, «todo» dice lo mismo sin el número. */
         private const val MAX_ARCHIVE_DAYS = 3650
+
+        /** Entre las casillas de los estados de la barra de estado. */
+        private const val STATUS_GAP = 12
 
         /** Un giga por paso: la cuota se piensa en gigas, no en megas. */
         private const val IMAGE_QUOTA_STEP = 1024

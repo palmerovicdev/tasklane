@@ -13,6 +13,14 @@ internal object TasklaneIcons {
     val ToolWindow: Icon = IconLoader.getIcon("/icons/tasklane.svg", TasklaneIcons::class.java)
 
     /**
+     * El del widget de la barra de estado (2.14.0): el mismo dibujo que la tool window en
+     * la rejilla de 16 de la barra. El de la ventana es de 13, y escalarlo emborrona el
+     * trazo.
+     */
+    @JvmField
+    val StatusBar: Icon = IconLoader.getIcon("/icons/status.svg", TasklaneIcons::class.java)
+
+    /**
      * El vencimiento de una fila. Es propio porque `AllIcons` no trae calendario ni
      * reloj, y sin él la fila tenía que llevar la palabra «Due» delante de la fecha
      * para distinguirla de la de modificación, que va justo al lado.

@@ -1,5 +1,6 @@
 package com.tasklane.domain.command
 
+import com.tasklane.domain.model.AnchorMove
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
@@ -101,6 +102,21 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                 else Plan(listOf(Mutation.Reprioritize(command.from, command.to, now)), config)
 
             is TaskCommand.SeedManualOrder -> Plan(listOf(Mutation.SeedOrder(command.state)), config)
+
+            // Renombrar un fichero no es editar la tarea: `updatedAt` no se toca, como al
+            // marcar. Si se tocara, una refactorización que mueve un paquete arrastraría
+            // al grupo de hoy cada tarea que apuntara dentro, sin que nadie las hubiera
+            // mirado. Tampoco la línea: el contenido del fichero es el mismo.
+            is TaskCommand.RelinkAnchors -> {
+                val moved = subject.tasks.mapNotNull { task ->
+                    val anchors = task.anchors.map { anchor ->
+                        val path = AnchorMove.rewrite(anchor.path, command.moves)
+                        if (path == anchor.path) anchor else anchor.copy(path = path)
+                    }.distinct()
+                    if (anchors == task.anchors) null else task.copy(anchors = anchors)
+                }
+                if (moved.isEmpty()) nothing(config) else Plan(listOf(Mutation.Upsert(moved)), config)
+            }
 
             is TaskCommand.BackfillCompletedAt ->
                 if (command.states.isEmpty()) nothing(config)
@@ -337,6 +353,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         is TaskCommand.Move -> listOf(command.id)
         is TaskCommand.Batch -> command.commands.flatMapTo(LinkedHashSet()) { targetsOf(it) }.toList()
         is TaskCommand.Restore -> command.tasks.map { it.id }
+        is TaskCommand.RelinkAnchors -> command.ids
         else -> emptyList()
     }
 

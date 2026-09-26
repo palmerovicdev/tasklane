@@ -325,6 +325,31 @@ class TaskTreeRendererTest {
         assertEquals(anchor, hit)
     }
 
+    /**
+     * Un ancla rota (2.13.0) ocupa lo mismo que una sana y se sigue pulsando —el clic
+     * avisa de que el fichero no está—: con la ventana estrecha no hay sitio para una
+     * palabra más, así que lo que cambia es el icono y el trazo, no el ancho.
+     */
+    @Test
+    fun `un ancla rota ocupa lo mismo y se sigue pulsando`() {
+        val anchor = CodeAnchor.of("src/main/kotlin/Borrado.kt", 4)
+        val task = task("Arreglar el login", anchors = listOf(anchor))
+
+        fun columns(broken: Set<String>): List<Int> {
+            renderer.brokenAnchors = broken
+            val tree = treeWith(task)
+            val bounds = painted(tree, 0)
+            return (0 until bounds.width).filter { x ->
+                (0 until bounds.height step 2).any { y -> anchorAt(tree, Point(bounds.x + x, bounds.y + y)) == anchor }
+            }
+        }
+
+        val sana = columns(emptySet())
+        val rota = columns(setOf(anchor.path))
+        assertTrue("el ancla rota tiene que poder pulsarse", rota.isNotEmpty())
+        assertEquals(sana, rota)
+    }
+
     @Test
     fun `una tarea sin ancla no navega desde ningun punto`() {
         val tree = treeWith(task("Comprar pan"))

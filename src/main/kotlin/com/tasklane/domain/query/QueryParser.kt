@@ -62,6 +62,7 @@ object QueryParser {
                     "link", "links" -> has += TaskQuery.Facet.LINK
                     "image", "images" -> has += TaskQuery.Facet.IMAGE
                     "code", "anchor" -> has += TaskQuery.Facet.CODE
+                    "broken-anchor", "broken-anchors", "broken" -> has += TaskQuery.Facet.BROKEN_ANCHOR
                     else -> terms += TextNormalizer.normalize(token)
                 }
 
