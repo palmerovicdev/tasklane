@@ -45,6 +45,7 @@ import com.tasklane.data.store.TasksCodec
 import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TaskStats
 import com.tasklane.diagnostics.TasklaneMetrics
+import com.tasklane.domain.command.Additions
 import com.tasklane.domain.command.Change
 import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.RepoScoped
@@ -213,6 +214,18 @@ class TaskService(
      */
     private val _anchorsWritten = MutableSharedFlow<Set<String>>(extraBufferCapacity = Channel.UNLIMITED)
     internal val anchorsWritten: SharedFlow<Set<String>> = _anchorsWritten.asSharedFlow()
+
+    /**
+     * Lo que acaba de añadir un gesto de la persona: anclas y capturas nuevas (P35). Lo
+     * escuchan los *Got It* de la primera vez, el del ancla en el editor y el de la captura
+     * en la tarjeta. Sale del mismo [Change] que `⌘Z`, así que lo del agente por MCP no pasa.
+     *
+     * **Sólo se calcula si alguien escucha**, y dejan de escuchar en cuanto se ha dicho
+     * *Got It*: a partir de ahí no cuesta nada. Perder uno con el búfer lleno no importa, era
+     * una pista.
+     */
+    private val _added = MutableSharedFlow<Additions>(extraBufferCapacity = 8)
+    internal val added: SharedFlow<Additions> = _added.asSharedFlow()
 
     /**
      * Repos en los que no se escribe: su `tasks.xml` viene de una versión futura del
@@ -478,8 +491,18 @@ class TaskService(
      */
     private fun recorder(command: TaskCommand): ((Change) -> Unit)? = when (command) {
         is TaskCommand.ForgetRepo -> null
-        is RepoScoped, is TaskCommand.Batch -> { change -> if (record(command, change) == null) notifyForGood(change) }
+        is RepoScoped, is TaskCommand.Batch -> { change ->
+            if (record(command, change) == null) notifyForGood(change)
+            announce(change)
+        }
         else -> null
+    }
+
+    /** Ver [added]. */
+    private fun announce(change: Change) {
+        if (_added.subscriptionCount.value == 0) return
+        val additions = Additions.of(change)
+        if (!additions.isEmpty) _added.tryEmit(additions)
     }
 
     /**

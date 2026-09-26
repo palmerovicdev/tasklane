@@ -147,6 +147,10 @@ internal class AnchorMarkers(
                     }
                 }
         }
+
+        // La primera ancla se explica sobre su línea (P35). Vive aquí porque es de las
+        // marcas: sin ellas no hay nada que explicar.
+        AnchorGotIt(project, this) { style }.start(scope)
     }
 
     // ------------------------------------------------------------------ pintar
