@@ -14,7 +14,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
-import com.intellij.ui.SearchTextField
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
@@ -27,6 +26,7 @@ import com.tasklane.service.TaskService
 import com.tasklane.service.ViewService
 import com.tasklane.ui.actions.TasklaneDataKeys
 import com.tasklane.ui.common.noStatesPanel
+import com.tasklane.ui.search.QuerySearchField
 import com.tasklane.ui.toolwindow.BoardHost
 import com.tasklane.ui.toolwindow.RepoSelectorAction
 import com.tasklane.ui.toolwindow.TasklanePanel
@@ -115,7 +115,7 @@ internal class TaskBoard(private val project: Project) :
     }
 
     /** El historial es el de la ventana: ver [TasklanePanel.HISTORY_PROPERTY]. */
-    private val searchField = SearchTextField(TasklanePanel.HISTORY_PROPERTY)
+    private val searchField = QuerySearchField(TasklanePanel.HISTORY_PROPERTY, project)
 
     /** Ver el mismo campo en [TasklanePanel]: escribir la consulta desde fuera no la vuelve a publicar. */
     private var updatingSearchField = false
@@ -202,7 +202,6 @@ internal class TaskBoard(private val project: Project) :
         searchField.textEditor.emptyText.text =
             if (hint.isNullOrBlank()) TasklaneBundle.message("search.placeholder")
             else TasklaneBundle.message("search.placeholder.shortcut", hint)
-        searchField.textEditor.toolTipText = TasklaneBundle.message("search.tooltip")
         searchField.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(e: DocumentEvent) {
                 if (!updatingSearchField) search.setQuery(searchField.text)

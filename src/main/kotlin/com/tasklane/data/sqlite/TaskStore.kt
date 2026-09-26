@@ -14,6 +14,7 @@ import com.tasklane.domain.model.DueCount
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.TagCount
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
@@ -1158,6 +1159,11 @@ internal class TaskStore(private val db: TaskDb) {
             PriorityId(it.getString(0).orEmpty()) to it.getInt(1)
         }
         .toMap()
+
+    fun tagCounts(repo: RepoKey): List<TagCount> = db.reader.rows(
+        "SELECT tag, count(*) AS n FROM tag WHERE repo = ? GROUP BY tag ORDER BY n DESC, tag",
+        repo.value,
+    ) { TagCount(it.getString(0).orEmpty(), it.getInt(1)) }
 
     /** Cuántas siguen sin cerrar en un estado. Lo pregunta el ofrecimiento de rellenar `completedAt`. */
     fun openCountOf(state: StateId): Int =

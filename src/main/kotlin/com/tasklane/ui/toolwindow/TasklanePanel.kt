@@ -26,7 +26,6 @@ import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
-import com.intellij.ui.SearchTextField
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.GraphicsUtil
@@ -61,6 +60,7 @@ import com.tasklane.service.ViewService
 import com.tasklane.ui.actions.TasklaneDataKeys
 import com.tasklane.ui.common.GroupLabels
 import com.tasklane.ui.editor.TaskEditDialog
+import com.tasklane.ui.search.QuerySearchField
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -287,7 +287,7 @@ internal class TasklanePanel(
      * El historial se persiste con el nombre de propiedad, así que las consultas
      * recientes sobreviven al reinicio sin que haya que guardarlas a mano.
      */
-    private val searchField = SearchTextField(HISTORY_PROPERTY)
+    private val searchField = QuerySearchField(HISTORY_PROPERTY, project)
 
     /** Evita que sincronizar una copia del campo vuelva a publicar la consulta. */
     private var updatingSearchField = false
@@ -625,7 +625,6 @@ internal class TasklanePanel(
         searchField.textEditor.emptyText.text =
             if (hint.isNullOrBlank()) TasklaneBundle.message("search.placeholder")
             else TasklaneBundle.message("search.placeholder.shortcut", hint)
-        searchField.textEditor.toolTipText = TasklaneBundle.message("search.tooltip")
         searchField.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(e: DocumentEvent) {
                 if (!updatingSearchField) search.setQuery(searchField.text)

@@ -83,7 +83,7 @@ internal class TaskTools(private val project: Project) {
         if (!query.isNullOrBlank()) {
             var parsed = QueryParser.parse(query)
             if (stateFilter != null) parsed = parsed.copy(states = parsed.states + TextNormalizer.normalize(stateFilter.name))
-            if (!includeClosed && parsed.done == null && stateFilter?.terminal != true) parsed = parsed.copy(done = false)
+            if (!includeClosed && !parsed.mentionsClosed(config) && stateFilter?.terminal != true) parsed = parsed.copy(done = false)
             val scope = repo?.let { SearchScope.Repo(it.key) } ?: SearchScope.All
             val found = SearchService.getInstance(project).find(parsed, scope)
             return ToolJson.write(

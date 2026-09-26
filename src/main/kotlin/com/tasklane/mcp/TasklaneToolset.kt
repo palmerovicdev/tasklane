@@ -55,7 +55,7 @@ class TasklaneToolset : McpToolset {
         """,
     )
     suspend fun listTasks(
-        @McpDescription("Free text and operators, as in Tasklane's search box: state:Doing p:high #tag file:Auth.kt has:code has:image is:done. Empty to list without searching.")
+        @McpDescription("Free text and operators, as in Tasklane's search box: state:Doing p:high #tag file:Auth.kt has:code has:image has:due has:checklist has:tag is:done is:overdue is:bookmarked; dates with due:, closed:, created:, updated: and today, yesterday, tomorrow, week, month, <7d, >2w, 2026-09-01, >2026-09-01; a leading - excludes (-#wip -is:done). Empty to list without searching.")
         query: String? = null,
         @McpDescription("Only tasks in this state, e.g. \"Doing\".")
         state: String? = null,

@@ -58,7 +58,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Deshacer y rehacer** | `⌘Z` en la lista deshace lo último que se hizo en el repositorio —completar, mover, prioridad, marcar, reordenar, una casilla, editar, crear o borrar— y `⌘⇧Z` lo rehace |
 | **Agrupar y plegar** | Por fecha —hoy y un grupo por día—, por prioridad o por etiqueta, elegido por estado; cada cabecera se pliega |
 | **Filtrar la vista** | Todas, abiertas, vencidas o marcadas, sumado a la búsqueda |
-| **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag`. También desde `⇧⇧` |
+| **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag`, fechas (`due:week`, `closed:<7d`, `created:>2026-09-01`) y negación con `-`. Con autocompletado de operadores y valores. También desde `⇧⇧` |
 | **Archivar lo terminado** | Esconder lo cerrado hace más de N días, con el pie de la lista diciendo cuántas y un enlace para verlas |
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.18.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.21.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -520,14 +520,43 @@ el foco a la lista; `Escape` la borra.
 | `state:` | `state:doing`, `state:"In Review"` |
 | `p:` | `p:high` |
 | `repo:` | `repo:backend` |
-| `is:` | `is:done`, `is:open` |
-| `has:` | `has:link`, `has:image`, `has:code`, `has:broken-anchor` —un ancla cuyo fichero ya no está— |
+| `is:` | `is:open`, `is:done`, `is:overdue` —vencida y sin cerrar—, `is:bookmarked` |
+| `has:` | `has:due`, `has:checklist`, `has:tag`, `has:link`, `has:image`, `has:code`, `has:broken-anchor` —un ancla cuyo fichero ya no está— |
 | `file:` | `file:AuthService`, `file:main/kotlin` — por un trozo de la ruta anclada |
 | `#tag` | `#api #urgente` — se piden todas las etiquetas |
+| `due:` `closed:` `created:` `updated:` | `due:today`, `due:<7d`, `closed:week`, `created:>2026-09-01` — ver abajo |
+| `-` delante | `-#wip`, `-p:low`, `-is:done`, `-borrador` — lo excluye |
 
 Los valores son prefijos. Varios valores del mismo operador son un «o»; operadores
-distintos se acumulan. Un operador a medio escribir (`state:`) se ignora en vez de
-vaciar la lista, y un prefijo desconocido (`https:`) se busca como texto.
+distintos se acumulan. Un operador a medio escribir (`state:`, `is:ov`, `due:<7`) se
+ignora en vez de vaciar la lista, y un prefijo desconocido (`https:`) se busca como texto.
+
+**Fechas.** `due:` es el vencimiento, `closed:` cuándo se cerró, `created:` y `updated:`
+cuándo se creó y cuándo cambió por última vez. Todas cortan por días enteros de tu
+calendario:
+
+| Valor | Qué es |
+|---|---|
+| `today`, `yesterday`, `tomorrow` | Ese día |
+| `week`, `month` | La semana y el mes en curso, enteros; la semana empieza donde diga tu locale |
+| `2026-09-01` | Ese día. Con `>`, `>=`, `<` o `<=` delante, un límite: `>2026-09-01` empieza el 2 |
+| `<7d`, `>2w` | Más cerca o más lejos de hoy que eso, en días o semanas |
+
+La distancia se mide hacia donde mira la fecha: `created:<7d` son los últimos siete días, y
+`due:<7d` lo que vence antes de dentro de siete, **con lo ya vencido**. Dos fechas del
+mismo operador se acumulan, así que `created:>2026-09-01 created:<2026-09-10` es un
+intervalo. Una tarea sin esa fecha —sin vencimiento, sin cerrar— no casa nunca.
+
+**Excluir.** Un `-` delante de cualquier cosa la quita del resultado: `-#wip`, `-p:low`,
+`-is:done`, `-due:week`, o una palabra, `-borrador`. Cada exclusión va por su cuenta
+—`-p:low -p:normal` quita las dos— y lo excluido no se resalta.
+
+**Autocompletado.** Tras `state:`, `p:`, `repo:`, `is:`, `has:` o un operador de fecha, el
+campo ofrece sus valores —los estados y prioridades configurados, por ejemplo—, y tras `#`
+las etiquetas del repositorio con cuántas tareas llevan cada una. `Tab` o `Enter` insertan
+la elegida y `Escape` cierra la lista sin borrar la búsqueda. Una palabra que empieza como
+un operador (`st`) lo ofrece sin elegirlo, así que `Enter` sigue yendo a la lista; y
+`⌃Espacio` —el atajo de *Basic Completion*— enseña todos los operadores.
 
 **Alcance.** Sólo el repositorio activo, salvo que se active *Search All Repositories*
 en la barra — que sólo aparece cuando hay más de uno. Las filas de otro repositorio se
@@ -860,7 +889,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.18.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.21.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -891,6 +920,7 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | `←` / `→` | Plegar / desplegar el grupo | Dentro del árbol |
 | `⌘C` / `Escape` | Copiar el texto marcado de la tarjeta / quitar la marca | Sólo con texto marcado |
 | `Enter` / `Escape` | Guardar la búsqueda en el historial / borrarla | En el buscador |
+| `⌃Espacio` / `Tab` | Sugerir operadores / insertar la sugerencia | En el buscador; el primero es el de *Basic Completion* |
 | `Espacio` / `Enter` | Abrir la pestaña de estado con el foco | En la fila de estados |
 | `Retroceso` | Quitar la última etiqueta | En el campo de etiquetas vacío |
 | `Escape` | Cerrar el diálogo | También con el cursor dentro del cuerpo |

@@ -9,6 +9,47 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.21.0]
+
+Menor sin cambio de formato: el lenguaje de consulta, completo. Es la P29 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **`is:overdue` e `is:bookmarked`** en el buscador: lo que la ventana filtraba y no se
+  podía escribir. Y **`has:due`, `has:checklist` y `has:tag`**, junto a los `has:` de siempre.
+- **Fechas**: `due:`, `closed:`, `created:` y `updated:` con `today`, `yesterday`,
+  `tomorrow`, `week`, `month`, un día (`2026-09-01`, o `>2026-09-01` como límite) o una
+  distancia a hoy (`<7d`, `>2w`). Cortan por días de tu calendario y la semana empieza
+  donde diga tu locale. `due:<7d` es lo que vence en la próxima semana **con lo ya
+  vencido**; `created:<7d`, lo creado en los últimos siete días. Dos fechas del mismo
+  operador son un intervalo.
+- **Excluir con `-`**: `-#wip`, `-p:low`, `-is:done`, `-due:week` o una palabra,
+  `-borrador`. Cada exclusión cuenta por separado y no se resalta.
+- **Autocompletado en el buscador** de la ventana y del tablero: tras `state:`, `p:`,
+  `repo:`, `is:`, `has:` o un operador de fecha, sus valores; tras `#`, las etiquetas del
+  repositorio con cuántas tareas llevan. `Tab` o `Enter` insertan, `Escape` cierra sin
+  borrar la búsqueda. Una palabra que empieza como un operador (`st`) lo ofrece sin
+  elegirlo, así que `Enter` sigue yendo a la lista; `⌃Espacio` enseña todos.
+- Lo gana también **`⇧⇧`** y **el agente por MCP** (`tasklane_list_tasks`), que usan la
+  misma consulta: ya pueden preguntar qué está vencido.
+
+### Cambiado
+- **Un valor de `is:` o `has:` a medio escribir ya no vacía la lista**: `is:ov` se ignora
+  mientras se teclea, como `state:`. Uno que ya no puede ser válido (`is:quizas`) sigue
+  buscándose como texto.
+- Un `-` al principio de una palabra ya no se busca: la excluye.
+
+### Corregido
+- **El agente no encontraba lo cerrado escribiéndolo en la consulta**: `state:Done` sin
+  `includeClosed` devolvía cero, porque la herramienta añadía «sólo lo abierto» encima.
+  Venía de la 2.12.0. Lo nuevo cuenta igual: `closed:week` y `-is:open` ya piden lo cerrado.
+
+### Detalles
+- `has:checklist` no es una columna: SQL criba con el cuerpo y lo remata en Kotlin el mismo
+  `Checklist` que pinta la tarjeta, así que un `[x]` en medio de una frase o dentro de un
+  bloque de código no cuenta.
+- **Formato:** ninguno. El esquema sigue en la versión 1.
+
 ## [2.20.0]
 
 Menor sin cambio de formato: la búsqueda enseña por qué casa. Es la P28 de

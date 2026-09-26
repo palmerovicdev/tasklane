@@ -217,7 +217,9 @@
                 ranked by relevance, with matches in the title weighing more, and the list shows
                 the 200 best.</li>
             <li><b>Operators</b>: <code>state:doing</code>, <code>p:high</code>,
-                <code>repo:backend</code>, <code>is:done</code> / <code>is:open</code>,
+                <code>repo:backend</code>, <code>is:open</code> / <code>is:done</code> /
+                <code>is:overdue</code> / <code>is:bookmarked</code>,
+                <code>has:due</code>, <code>has:checklist</code>, <code>has:tag</code>,
                 <code>has:link</code>, <code>has:image</code>, <code>has:code</code>,
                 <code>has:broken-anchor</code>,
                 <code>file:AuthService</code> (part of an anchored path) and
@@ -225,6 +227,13 @@
                 (<code>state:"In Review"</code>); several values of one operator mean
                 <i>or</i>, different operators add up, and free text asks for every term. A
                 half-typed operator is ignored instead of emptying the list.</li>
+            <li><b>Dates</b>: <code>due:</code>, <code>closed:</code>, <code>created:</code> and
+                <code>updated:</code> with <code>today</code>, <code>week</code>,
+                <code>month</code>, a day (<code>&gt;2026-09-01</code>) or a distance from today
+                (<code>&lt;7d</code>). <b>A leading <code>-</code> excludes</b>:
+                <code>-#wip</code>, <code>-is:done</code>.</li>
+            <li><b>Autocompletion</b>: the field suggests states, priorities, tags and every
+                operator's values as you type; <code>Ctrl+Space</code> lists the operators.</li>
             <li><code>&#8984;K</code> / <code>Ctrl+K</code> focuses the field from the list,
                 <code>Enter</code> keeps the query in the field's history and returns to the list,
                 and <code>Escape</code> clears it.</li>

@@ -57,6 +57,7 @@ import com.tasklane.domain.model.DueCount
 import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.StateId
+import com.tasklane.domain.model.TagCount
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskFilter
 import com.tasklane.domain.model.TaskId
@@ -986,6 +987,8 @@ class TaskService(
     fun countsByState(): Map<StateId, Int> = store?.countsByState().orEmpty()
 
     fun countsByPriority(): Map<PriorityId, Int> = store?.countsByPriority().orEmpty()
+
+    fun tagCounts(repo: RepoKey): List<TagCount> = store?.tagCounts(repo).orEmpty()
 
     /** Cuántas siguen sin cerrar en un estado. Lo pregunta el ofrecimiento de rellenar `completedAt`. */
     fun openCountOf(state: StateId): Int = store?.openCountOf(state) ?: 0

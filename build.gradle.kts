@@ -121,6 +121,28 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.21.0 &mdash; the full query language</h3>
+            <ul>
+              <li><b><code>is:overdue</code> and <code>is:bookmarked</code></b> in the search box,
+                  plus <code>has:due</code>, <code>has:checklist</code> and
+                  <code>has:tag</code>.</li>
+              <li><b>Dates</b>: <code>due:</code>, <code>closed:</code>, <code>created:</code> and
+                  <code>updated:</code> with <code>today</code>, <code>yesterday</code>,
+                  <code>tomorrow</code>, <code>week</code>, <code>month</code>, a day
+                  (<code>2026-09-01</code>, or <code>&gt;2026-09-01</code> as a bound) or a distance
+                  from today (<code>&lt;7d</code>, <code>&gt;2w</code>). <code>due:&lt;7d</code>
+                  includes what is already overdue.</li>
+              <li><b>Exclude with <code>-</code></b>: <code>-#wip</code>, <code>-p:low</code>,
+                  <code>-is:done</code>, <code>-draft</code>.</li>
+              <li><b>Autocompletion</b> in the search box: values after <code>state:</code>,
+                  <code>p:</code>, <code>is:</code>, <code>has:</code> or a date operator, the
+                  repository's tags after <code>#</code>, and every operator with
+                  <code>&#8963;Space</code>.</li>
+              <li>Search Everywhere and the MCP tools get it too; and an agent asking for
+                  <code>state:Done</code> in the query no longer gets zero results.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.20.0 &mdash; search shows why a task matched</h3>
             <ul>
               <li><b>While searching, a folded card shows the body line that matched</b>, not the

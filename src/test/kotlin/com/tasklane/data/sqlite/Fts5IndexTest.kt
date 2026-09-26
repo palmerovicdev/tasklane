@@ -17,7 +17,10 @@ import com.tasklane.search.TaskSearchIndex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Clock
+import java.time.DayOfWeek
 import java.time.Instant
+import java.time.ZoneId
 
 /**
  * **La búsqueda nueva contra la vieja, sobre el mismo corpus.**
@@ -185,5 +188,111 @@ class Fts5IndexTest {
         for (raw in listOf("\"", "*", "AND", "NOT", "(", "^token")) {
             fts.find(raw) // lo que no puede hacer es lanzar
         }
+    }
+
+    // ------------------------------------------------ la consulta completa (2.21.0)
+
+    /** Sábado 26 de septiembre de 2026, 10:00 en Madrid; la semana va del lunes 21 al domingo 27. */
+    private val zone = ZoneId.of("Europe/Madrid")
+    private val clock = Clock.fixed(Instant.parse("2026-09-26T08:00:00Z"), zone)
+
+    /** Vence al acabar el día, como las deja `DueDates`. */
+    private fun dueOn(date: String) = java.time.LocalDate.parse(date).atTime(java.time.LocalTime.MAX).atZone(zone).toInstant()
+
+    private val dated: List<Task> = listOf(
+        task("v1", body = "Pagar el dominio", dueDate = dueOn("2026-09-20"), tags = listOf("admin")),
+        task(
+            "v2",
+            body = "Revisar informe\n- [ ] leer\n- [x] firmar",
+            dueDate = dueOn("2026-09-26"),
+            bookmarked = true,
+            priority = TasklaneConfig.HIGH,
+        ),
+        task(
+            "v3",
+            body = "Cerrar sprint",
+            state = TasklaneConfig.DONE,
+            completedAt = Instant.parse("2026-09-24T10:00:00Z"),
+            dueDate = dueOn("2026-09-22"),
+            tags = listOf("wip"),
+        ),
+        // Los dos siguientes pasan el colador de SQL de `has:checklist` y no son listas:
+        // un `[x]` en medio de la frase y una casilla dentro de un bloque de código.
+        task("v4", body = "Nota con [x] en medio del texto", createdAt = Instant.parse("2026-09-25T09:00:00Z")),
+        task("v5", body = "Ejemplo de código\n```\n- [ ] dentro de la valla\n```"),
+        task("v6", body = "Plan largo\n1. [ ] numerado", dueDate = dueOn("2026-10-10")),
+    )
+
+    /**
+     * Lo nuevo de la consulta, en las dos implementaciones y contra lo esperado. La consulta
+     * se interpreta **una vez** con el reloj fijo: `is:overdue` y las fechas dependen de él.
+     */
+    @Test
+    fun `los operadores nuevos y la negacion encuentran lo mismo en las dos`() = withStore { store, db ->
+        store.importBatch(dated, CONFIG)
+        val fts = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(CONFIG, repositories)) }
+        val linear = LinearScanIndex().apply { setCorpus(SearchCorpus(CONFIG, repositories, dated)) }
+        val all = dated.map { it.id.value }.toSet()
+
+        val expected = mapOf(
+            "is:overdue" to setOf("v1"),
+            "is:bookmarked" to setOf("v2"),
+            "has:due" to setOf("v1", "v2", "v3", "v6"),
+            "has:checklist" to setOf("v2", "v6"),
+            "-has:checklist" to setOf("v1", "v3", "v4", "v5"),
+            "has:tag" to setOf("v1", "v3"),
+            "-has:tag" to setOf("v2", "v4", "v5", "v6"),
+            "-#wip" to all - "v3",
+            "-is:done" to all - "v3",
+            "-p:high" to all - "v2",
+            "-dominio" to all - "v1",
+            "-state:inexistente" to all,
+            "due:today" to setOf("v2"),
+            "due:<7d" to setOf("v1", "v2", "v3"),
+            "due:week" to setOf("v2", "v3"),
+            "-due:week" to all - "v2" - "v3",
+            "due:>2026-09-30" to setOf("v6"),
+            "closed:week" to setOf("v3"),
+            "closed:yesterday" to emptySet(),
+            "created:>2026-09-01" to setOf("v4"),
+            "created:<7d" to setOf("v4"),
+            "revisar -leer" to emptySet(),
+            "revisar -pagar" to setOf("v2"),
+            "cerrar -#wip" to emptySet(),
+            "cerrar -#admin" to setOf("v3"),
+            "is:overdue -#admin" to emptySet(),
+            "has:checklist is:bookmarked" to setOf("v2"),
+            "has:checklist -has:checklist" to emptySet(),
+            "-is:overdue -is:done -has:checklist" to setOf("v4", "v5"),
+        )
+        for ((raw, want) in expected) {
+            val query = QueryParser.parse(raw, clock, DayOfWeek.MONDAY)
+            for ((name, index) in listOf("FTS5" to fts, "escaneo" to linear)) {
+                assertEquals(
+                    "«$raw» en $name",
+                    want,
+                    index.search(query, SearchScope.Repo(REPO)).map { it.task.id.value }.toSet(),
+                )
+            }
+        }
+    }
+
+    /**
+     * Lo que se remata en Kotlin no puede quedarse en la primera página. Doscientas tareas
+     * recientes con lista y, detrás, las cinco que no la tienen: `-has:checklist` tiene que
+     * llegar a ellas.
+     */
+    @Test
+    fun `lo que se remata en Kotlin recorre mas alla de la primera pagina`() = withStore { store, db ->
+        val base = Instant.parse("2026-09-01T00:00:00Z")
+        val lists = (0 until 1_200).map {
+            task("l$it", body = "Lista $it\n- [ ] paso", updatedAt = base.plusSeconds(10_000L + it))
+        }
+        val plain = (0 until 5).map { task("p$it", body = "Sin lista $it", updatedAt = base.plusSeconds(it.toLong())) }
+        store.importBatch(lists + plain, CONFIG)
+        val fts = Fts5Index(db.reader).apply { setCorpus(SearchCorpus(CONFIG, repositories)) }
+
+        assertEquals(plain.map { it.id.value }.toSet(), fts.find("-has:checklist").toSet())
+        assertEquals(200, fts.find("has:checklist").size)
     }
 }

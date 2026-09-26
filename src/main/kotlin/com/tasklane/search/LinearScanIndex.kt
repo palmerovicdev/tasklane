@@ -9,6 +9,7 @@ import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.query.DateField
 import com.tasklane.domain.query.TaskQuery
 import com.tasklane.domain.text.TextNormalizer
 import java.util.concurrent.ConcurrentHashMap
@@ -158,10 +159,26 @@ class LinearScanIndex : TaskSearchIndex {
                 TaskQuery.Facet.IMAGE -> task.attachments.isNotEmpty()
                 TaskQuery.Facet.CODE -> task.anchors.isNotEmpty()
                 TaskQuery.Facet.BROKEN_ANCHOR -> task.anchors.any { it.path in broken }
+                TaskQuery.Facet.DUE -> task.dueDate != null
+                TaskQuery.Facet.CHECKLIST -> task.checklist.second > 0
+                TaskQuery.Facet.TAG -> task.tags.isNotEmpty()
+                TaskQuery.Facet.BOOKMARKED -> task.bookmarked
             }
             if (!present) return false
         }
-        return true
+        if (query.overdue != null && !task.isOverdue(query.overdue)) return false
+        for (range in query.dates) {
+            val date = when (range.field) {
+                DateField.DUE -> task.dueDate
+                DateField.CLOSED -> task.completedAt
+                DateField.CREATED -> task.createdAt
+                DateField.UPDATED -> task.updatedAt
+            }
+            if (!range.accepts(date)) return false
+        }
+        // Lo negado (2.21.0) es el mismo examen al revés: cada exclusión es una consulta de
+        // una sola condición, y la tarea no puede pasarlo con ninguna.
+        return query.excluded.none { matches(task, document, it, config, stateNames, priorityNames, repoNames, broken) }
     }
 
     /**

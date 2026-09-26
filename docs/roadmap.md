@@ -36,6 +36,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P24 · Las capturas, también para el agente              | `2.18.0` |
 | ✅ | P27 · Pegar y soltar en la lista                        | `2.19.0` |
 | ✅ | P28 · La búsqueda enseña por qué casa                   | `2.20.0` |
+| ✅ | P29 · El lenguaje de consulta, completo                 | `2.21.0` |
 
 ---
 
@@ -334,7 +335,7 @@ dentro de un bloque de código; si la coincidencia caería detrás del recorte, 
 de la tarjeta desplegada y a los enlaces, que se siguen pulsando. Lo que casa en una etiqueta
 o en la ruta de un ancla no elige línea: ahí se ve el distintivo.
 
-### P29 · El lenguaje de consulta, completo 👾
+### P29 · El lenguaje de consulta, completo ✅ `2.21.0`
 
 La ventana filtra por vencidas y marcadas, y el CSV exporta vencimiento, fechas y checklist,
 pero nada de eso se puede **buscar**: `is:overdue` se busca como texto y devuelve cero, y
@@ -344,6 +345,18 @@ fechas: `due:today|week|<7d`, `closed:yesterday|week`, `created:>2026-09-01`; y
 autocompletado de operadores y valores en el buscador —estados, prioridades, etiquetas—.
 Lo ganan también `⇧⇧` y el agente por MCP, que no tienen el filtro de la ventana y hoy no
 pueden preguntar «qué está vencido». No es P9: no guarda nada, sólo deja decirlo.
+
+Salió así: `is:overdue`, `is:bookmarked`, `has:due`, `has:checklist`, `has:tag`; `due:`,
+`closed:`, `created:` y **también `updated:`**, con `today|yesterday|tomorrow|week|month`,
+un día con o sin comparador y una distancia `<7d`/`>2w` que se mide hacia donde mira la fecha
+—`due:<7d` incluye lo vencido—. Dos fechas del mismo operador se **acumulan** (un intervalo),
+al revés que el resto de operadores. El `-` niega cualquier token, texto incluido, y cada
+exclusión cuenta por separado. Un valor a medio escribir (`is:ov`, `due:<7`) ya no vacía la
+lista. `has:checklist` no es columna: SQL criba el cuerpo y remata `Checklist` en Kotlin.
+Autocompletado en los dos buscadores (`QuerySearchField`): los valores salen elegidos, una
+palabra que empieza como un operador lo ofrece **sin** elegirlo —`Enter` sigue yendo a la
+lista— y `⌃Espacio` enseña todos. De paso se arregló que el agente con `state:Done` en la
+consulta y sin `includeClosed` recibiera cero (venía de la 2.12.0).
 
 ### P30 · Etiquetas de verdad 👾
 
