@@ -121,6 +121,46 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.17.0 &mdash; the board</h3>
+            <ul>
+              <li><b>Every state side by side, in an editor tab</b>: <i>Open Board</i> in the tool
+                  window toolbar or in <i>Tools</i>. The tool window stays for everyday work; the
+                  board has the editor's width, for planning.</li>
+              <li><b>Each column is the tool window's list</b>: the same cards, menu, shortcuts and
+                  <code>&#8984;Z</code>, with its own grouping and order. Its header shows the count,
+                  with <b>+</b> to create right there and <i>Group By</i>.</li>
+              <li><b>Drag a card to another column</b> by its grip to change its state &mdash; the
+                  whole selection, if the card is part of one. In a manually ordered column it lands
+                  between the two cards you drop it on. The board and the column scroll by
+                  themselves near their edges.</li>
+              <li><b>The selection follows the cards</b> to their new column, also with <i>Move
+                  To</i> and <code>&#8679;&#8997;&larr;/&rarr;</code>; <code>&#8997;&larr;/&rarr;</code>
+                  moves between columns. One undo step puts the cards back in their column and
+                  their place.</li>
+              <li>The board shares the search, the repository and the view filter with the tool
+                  window.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
+            <h3>2.16.0 &mdash; undo everything, not just deleting</h3>
+            <ul>
+              <li><b><code>&#8984;Z</code> / <code>Ctrl+Z</code> in the list undoes what you just
+                  did</b>: completing, moving to another state, changing the priority,
+                  bookmarking, reordering, ticking a checklist item, editing, creating or
+                  deleting &mdash; one task or a whole selection. <code>&#8984;&#8679;Z</code> /
+                  <code>Ctrl+Shift+Z</code> redoes it. Up to 100 steps.</li>
+              <li><b>Each repository has its own history.</b> <code>&#8984;Z</code> undoes the last
+                  thing done in the repository you are looking at, never something you cannot
+                  see.</li>
+              <li><b>It says what it undid</b> in the status bar &mdash; <i>Undone: move 3 tasks to
+                  Done</i> &mdash;, because the tasks may come back to another tab.</li>
+              <li><b>Undo puts back what you changed and nothing else.</b> If an AI agent edited the
+                  task since, its edit stays. Undo brings back the original dates too, so a task
+                  returns to its date group.</li>
+              <li>What an agent does through the MCP tools is not on your undo stack.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.15.0 &mdash; anchor a block of code</h3>
             <ul>
               <li><b>Anchor a whole block, not just a line.</b> Select several lines and use

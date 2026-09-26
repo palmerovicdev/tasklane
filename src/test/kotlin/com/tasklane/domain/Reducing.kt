@@ -1,6 +1,7 @@
 package com.tasklane.domain
 
 import com.tasklane.data.sqlite.TaskStore
+import com.tasklane.domain.command.Change
 import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.command.TaskReducer
@@ -51,7 +52,14 @@ internal class Model(
  * Un comando aplicado al modelo de mentira. Devuelve el **mismo** [Model] cuando no
  * cambió nada, que es lo que deja escribir `assertSame` sobre «esto no hizo nada».
  */
-internal fun TaskReducer.step(model: Model, command: TaskCommand): Model {
+internal fun TaskReducer.step(model: Model, command: TaskCommand): Model = recorded(model, command).first
+
+/**
+ * Como [step], y además lo que la pila de `⌘Z` guardaría del comando (2.16.0): las tareas
+ * que nombraba antes, contra las mutaciones. Es lo mismo que hace el servicio dentro de la
+ * transacción, sin las vecinas de un reordenar, que las sabe el almacén.
+ */
+internal fun TaskReducer.recorded(model: Model, command: TaskCommand): Pair<Model, Change> {
     val targets = targetsOf(command).toSet()
     val repo = (command as? RepoScoped)?.repo ?: model.snapshot.activeRepo
     val subject = TaskReducer.Subject(
@@ -60,6 +68,7 @@ internal fun TaskReducer.step(model: Model, command: TaskCommand): Model {
         nextOrder = { (model.tasksOf(repo).maxOfOrNull { it.order } ?: 0L) + TaskStore.ORDER_GAP },
     )
     val plan = plan(subject, command)
+    val change = Change.of(subject.tasks, plan.mutations)
     val view = view(model.snapshot, command)
 
     // `ForgetRepo` es la única cuya mutación no lleva filas y sí tiene efecto aquí: se
@@ -73,6 +82,6 @@ internal fun TaskReducer.step(model: Model, command: TaskCommand): Model {
         else -> TaskReducer.applyTo(model.tasks, plan.mutations)
     }
 
-    if (tasks === model.tasks && view === model.snapshot && plan.config == model.config) return model
-    return Model(plan.config, tasks, view.copy(config = plan.config))
+    if (tasks === model.tasks && view === model.snapshot && plan.config == model.config) return model to change
+    return Model(plan.config, tasks, view.copy(config = plan.config)) to change
 }

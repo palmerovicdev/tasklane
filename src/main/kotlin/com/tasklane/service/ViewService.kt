@@ -4,6 +4,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.tasklane.data.config.TasklaneWorkspaceService
+import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskFilter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,7 +14,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /**
- * Cómo se está mirando la lista: el filtro de vista y el archivo de lo terminado.
+ * Cómo se está mirando la lista: el filtro de vista, el archivo de lo terminado y qué
+ * estados salen en el tablero.
  *
  * Es un servicio aparte y no un campo de [TaskService] porque no es modelo —nada de
  * lo que hay aquí se guarda en el fichero de tareas ni se comparte con el equipo— y
@@ -67,6 +69,16 @@ class ViewService(project: Project) {
     /** Enseña u oculta lo archivado hasta que se cierre el proyecto. */
     fun showArchived(show: Boolean) {
         _archive.value = _archive.value.copy(showingAll = show)
+    }
+
+    /** Los estados sin columna en el tablero (2.17.1). Ver `TasklaneWorkspaceService.boardHidden`. */
+    private val _boardHidden = MutableStateFlow(workspace.boardHidden)
+    val boardHidden: StateFlow<Set<StateId>> = _boardHidden.asStateFlow()
+
+    /** Lo pide la página de ajustes al aplicar. */
+    fun setBoardHidden(hidden: Set<StateId>) {
+        workspace.boardHidden = hidden
+        _boardHidden.value = workspace.boardHidden
     }
 
     companion object {

@@ -6,7 +6,6 @@ import com.tasklane.domain.model.PriorityId
 import com.tasklane.domain.model.RepoKey
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.StateId
-import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TasklaneConfig
 import java.time.Instant
@@ -150,17 +149,27 @@ sealed interface TaskCommand {
     // ----------------------------------------------------- alcance de proyecto
 
     /**
-     * Devuelve tareas borradas **tal como estaban** (2.9.0): el mismo id, las mismas
-     * fechas, el mismo orden. Es el *Undo* del aviso que sale al borrar.
+     * Deshace un [Change] (2.16.0): es el `⌘Z` de la lista y el *Undo* del aviso de borrar.
+     * Rehacer es lo mismo con el cambio que dejó el deshacer.
      *
-     * No es un [Create]: una tarea recreada nacería con otro id y con la fecha de hoy,
-     * y se iría del grupo de fecha donde estaba, que es justo lo contrario de deshacer.
+     * Hasta la 2.15 sólo se deshacía un borrado, con un `Restore` que devolvía las tareas.
+     * Ahora cada fila vuelve según lo que el gesto le hizo:
      *
-     * De alcance de proyecto porque cada tarea lleva su repositorio: una selección
-     * borrada buscando en todos puede cruzar varios. Las que ya existen se dejan como
-     * están, así que deshacer dos veces no duplica nada.
+     * - **La creó**: se borra, si sigue estando.
+     * - **La borró**: vuelve **tal como estaba** —el mismo id, las mismas fechas, el mismo
+     *   orden—, si no está. Un [Create] no valdría: nacería con otro id y con la fecha de
+     *   hoy, y se iría del grupo de fecha donde estaba. Si su estado o su prioridad ya no
+     *   existen, vuelve aparcada en la de por defecto, como hace la renormalización.
+     * - **La cambió**: vuelve lo de antes **campo a campo, y sólo donde sigue lo de
+     *   después**. Si entretanto un agente le cambió el cuerpo a la tarea que se completó,
+     *   deshacer la reabre y respeta el cuerpo nuevo; si algo ya volvió solo, no se toca.
+     *   El `ord` no es un campo de éstos: el sitio en la lista va aparte, en
+     *   [Change.moves].
+     *
+     * Así deshacer dos veces no duplica ni pisa nada. De alcance de proyecto porque cada
+     * tarea lleva su repositorio: una selección buscando en todos puede cruzar varios.
      */
-    data class Restore(val tasks: List<Task>) : TaskCommand
+    data class Revert(val change: Change) : TaskCommand
 
     /**
      * Entró una configuración nueva —del fichero, de los ajustes o de la plantilla—.
@@ -243,6 +252,10 @@ sealed interface TaskCommand {
      *
      * Sólo comandos que **tocan tareas existentes**: [Create] y [ForgetRepo] no caben,
      * porque ni tienen una fila que leer antes ni se componen con nada.
+     *
+     * [Move] sí cabe, y va **después** de lo demás aunque llegue antes (2.17.0): soltar una
+     * tarjeta en otra columna del tablero es `ChangeState` y `Move` en el mismo lote, y
+     * colocarla entre dos vecinas sólo tiene sentido cuando ya es de su estado.
      */
     data class Batch(val commands: List<RepoScoped>) : TaskCommand {
         init {

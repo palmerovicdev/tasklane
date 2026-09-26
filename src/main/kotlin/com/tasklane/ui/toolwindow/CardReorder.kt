@@ -5,11 +5,13 @@ import com.intellij.util.ui.JBUI
 import com.tasklane.domain.model.Task
 import com.tasklane.domain.model.TaskId
 import java.awt.Graphics
+import java.awt.Point
 import java.awt.Rectangle
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
+import javax.swing.tree.TreePath
 
 /**
  * Reordenar arrastrando la tarjeta por su asa (2.11.0), en una pestaña con orden manual.
@@ -27,10 +29,18 @@ import javax.swing.tree.DefaultMutableTreeNode
  *
  * Lo que se decide aquí son sólo las **vecinas**: qué tarea queda encima y cuál debajo.
  * El número que le toca lo pone el almacén, que es quien sabe si queda hueco.
+ *
+ * **En el tablero el asa lleva además a otra columna** (2.17.0), vaya o no ésta a mano: en
+ * cuanto el ratón sale a otra columna, lo que se pinta y lo que pasa al soltar es cosa de
+ * ella. Ver [CardCarry].
  */
 internal class CardReorder(
     private val tree: JTree,
     private val renderer: TaskTreeRenderer,
+    /** Adónde más puede ir la tarjeta: en el tablero, a otra columna (2.17.0). */
+    private val carry: CardCarry? = null,
+    /** La selección de antes de pulsar el asa, que el `TreeUI` ya ha podido cambiar. Ver [carried]. */
+    private val selectionAtPress: () -> List<TreePath> = { tree.selectionPaths.orEmpty().toList() },
     private val onDrop: (task: Task, above: TaskId?, below: TaskId?) -> Unit,
 ) {
 
@@ -38,6 +48,13 @@ internal class CardReorder(
 
     private var dragged: TaskNode? = null
     private var drop: Drop? = null
+
+    /**
+     * Lo que se lleva a otra columna: la selección entera si la tarjeta del asa es parte de
+     * una de varias, y si no, ella sola. Reordenar dentro de la columna mueve siempre sólo
+     * la del asa, como hasta ahora.
+     */
+    private var carried: List<Task> = emptyList()
 
     /** Si hay un arrastre en curso: mientras dura, el resto de gestos del ratón se callan. */
     val active: Boolean get() = dragged != null
@@ -48,12 +65,17 @@ internal class CardReorder(
                 if (e.button != MouseEvent.BUTTON1 || e.isPopupTrigger) return
                 if (!renderer.isOnHandle(tree, e.point)) return
                 val row = rowAtHeight(tree, e.y)
-                dragged = tree.getPathForRow(row)?.lastPathComponent as? TaskNode
+                val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode
+                dragged = node
+                carried = node?.let(::carriedWith).orEmpty()
             }
 
             override fun mouseDragged(e: MouseEvent) {
                 val node = dragged ?: return
-                val next = dropAt(node, e.y)
+                // Sobre otra columna manda ella: la línea de aquí se borra, y la de allí
+                // la pinta la otra.
+                val away = carry?.over(carried, e.locationOnScreen) == true
+                val next = if (away || !renderer.reorderable) null else dropAt(node, e.y)
                 if (next?.lineY != drop?.lineY) {
                     drop = next
                     tree.repaint()
@@ -63,14 +85,31 @@ internal class CardReorder(
             override fun mouseReleased(e: MouseEvent) {
                 val node = dragged ?: return
                 val target = drop
+                val tasks = carried
                 dragged = null
                 drop = null
+                carried = emptyList()
                 tree.repaint()
+                if (carry?.drop(tasks, e.locationOnScreen) == true) return
                 if (target != null) onDrop(node.task, target.above, target.below)
             }
         }
         tree.addMouseListener(mouse)
         tree.addMouseMotionListener(mouse)
+    }
+
+    /**
+     * Ver [carried]. En el orden en que se ven, que es en el que llegarán a la otra columna.
+     * Si al pulsar se quedó reducida a la tarjeta del asa, se devuelve: lo que se ve
+     * seleccionado tiene que ser lo que se lleva.
+     */
+    private fun carriedWith(node: TaskNode): List<Task> {
+        if (carry == null) return listOf(node.task)
+        val before = selectionAtPress()
+        val selected = before.mapNotNull { it.lastPathComponent as? TaskNode }
+        if (node !in selected || selected.size < 2) return listOf(node.task)
+        if (tree.selectionPaths.orEmpty().toList() != before) tree.selectionPaths = before.toTypedArray()
+        return selected.sortedBy { tree.getRowForPath(TreePath(it.path)) }.map { it.task }
     }
 
     /** La línea de soltar, encima de todo. La llama el `paint` del árbol. */
@@ -113,4 +152,21 @@ internal class CardReorder(
         fun tasksOf(parent: DefaultMutableTreeNode): List<TaskNode> =
             (0 until parent.childCount).mapNotNull { parent.getChildAt(it) as? TaskNode }
     }
+}
+
+/**
+ * Adónde más puede ir una tarjeta que se arrastra por el asa (2.17.0): en el tablero, a
+ * otra columna. Lo pone cada columna; en la tool window no hay, y el asa sólo reordena.
+ */
+internal interface CardCarry {
+
+    /**
+     * El ratón, en coordenadas de pantalla, llevando [tasks]. `true` si está sobre **otra**
+     * columna, que es entonces quien pinta dónde caerían; `false` en cualquier otro sitio, y
+     * entonces no queda nada pintado fuera de la columna de origen.
+     */
+    fun over(tasks: List<Task>, screen: Point): Boolean
+
+    /** Soltarlas ahí. `true` si las recogió otra columna. Borra lo pintado en cualquier caso. */
+    fun drop(tasks: List<Task>, screen: Point): Boolean
 }

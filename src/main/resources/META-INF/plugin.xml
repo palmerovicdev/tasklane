@@ -50,7 +50,7 @@
             <li><b>A toolbar</b> with <i>New Task</i> &mdash; a split button: the body creates in
                 the current tab, the arrow lets you pick another target state &mdash;,
                 <i>Edit</i>, <i>Delete</i>, <i>Group By</i>, <i>Search All Repositories</i>,
-                <i>Export</i> and <i>Settings</i>.</li>
+                <i>Open Board</i>, <i>Export</i> and <i>Settings</i>.</li>
             <li><b>A repository selector</b> and a <b>view filter</b> in the window header. The
                 filter shows <i>All tasks</i>, <i>Open</i>, <i>Overdue</i> or
                 <i>Bookmarked</i>, stacks with the search instead of replacing it, and is
@@ -83,6 +83,23 @@
                 are left (<i>4,213 more</i>) &mdash; scrolling to it loads the next page &mdash;,
                 groups with more than 500 tasks start folded, and all the heavy work runs off the
                 UI thread. With 100,000 tasks a project opens its list in about 9&nbsp;ms.</li>
+        </ul>
+
+        <h3>The board</h3>
+        <ul>
+            <li><b>Every state side by side</b>, in an editor tab: <i>Open Board</i> in the tool
+                window toolbar or in <i>Tools</i>. The editor has the width the tool window
+                lacks, so this is where you plan; the tool window stays for everyday work.</li>
+            <li><b>The same cards</b>, with the same menu, shortcuts and <code>&#8984;Z</code>.
+                Each column keeps its grouping and order, and its header has a <b>+</b> to create
+                right there.</li>
+            <li><b>Drag a card to another column</b> by its grip to change its state &mdash; a
+                whole selection, if the card is part of one. In a manually ordered column it
+                lands between the two cards you drop it on. <i>Move To</i> and
+                <code>&#8679;&#8997;&larr;/&rarr;</code> work too, and the selection follows the
+                cards to their new column.</li>
+            <li><b>One search, filter and repository</b> for the whole board &mdash; the same
+                ones as the tool window.</li>
         </ul>
 
         <h3>The card</h3>
@@ -459,6 +476,14 @@
                                 implementation="com.tasklane.ui.statusbar.TasklaneStatusWidgetFactory"
                                 order="first"/>
 
+        <!-- El tablero en una pestana del editor (2.17.0). Su fichero vive en un sistema de
+             ficheros propio, tasklane://<proyecto>, para que la pestana se reabra con el
+             proyecto: la plataforma recuerda las pestanas por su URL. Ver TaskBoardFile. -->
+        <virtualFileSystem key="tasklane"
+                           implementationClass="com.tasklane.ui.board.TaskBoardFileSystem"
+                           physical="false"/>
+        <fileEditorProvider implementation="com.tasklane.ui.board.TaskBoardEditorProvider"/>
+
         <projectConfigurable
             id="com.tasklane.settings"
             parentId="tools"
@@ -500,6 +525,14 @@
         <action id="Tasklane.ImportTodos"
                 class="com.tasklane.ui.quickadd.ImportTodosAction"
                 icon="AllIcons.General.TodoDefault">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!-- El tablero (2.17.0): en la barra de la ventana y en Tools. Global porque no
+             necesita una pestana: abre el del proyecto, o va a el si ya esta abierto. -->
+        <action id="Tasklane.OpenBoard"
+                class="com.tasklane.ui.board.OpenBoardAction"
+                icon="/icons/board.svg">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
 
@@ -647,9 +680,18 @@
             <separator/>
             <reference ref="Tasklane.Grouping"/>
             <reference ref="Tasklane.SearchAllRepos"/>
+            <reference ref="Tasklane.OpenBoard"/>
             <separator/>
             <reference ref="Tasklane.Export"/>
             <reference ref="Tasklane.Settings"/>
+        </group>
+
+        <!-- La cabecera de cada columna del tablero (2.17.0): crear en ese estado y como se
+             agrupa, que son de la columna. Lo demas de la barra es de todo el tablero y va
+             encima de las columnas. Ver ColumnHeader. -->
+        <group id="Tasklane.BoardColumn">
+            <reference ref="Tasklane.NewTask"/>
+            <reference ref="Tasklane.Grouping"/>
         </group>
 
         <group id="Tasklane.ContextMenu" popup="true">

@@ -528,6 +528,36 @@ internal class TaskStore(private val db: TaskDb) {
     }
 
     /**
+     * Entre qué dos tareas está [id] en el orden manual (2.16.0): la de justo encima y la de
+     * justo debajo, del mismo estado y del mismo lado de la marca, que son las que mira
+     * [place]. `null` si la tarea no existe; cualquiera de las dos, si es la primera o la
+     * última de lo suyo.
+     *
+     * Es lo que se guarda para deshacer un [Mutation.Place]. El `ord` de antes no serviría:
+     * colocar puede reespaciar el estado entero —ver [respace]—, y entonces ese número ya
+     * no cae donde caía. Las vecinas siguen siendo las vecinas. El mismo orden que la lista,
+     * `ord` y luego `id`, por el índice `task_manual`.
+     */
+    fun neighbours(id: TaskId): Pair<TaskId?, TaskId?>? {
+        class Me(val repo: String, val state: String, val marked: Int, val ord: Long)
+        val me = sql.first("SELECT repo, state, bookmarked, ord FROM task WHERE id = ?", id.value) {
+            Me(it.getString(0).orEmpty(), it.getString(1).orEmpty(), it.getInt(2), it.getLong(3))
+        } ?: return null
+
+        fun next(comparison: String, direction: String): TaskId? = sql.first(
+            "SELECT id FROM task WHERE repo = ? AND state = ? AND bookmarked = ? AND (ord, id) $comparison (?, ?) " +
+                "ORDER BY ord $direction, id $direction LIMIT 1",
+            me.repo,
+            me.state,
+            me.marked,
+            me.ord,
+            id.value,
+        ) { TaskId(it.getString(0).orEmpty()) }
+
+        return next(">", "ASC") to next("<", "DESC")
+    }
+
+    /**
      * Vuelve a espaciar el orden manual de un estado de un repositorio: las mismas
      * posiciones, a [ORDER_GAP] unas de otras. Empieza en el `ord` más bajo que ya hubiera,
      * para no mover el estado respecto a lo recién creado, que se crea por encima de todo.

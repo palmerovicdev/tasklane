@@ -73,6 +73,14 @@ internal object TasklaneIcons {
     @JvmField
     val GroupBy: Icon = IconLoader.getIcon("/icons/group_by.svg", TasklaneIcons::class.java)
 
+    /**
+     * El tablero (2.17.0): tres columnas de alto distinto. Va en *Open Board* y en su
+     * pestaña del editor. `AllIcons` no trae uno: lo más cercano son las divisiones del
+     * editor, que en una barra se leen como «partir la ventana».
+     */
+    @JvmField
+    val Board: Icon = IconLoader.getIcon("/icons/board.svg", TasklaneIcons::class.java)
+
     private fun format(name: String): Icon =
         IconLoader.getIcon("/icons/format_$name.svg", TasklaneIcons::class.java)
 }

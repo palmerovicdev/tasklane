@@ -411,6 +411,38 @@ class PlanTest {
     }
 
     /** Crear no se compone: no hay fila que leer antes, y el orden de dos creadas chocaría. */
+    /**
+     * Soltar en otra columna del tablero (2.17.0): cambiar de estado y colocar, en un lote.
+     * Colocar va **detrás** aunque llegue delante, porque el almacén busca las vecinas en el
+     * estado en que la tarea ha quedado.
+     */
+    @Test
+    fun `un lote que cambia de estado y coloca escribe primero y coloca despues`() {
+        val a = task("a")
+        val batch = TaskCommand.Batch(
+            listOf(
+                TaskCommand.Move(repo, a.id, TaskId("x"), TaskId("y")),
+                TaskCommand.ChangeState(repo, a.id, TasklaneConfig.DOING),
+            ),
+        )
+
+        val mutations = plan(batch, a).mutations
+
+        assertEquals(2, mutations.size)
+        assertEquals(TasklaneConfig.DOING, (mutations[0] as Mutation.Upsert).tasks.single().stateId)
+        assertEquals(Mutation.Place(repo, a.id, TaskId("x"), TaskId("y")), mutations[1])
+    }
+
+    @Test
+    fun `un lote no coloca lo que el mismo borra`() {
+        val a = task("a")
+        val batch = TaskCommand.Batch(
+            listOf(TaskCommand.Move(repo, a.id, TaskId("x"), null), TaskCommand.Delete(repo, listOf(a.id))),
+        )
+
+        assertEquals(listOf(Mutation.Delete(listOf(a.id))), plan(batch, a).mutations)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun `un lote no admite crear`() {
         TaskCommand.Batch(listOf(TaskCommand.Create(repo, "Algo")))

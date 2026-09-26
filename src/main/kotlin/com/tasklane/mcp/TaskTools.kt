@@ -28,7 +28,8 @@ import java.util.Optional
  * paso de [ToolError] a error esperado. Aquí está el trabajo, y pasa **por los mismos
  * caminos que la ventana** —[TaskService.apply] con los comandos de siempre, la búsqueda
  * de [SearchService]—: lo que haga un agente se ve en la lista en el acto, cuenta para los
- * avisos y el *Undo*, y respeta la solo lectura de una base que se está recuperando.
+ * avisos y respeta la solo lectura de una base que se está recuperando. Lo que no hace es
+ * entrar en la pila de `⌘Z`, que es del usuario: ver [write].
  *
  * **No hay borrar.** Un agente que se equivoca completando se deshace reabriendo; uno
  * que borra, no —los datos no van al VCS y el *Undo* de borrar es del usuario, en su
@@ -131,7 +132,7 @@ internal class TaskTools(private val project: Project) {
         val repo = ToolNames.repository(snapshot.repositories, snapshot.activeRepo, repository)
         writable(repo.key)
         val id = TaskId.random()
-        tasks.apply(
+        write(
             TaskCommand.Create(
                 repo = repo.key,
                 body = body,
@@ -160,7 +161,7 @@ internal class TaskTools(private val project: Project) {
         val task = find(id)
         writable(task.repo)
         if (body != null && body.isBlank()) throw ToolError("The task body can't be empty. Its first line is the title.")
-        tasks.apply(
+        write(
             TaskCommand.UpdateTask(
                 repo = task.repo,
                 id = task.id,
@@ -172,7 +173,7 @@ internal class TaskTools(private val project: Project) {
                 anchors = code?.filter(String::isNotBlank)?.map(::anchorOf),
             ),
         )
-        if (bookmarked != null && bookmarked != task.bookmarked) tasks.apply(TaskCommand.ToggleBookmark(task.repo, task.id))
+        if (bookmarked != null && bookmarked != task.bookmarked) write(TaskCommand.ToggleBookmark(task.repo, task.id))
         return saved(task.id)
     }
 
@@ -185,7 +186,7 @@ internal class TaskTools(private val project: Project) {
         writable(task.repo)
         val closed = config.states.firstOrNull { it.terminal }
             ?: throw ToolError("No state is marked as closed in Tasklane's settings.")
-        if (!config.stateOrDefault(task.stateId).terminal) tasks.apply(TaskCommand.ChangeState(task.repo, task.id, closed.id))
+        if (!config.stateOrDefault(task.stateId).terminal) write(TaskCommand.ChangeState(task.repo, task.id, closed.id))
         return saved(task.id)
     }
 
@@ -197,11 +198,19 @@ internal class TaskTools(private val project: Project) {
         if (items.isEmpty()) throw ToolError("Task $id has no checklist items (\"- [ ] item\" lines).")
         val item = items.firstOrNull { it.index == index }
             ?: throw ToolError("Task $id has checklist items 1..${items.size}; there is no item $index.")
-        if (item.checked != checked) tasks.apply(TaskCommand.ToggleCheck(task.repo, task.id, item.offset))
+        if (item.checked != checked) write(TaskCommand.ToggleCheck(task.repo, task.id, item.offset))
         return saved(task.id)
     }
 
     // ------------------------------------------------------------------ internos
+
+    /**
+     * Por [TaskService.apply], pero **fuera de la pila de `⌘Z`** del usuario (2.16.0): si lo
+     * del agente entrara, deshacer lo que uno acaba de mover en la lista desharía lo último
+     * que tocó el agente por detrás. Y deshacer lo propio respeta lo del agente: vuelve
+     * campo a campo y sólo donde nadie ha escrito después.
+     */
+    private fun write(command: TaskCommand) = tasks.apply(command, undoable = false)
 
     private fun find(id: String): Task =
         tasks.task(TaskId(id.trim())) ?: throw ToolError("No task with id \"$id\". List tasks to get their ids.")

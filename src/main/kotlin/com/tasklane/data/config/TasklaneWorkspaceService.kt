@@ -68,6 +68,10 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
 
         @Attribute
         var statusBarOverdue: Boolean = true
+
+        /** Los estados que no salen en el tablero, separados por comas. Ver [boardHidden]. */
+        @Attribute
+        var boardHidden: String? = null
     }
 
     private var state = WorkspaceState()
@@ -157,6 +161,19 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
         set(value) {
             state.statusBarStates = value.states?.joinToString(",") { it.value }
             state.statusBarOverdue = value.overdue
+        }
+
+    /**
+     * Los estados que **no** tienen columna en el tablero (2.17.1). De la persona, como lo que
+     * cuenta la barra de estado: qué columnas quiere uno delante no dice nada del equipo.
+     *
+     * Se guardan los que se quitan y no los que se ven para que un estado nuevo salga en el
+     * tablero sin que nadie tenga que acordarse de marcarlo, y uno borrado deje de importar.
+     */
+    var boardHidden: Set<StateId>
+        get() = state.boardHidden?.split(',')?.filter { it.isNotBlank() }?.mapTo(LinkedHashSet(), ::StateId).orEmpty()
+        set(value) {
+            state.boardHidden = value.takeIf { it.isNotEmpty() }?.joinToString(",") { it.value }
         }
 
     /** Formato del portapapeles. Markdown por defecto: es lo que entiende el destino habitual. */

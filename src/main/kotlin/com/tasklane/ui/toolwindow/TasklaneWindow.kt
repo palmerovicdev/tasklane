@@ -116,7 +116,7 @@ internal class TasklaneWindow(
         //    de la fila de pestañas lo pone la configuración en cada repintado.
         for (state in states) {
             panels.getOrPut(state.id) {
-                TasklanePanel(project, state.id) { select(it) }.also { panel ->
+                TasklanePanel(project, state.id, onSelectState = { select(it) }).also { panel ->
                     // Colgado de la ventana: cerrar la tool window cancela el scope de
                     // corrutinas de cada panel sin tener que recorrerlos a mano.
                     Disposer.register(this, panel)

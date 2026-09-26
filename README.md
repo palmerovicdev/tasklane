@@ -54,7 +54,8 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
 | **Mover de estado sin diálogo** | *Move To ▸* o `⇧⌥←/→`, también sobre una selección |
 | **Marcar** | Sube la tarea al principio de su grupo, sea cual sea su prioridad |
-| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace. Borrar se deshace con *Undo* o `⌘Z` |
+| **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
+| **Deshacer y rehacer** | `⌘Z` en la lista deshace lo último que se hizo en el repositorio —completar, mover, prioridad, marcar, reordenar, una casilla, editar, crear o borrar— y `⌘⇧Z` lo rehace |
 | **Agrupar y plegar** | Por fecha —hoy y un grupo por día—, por prioridad o por etiqueta, elegido por estado; cada cabecera se pliega |
 | **Filtrar la vista** | Todas, abiertas, vencidas o marcadas, sumado a la búsqueda |
 | **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag`. También desde `⇧⇧` |
@@ -92,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.15.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.17.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -228,9 +229,16 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
 - **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`.
 - **Cambiar la prioridad** de la selección con *Priority ▸*, cada entrada con su color.
 - **Borrar** con `Supr` o *Delete*. No pregunta, y **se deshace**: sale un aviso
-  *«3 tasks deleted — Undo»*, y `⌘Z` con el foco en la lista devuelve lo último que se
-  borró, tal como estaba —mismas fechas, mismo sitio, mismas imágenes—. Hasta 10.000
-  tareas de una vez; por encima el aviso dice que no hay vuelta.
+  *«3 tasks deleted — Undo»* que devuelve lo borrado tal como estaba —mismas fechas, mismo
+  sitio, mismas imágenes—, aunque después se hayan hecho otras cosas.
+- **Todo se deshace** (2.16.0): `⌘Z` con el foco en la lista deshace lo último que se hizo
+  en el repositorio que se está mirando —completar, mover, la prioridad, marcar, reordenar,
+  una casilla, editar, crear o borrar, sobre una tarea o sobre una selección— y `⌘⇧Z` lo
+  rehace. La barra de estado dice qué: *Undone: move 3 tasks to Done*. Vuelve lo que se
+  cambió y nada más: lo que un agente haya escrito después en esas tareas se queda, y lo que
+  hace un agente por MCP no entra en la pila. Se guardan los últimos 100 pasos o 10.000
+  tareas entre todos, lo que llegue antes; un gesto de más de 10.000 no se puede deshacer, y
+  el aviso lo dice.
 - **Entrar en un estado terminal** —*Done* de fábrica— apunta la fecha de cierre, que es
   la que usa *Done* para agrupar por fecha.
 - **Listas de comprobación.** Una línea `- [ ] algo` en el cuerpo se pinta en la tarjeta
@@ -345,6 +353,24 @@ para no tener que abrir la ventana para saber cómo va la lista (2.14.0).
 la configuración. En cuanto se marca o se desmarca una casilla, la elección es la que se
 hizo, y un estado nuevo no sale hasta marcarlo. Es de cada uno y va a `workspace.xml`, como
 el aviso de vencimientos.
+
+## El tablero
+
+*Open Board* —en la barra de la ventana y en *Tools*— abre **los estados en columnas, lado a
+lado, en una pestaña del editor** (2.17.0). La ventana vive estrecha y enseña un estado cada
+vez, que es lo que pide el día a día; para planificar hace falta verlo todo de una vez, y el
+editor tiene el ancho que a la ventana le falta.
+
+| | |
+|---|---|
+| Las columnas | Una por estado, en el orden de los ajustes, y **cada una es la lista de la ventana**: las mismas tarjetas, el mismo menú, los mismos atajos y el mismo `⌘Z`, con su agrupación y su orden. Se reparten el ancho, y si no caben a 300 px cada una sale la barra horizontal |
+| La cabecera de cada una | El nombre y cuántas tiene; `+` crea una tarea en ese estado y *Group By* cambia cómo se agrupa, que es del estado —cambiarlo aquí lo cambia también en la ventana— |
+| Arrastrar | Por el asa ⋮⋮ de la tarjeta —la del orden manual, que aquí sale siempre— a otra columna: la tarea pasa a ese estado. Si la tarjeta es parte de una selección, se va la selección entera. En una columna **a mano, sin buscar y sin grupos**, cae entre las dos tarjetas donde se suelta, y la línea lo dice antes de soltar; en las demás la columna entera se recuadra y la tarea va donde la ordene la columna. Cerca de los bordes, el tablero y la columna se desplazan solos |
+| Después | Lo movido queda **seleccionado en su columna nueva**, con el foco: en una columna que se ordena sola es la forma de ver dónde ha caído. Lo mismo con *Move To ▸* y `⇧⌥←/→`, así que un segundo `⇧⌥→` sigue llevándolo |
+| Deshacer | Un arrastre es **un** paso: `⌘Z` devuelve las tareas a su columna y a su sitio, y la barra de estado dice *Undone: move 2 tasks to Doing* |
+| Arriba | El buscador, el repositorio y el filtro, **los mismos de la ventana**: buscar aquí es buscar también allí. Son dos vistas de las mismas tareas, y que cada una filtrara distinto obligaría a mirar dos campos para saber qué se ve. `⌘K` en una columna lleva al buscador |
+| El teclado | `⌥←/→` pasa a la columna de al lado; lo demás, como en la ventana |
+| La pestaña | Una por proyecto: *Open Board* con ella abierta va a ella |
 
 ## Anclas de código
 
@@ -526,6 +552,9 @@ Detalles que importan:
 - **Todo pasa por el mismo camino que la ventana**: lo que hace el agente aparece en la
   lista en el acto, y una base que se está recuperando o importando se niega a escribir
   con un error que lo dice.
+- **Lo del agente no entra en tu `⌘Z`** (2.16.0). Si entrara, deshacer lo que acabas de
+  mover desharía lo último que tocó el agente por detrás. Y deshacer lo tuyo no se lleva lo
+  suyo: vuelve campo a campo, sólo donde nadie ha escrito después.
 - **Los nombres se escriben como se leen**: `doing`, `High`, `backend` —sin mayúsculas ni
   acentos, o un prefijo que encaje con uno solo—. Si no encajan, el error dice cuáles hay,
   para que el agente se corrija en la llamada siguiente.
@@ -796,7 +825,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.15.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.17.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -820,7 +849,7 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | `⌘K` | Foco en la búsqueda | Sólo dentro de la Tool Window, así que no compite con *Commit* |
 | `Enter` | Editar la tarea seleccionada | Dentro del árbol. Sobre «N more», trae la página siguiente |
 | `Supr` | Borrar las seleccionadas | Dentro del árbol |
-| `⌘Z` | Deshacer el último borrado | Dentro del árbol, y sólo si hay algo que devolver: si no, sigue siendo el *Undo* de siempre |
+| `⌘Z` / `⌘⇧Z` | Deshacer / rehacer lo último del repositorio | Dentro del árbol, y sólo si hay algo que devolver: si no, siguen siendo los de siempre |
 | `⌘⇧↑/↓` | Subir / bajar la tarea un puesto | Dentro del árbol, en un estado con orden manual |
 | `⇧⇧` | Buscar tareas en *Search Everywhere* | Global, pestaña *Tasklane* |
 | `←` / `→` | Plegar / desplegar el grupo | Dentro del árbol |
@@ -829,8 +858,8 @@ lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en
 | `Espacio` / `Enter` | Abrir la pestaña de estado con el foco | En la fila de estados |
 | `Retroceso` | Quitar la última etiqueta | En el campo de etiquetas vacío |
 | `Escape` | Cerrar el diálogo | También con el cursor dentro del cuerpo |
-| `⌥←/→` | Pestaña de estado anterior / siguiente | Dentro del árbol. Es el `Alt+←/→` que ponía el IDE cuando los estados eran pestañas suyas |
-| `⇧⌥←/→` | Mover la selección a esa pestaña | Mismo eje, y `Shift` significa «llévate esto contigo». No da la vuelta al llegar al extremo |
+| `⌥←/→` | Pestaña de estado anterior / siguiente | Dentro del árbol. Es el `Alt+←/→` que ponía el IDE cuando los estados eran pestañas suyas. En el tablero, la columna de al lado |
+| `⇧⌥←/→` | Mover la selección a esa pestaña | Mismo eje, y `Shift` significa «llévate esto contigo». No da la vuelta al llegar al extremo. En el tablero, la selección se va con las tareas a su columna |
 
 Todas las acciones están declaradas en `plugin.xml`, así que aparecen en *Settings →
 Keymap* y en *Search Everywhere* aunque no traigan atajo por defecto. Las de la Tool

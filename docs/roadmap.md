@@ -31,6 +31,8 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P1 · Anclas que sobreviven a renombrar y mover ficheros | `2.13.0` |
 | ✅ | P4 · Widget en la barra de estado                       | `2.14.0` |
 | ✅ | P12 · Anclar un rango, no una línea                     | `2.15.0` |
+| ✅ | P15 · Deshacer todo, no sólo el borrado                 | `2.16.0` |
+| ✅ | P19 · Tablero en una pestaña del editor                 | `2.17.0` |
 
 ---
 
@@ -137,11 +139,16 @@ Una acción que copia al portapapeles lo cerrado desde la última jornada, lo qu
 curso y lo vencido, en Markdown y agrupado por repositorio. Ahora se puede hacer
 copiando grupos de fecha uno a uno.
 
-### P15 · Deshacer todo, no sólo el borrado 👾
+### P15 · Deshacer todo, no sólo el borrado ✅ `2.16.0`
 
 Completar, mover de estado, cambiar la prioridad, marcar o reordenar —sobre todo en
 selecciones grandes— se deshacen con `⌘Z` igual que el borrado. Todo pasa ya por
 `TaskCommand` / `TaskReducer`, que es el sitio natural para guardar la inversa.
+
+Salió con `⌘⇧Z` para rehacer, una historia por repositorio y la barra de estado diciendo
+qué se deshizo. No se guarda la inversa sino cada tarea antes y después (`Change`), y
+`TaskCommand.Revert` devuelve campo a campo sólo lo que nadie ha vuelto a tocar; reordenar
+guarda sus vecinas. Lo de un agente por MCP no entra en la pila.
 
 ---
 
@@ -185,12 +192,20 @@ Tres piezas que usan el operador `file:` que ya existe:
 Hoy la relación va sólo de la tarea al código. Con esto va también del código a la tarea
 sin tener que pasar por la línea exacta.
 
-### P19 · Tablero en una pestaña del editor 👾
+### P19 · Tablero en una pestaña del editor ✅ `2.17.0`
 
 Un `FileEditor` con los estados en columnas y las mismas tarjetas, arrastrando entre
 columnas para mover de estado. La tool window vive estrecha (ver su nota de diseño): es
 la herramienta del día a día, pero no da la vista de conjunto. El tablero usa el espacio
 ancho del editor para planificar, y se abre desde la cabecera o con *Open Board*.
+
+Salió con cada columna siendo **la misma lista de la ventana** (`TasklanePanel` con un
+`BoardHost`), así que menú, atajos y `⌘Z` vienen solos. Se arrastra por el asa ⋮⋮, que en el
+tablero sale siempre; en una columna a mano cae entre dos vecinas, y cambiar de estado y de
+sitio es un solo lote y un solo paso de `⌘Z`. La selección sigue a lo movido. Buscador, filtro
+y repositorio son los de la ventana. La pestaña es `tasklane://<proyecto>`, un sistema de
+ficheros propio pensado para que se reabra con el proyecto; eso no llegó a comprobarse, y la
+documentación no lo promete.
 
 ### P20 · Tarea desde un fallo ⏸️
 
@@ -199,7 +214,7 @@ que falla o sobre una traza de excepción. El cuerpo lleva el nombre del test, e
 y la traza en un bloque de código; el ancla va al primer marco que sea del proyecto (no
 de librerías). Es el momento en que más notas se pierden: «esto falla, luego lo miro».
 
-### P21 · Espejo Markdown en el repositorio 👾
+### P21 · Espejo Markdown en el repositorio ⏸️
 
 Opcional por repositorio: Tasklane mantiene un `TASKS.md` generado —abiertas por estado y
 prioridad, con enlaces a las anclas relativos al repo— que se reescribe al cambiar algo.
@@ -357,3 +372,90 @@ de lo que lo distingue: `⌘⌥R` desde cualquier sitio, *New Tasklane Task from
 editor, *Import TODO Comments…* y conectar un agente por MCP. Propuesta: esas cuatro como
 enlaces en la lista vacía, y un *Got It* la primera vez que se crea un ancla o se pega una
 captura. Pesa más ahora, a las puertas del Marketplace.
+
+---
+
+## Ronda del 2026-09-25 (quinta)
+
+Tras contrastar el roadmap con la captura, las anclas, la búsqueda, los datos, la ventana
+y las herramientas MCP, quedan estos huecos que no cubren las propuestas anteriores.
+Son **ideas para elegir**, sin versión asignada. Van de mayor a menor valor esperado; el
+primer corte de cada una permite comprobar si resuelve el problema antes de ampliarla.
+
+### P36 · Saber cuándo un ancla ya no apunta al código correcto 🟡
+
+`AnchorResolver` encuentra el texto original de la línea dentro del mismo fichero. Si
+ese texto ya no existe, abre la línea antigua aproximada; la marca de ancla rota sólo
+cubre el caso de **fichero ausente**. Tras reescribir una función o mover un bloque a otro
+fichero, una tarea puede parecer bien anclada y llevar a código que ya no corresponde.
+
+Primera entrega: distinguir en la tarjeta y el tooltip entre *encontrada*, *movida por
+texto*, *dudosa* y *fichero ausente*; ofrecer *Reanclar aquí* desde una selección del
+editor y una vista para revisar las dudosas. Buscar candidatos puede ayudar, pero nunca
+cambiar el destino de una ancla dudosa sin confirmación. Comprobarlo al abrir o revisar
+el fichero, sin barrer todo el proyecto en cada pulsación. El éxito es que editar o
+borrar la línea anclada deje una señal visible y permita corregirla sin rehacer la tarea.
+Complementa P1 y P12: aquellas conservan la ruta y el bloque; ésta recupera la
+**confianza en el destino** cuando cambia el contenido.
+
+### P37 · Comprobar una tarea desde su propia tarjeta 🟡
+
+La checklist dice qué se pretendía hacer, pero no guarda una comprobación ejecutable.
+P20 propone crear una tarea desde un test fallido; falta el camino de vuelta para saber,
+al terminar, si el test o la ejecución que importa para esa tarea pasa ahora.
+
+Primera entrega: asociar una configuración de ejecución existente del IDE a la tarea,
+*Run Check* desde la tarjeta y enseñar **resultado y fecha** de la última ejecución,
+con enlace a su salida. No copiar logs ni secretos al cuerpo y no cerrar la tarea
+automáticamente: el resultado es evidencia para que la persona decida. Si cambia el
+código anclado después de ejecutarla, señalar que la comprobación es anterior al
+cambio. Empezar por una configuración por tarea evita inventar un sistema de tests
+propio; probar primero que el identificador de la configuración sobrevive a renombres y
+que la ejecución funciona en la versión mínima del IDE.
+
+### P38 · Que el agente y la persona no se pisen una edición 🟡
+
+`tasklane_get_task` devuelve el cuerpo y `updated`; `tasklane_update_task` puede
+reemplazar cuerpo, etiquetas y anclas completos sin decir qué versión leyó el agente.
+La escritura de `TaskService` es atómica, pero eso no evita que un agente que leyó una
+tarea antes de una edición humana guarde después una copia vieja. La checklist por
+índice también puede apuntar a otra casilla si alguien la reordena entre llamadas.
+
+Primera entrega: una revisión **por tarea**, persistida y devuelta por `get_task`;
+`update_task` y `set_checklist_item` la comprueban dentro de la misma transacción que
+escribe. El diálogo conserva la revisión al abrirse y, si ya cambió, ofrece ver la
+versión actual y conservar el borrador para resolver el conflicto. Una llamada vieja
+devuelve un conflicto con la revisión nueva y no modifica nada; completar una tarea
+ya cerrada sigue siendo idempotente. `updatedAt` no basta como revisión porque hay
+cambios —como marcar— que deliberadamente no lo tocan. Antes de elegirla, concretar
+la compatibilidad de las herramientas MCP actuales y la migración de datos. Es una
+garantía de trabajo compartido, distinta de la autoría y los avisos de P25.
+
+### P39 · Convertir una inspección del IDE en trabajo pendiente 🟡
+
+Tasklane ya captura `TODO` reconocidos por el IDE, y P20 propone capturar fallos de
+Run/Debug. Queda fuera un origen diario de deuda técnica: la advertencia concreta que
+una inspección señala mientras se está editando un fichero.
+
+Primera entrega: *Create Tasklane Task* sobre un problema del fichero actual,
+prellenando título, descripción de la inspección y ancla exacta, con una referencia a
+la regla que lo produjo. Si ya existe una tarea abierta para esa misma regla y lugar,
+ofrecer abrirla. Al volver a la tarea, *Recheck* puede indicar si el problema sigue
+apareciendo; nunca cerrarla sólo porque un análisis parcial dejó de mostrarlo. Acotar
+el primer corte a problemas con fichero y rango y validar la API en la versión mínima
+del IDE antes de prometerlo en todos los lenguajes.
+
+### P40 · Avisar antes de apuntar dos veces la misma tarea 🟡
+
+*Import TODO Comments…* ya compara las anclas de un fichero con el texto de la línea
+para señalar lo importado. Crear desde el editor, Quick Add o MCP no consulta esa pista:
+una nota repetida entra como una tarea nueva, especialmente cuando persona y agente
+capturan el mismo pendiente.
+
+Primera entrega: al crear una tarea con ancla, consultar las tareas **abiertas** de ese
+fichero y sugerir coincidencias por lugar y título normalizado. Ofrecer *Open Existing*
+o *Create Anyway*; dos tareas legítimas pueden compartir línea, así que no fusionar ni
+bloquear automáticamente. En MCP, devolver los identificadores candidatos antes de
+crear para que el agente pueda leerlos. Reutilizar el índice de anclas y mantener la
+consulta fuera del hilo de interfaz permite que siga sirviendo con listas grandes.
+No es P11, que duplica una tarea deliberadamente: ésta evita duplicados accidentales.

@@ -9,6 +9,82 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.17.0]
+
+Menor sin cambio de formato: el tablero, en una pestaña del editor. Es la P19 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Los estados en columnas, lado a lado, en una pestaña del editor**: *Open Board*, en la
+  barra de la ventana y en *Tools*. La ventana sigue siendo la herramienta del día a día, a su
+  ancho estrecho; el tablero es para planificar, con el ancho del editor.
+- **Cada columna es la lista de la ventana**: las mismas tarjetas, el mismo menú, los mismos
+  atajos y el mismo `⌘Z`, con su agrupación y su orden. Su cabecera dice cuántas tiene, y trae
+  `+` para crear en ese estado y *Group By*.
+- **Arrastrar una tarjeta a otra columna** la cambia de estado, por el asa ⋮⋮ —la del orden
+  manual, que en el tablero sale siempre—. Si es parte de una selección, se va la selección
+  entera. En una columna a mano cae entre las dos tarjetas donde se suelta; en las demás, la
+  columna entera se recuadra y la tarea va donde la ordene. Cerca de los bordes, el tablero y
+  la columna se desplazan solos.
+- **Lo movido queda seleccionado en su columna nueva**, con el foco, también con *Move To ▸* y
+  `⇧⌥←/→`: en una columna que se ordena sola es la forma de ver dónde ha caído, y un segundo
+  `⇧⌥→` lo sigue llevando. `⌥←/→` pasa de columna.
+- **Arriba, el buscador, el repositorio y el filtro de la ventana**, los mismos: buscar en el
+  tablero es buscar también en la ventana.
+- Una pestaña por proyecto: *Open Board* con el tablero abierto va a él.
+
+### Cambiado
+- Soltar en otra columna es **un** paso de `⌘Z` aunque cambie de estado y de sitio a la vez:
+  lo devuelve a su columna y a su sitio, y la barra de estado dice *Undone: move 2 tasks to
+  Doing*, no *reorder*.
+
+### Detalles
+- Por dentro, un lote de comandos puede llevar ahora *colocar* además de cambiar: se aplica
+  detrás de todo lo demás, porque las vecinas se buscan en el estado en que la tarea ha
+  quedado.
+- **Formato:** ninguno. El tablero no guarda nada propio: agrupar y ordenar una columna es
+  configurar el estado, como en la ventana.
+
+## [2.16.0]
+
+Menor sin cambio de formato: deshacer todo, no sólo el borrado. Es la P15 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **`⌘Z` en la lista deshace lo último que se hizo**, sea lo que sea: completar, mover de
+  estado, cambiar la prioridad, marcar, reordenar, pulsar una casilla, editar en el
+  diálogo, crear —también desde el editor, `⌘⌥R` o un TODO— o borrar. Sobre una tarea o
+  sobre una selección entera, que se deshace de una vez. Se guardan los últimos 100 pasos
+  o 10.000 tareas entre todos, lo que llegue antes.
+- **`⌘⇧Z` lo rehace.** Hacer algo nuevo tira lo que quedaba por rehacer, como en un
+  editor.
+- **La barra de estado dice qué se deshizo**: *Undone: move 3 tasks to Done*. Hace falta
+  porque lo que vuelve puede no estar a la vista: deshacer un *Move To* trae las tareas de
+  vuelta desde otra pestaña. Si ya no quedaba nada que deshacer —las tareas cambiaron
+  después—, lo dice también.
+
+### Cambiado
+- **Cada repositorio tiene su historia.** `⌘Z` deshace lo último del repositorio que se
+  está mirando, nunca algo de otro que no se ve; lo de los demás espera a que se vuelva a
+  ellos. Lo hecho buscando en todos se deshace desde el repositorio donde se hizo y desde
+  el de las tareas.
+- **Deshacer devuelve lo que se cambió y nada más**, campo a campo: si entretanto un
+  agente le cambió el cuerpo a la tarea que se completó, deshacer la reabre y el cuerpo
+  del agente se queda. Y devuelve también las fechas —la de edición y la de cierre—, así
+  que una tarea vuelve a su grupo de fecha.
+- El *Undo* del aviso de borrar deshace **ese** borrado aunque después se hayan hecho
+  otras cosas. Antes sólo valía mientras fuera lo último.
+- Lo que hace un agente por las herramientas MCP **no entra** en la pila: `⌘Z` es del
+  usuario, y deshacer lo propio no se lleva lo del agente.
+
+### Detalles
+- El límite de 10.000 tareas del borrado vale ahora para cualquier gesto: por encima, el
+  aviso dice que no hay vuelta y `⌘Z` no deshace lo de antes de ese repositorio. Vaciar o
+  quitar un repositorio olvida su historia.
+- Reordenar se deshace volviendo a poner la tarea **entre las mismas dos vecinas**, no con
+  su número de orden de antes: colocarla puede haber reespaciado el estado entero.
+- **Formato:** ninguno. La pila vive en memoria y se pierde al cerrar el proyecto.
+
 ## [2.15.0]
 
 Menor: anclar un bloque de código, no sólo una línea. Es la P12 de

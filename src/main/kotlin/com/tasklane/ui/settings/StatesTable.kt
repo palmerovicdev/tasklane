@@ -13,7 +13,9 @@ import javax.swing.JTable
 
 /**
  * Tabla de estados: nombre, cuál es el destino por defecto, cuál cierra la tarea y
- * cómo agrupa.
+ * cómo agrupa. Y desde la 2.17.1, las casillas de cada estado que son **de la persona** y
+ * no del proyecto —si sale en el tablero, si la cuenta la barra de estado—: ver
+ * [PersonalColumn].
  *
  * Añadir y quitar los pone [ToolbarDecorator] sobre el `EditableModel` que
  * `ListTableModel` ya implementa, sustituidos porque ambos necesitan decisiones que la
@@ -25,15 +27,16 @@ internal class StatesTable(
     private val onChanged: () -> Unit,
     /** Devuelve `false` para cancelar el borrado. Ahí es donde vive la reasignación. */
     private val onRemove: (StateRow) -> Boolean,
+    /** Van detrás de *Terminal*, con las otras casillas. */
+    personal: List<PersonalColumn> = emptyList(),
 ) {
 
     private val model = ListTableModel<StateRow>(
-        HandleColumn<StateRow>(),
-        NameColumn(),
-        DefaultColumn(),
-        TerminalColumn(),
-        GroupingColumn(),
-        AnchorColumn(),
+        *(
+            listOf<ColumnInfo<StateRow, *>>(HandleColumn<StateRow>(), NameColumn(), DefaultColumn(), TerminalColumn()) +
+                personal.map { PersonalColumnInfo(it) } +
+                listOf(GroupingColumn(), AnchorColumn())
+            ).toTypedArray(),
     ).apply {
         // Sin ordenación por columna: los índices de vista y de modelo coinciden, que
         // es de lo que dependen el marcado de problemas y el reordenar a mano.
@@ -73,6 +76,14 @@ internal class StatesTable(
 
     fun markProblems(rows: Set<Int>) {
         problemRows = rows
+        table.repaint()
+    }
+
+    /**
+     * Vuelve a pintar las casillas personales, que pueden depender de otra columna: lo que
+     * cuenta la barra de estado de fábrica son los estados no terminales.
+     */
+    fun refresh() {
         table.repaint()
     }
 
@@ -141,6 +152,18 @@ internal class StatesTable(
         }
     }
 
+    private inner class PersonalColumnInfo(private val column: PersonalColumn) : ColumnInfo<StateRow, Boolean>(column.name) {
+        override fun valueOf(item: StateRow): Boolean = column.get(item)
+        override fun getColumnClass(): Class<*> = Boolean::class.javaObjectType
+        override fun isCellEditable(item: StateRow): Boolean = true
+        override fun getWidth(table: JTable): Int = JBUI.scale(column.width)
+        override fun getTooltipText(): String = column.tooltip
+        override fun setValue(item: StateRow, value: Boolean) {
+            column.set(item, value)
+            onChanged()
+        }
+    }
+
     private inner class GroupingColumn : EnumColumn<StateRow, Grouping>(
         TasklaneBundle.message("settings.column.grouping"),
         Grouping.entries.toTypedArray(),
@@ -174,3 +197,19 @@ internal class StatesTable(
         const val PREFERRED_HEIGHT = 160
     }
 }
+
+/**
+ * Una casilla por estado que es de la persona y no del proyecto (2.17.1): si el estado sale
+ * en el tablero, si lo cuenta la barra de estado. Va en la tabla de estados porque es **por
+ * estado**, y una fila de casillas aparte repetía los nombres en otro orden. Pero su valor no
+ * viaja en [StateRow], que es lo que se comparte con el equipo en `tasklane.xml`: lo lee y lo
+ * escribe quien la pone, la página de ajustes, que lo guarda en `workspace.xml`.
+ */
+internal class PersonalColumn(
+    val name: String,
+    val tooltip: String,
+    /** Ancho en píxeles lógicos: el de la cabecera, que es lo más largo que tiene. */
+    val width: Int,
+    val get: (StateRow) -> Boolean,
+    val set: (StateRow, Boolean) -> Unit,
+)

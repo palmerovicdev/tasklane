@@ -51,10 +51,17 @@ internal object RowClicks {
 
             override fun mouseMoved(e: MouseEvent) {
                 // El asa de una pestaña a mano va primero: es el único sitio donde
-                // arrastrar reordena en vez de seleccionar texto (2.11.0).
+                // arrastrar reordena en vez de seleccionar texto (2.11.0). En el tablero
+                // lleva además la tarjeta a otra columna (2.17.0), y el tooltip lo dice.
                 if (renderer.isOnHandle(tree, e.point)) {
                     tree.cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
-                    tree.toolTipText = TasklaneBundle.message("toolwindow.row.reorder.tooltip")
+                    tree.toolTipText = TasklaneBundle.message(
+                        when {
+                            !renderer.movable -> "toolwindow.row.reorder.tooltip"
+                            renderer.reorderable -> "board.card.grip.reorder.tooltip"
+                            else -> "board.card.grip.tooltip"
+                        },
+                    )
                     shots.over(null)
                     hoveredAnchor = null
                     return

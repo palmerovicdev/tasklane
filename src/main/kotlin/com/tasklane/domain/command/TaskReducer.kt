@@ -159,12 +159,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
 
             is TaskCommand.Batch -> batch(subject, command)
 
-            is TaskCommand.Restore -> {
-                // Sólo las que no están: deshacer dos veces —el aviso y `⌘Z`— no duplica.
-                val present = subject.tasks.mapTo(HashSet()) { it.id }
-                val back = command.tasks.filter { it.id !in present }.map { restored(it, config) }
-                if (back.isEmpty()) nothing(config) else Plan(listOf(Mutation.Upsert(back)), config)
-            }
+            is TaskCommand.Revert -> revert(subject, command.change)
 
             is TaskCommand.CreateMany -> {
                 // Un orden por tarea, seguidos y en el orden en que llegan: pedirle al
@@ -352,7 +347,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         is TaskCommand.ToggleCheck -> listOf(command.id)
         is TaskCommand.Move -> listOf(command.id)
         is TaskCommand.Batch -> command.commands.flatMapTo(LinkedHashSet()) { targetsOf(it) }.toList()
-        is TaskCommand.Restore -> command.tasks.map { it.id }
+        is TaskCommand.Revert -> command.change.rows.map { it.id } + command.change.moves.map { it.id }
         is TaskCommand.RelinkAnchors -> command.ids
         else -> emptyList()
     }
@@ -380,6 +375,7 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         subject.tasks.associateByTo(current) { it.id }
         val changed = LinkedHashSet<TaskId>()
         val deleted = LinkedHashSet<TaskId>()
+        val placed = ArrayList<Mutation.Place>()
 
         for (sub in command.commands) {
             val mine = targetsOf(sub).mapNotNull { current[it] }
@@ -397,6 +393,11 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
                         deleted += it
                     }
 
+                    // Colocar no cambia nada que el reducer vea: el `ord` lo pone el
+                    // almacén, mirando las vecinas **del estado en que la tarea ha
+                    // quedado**. Por eso va al final, detrás de las escrituras.
+                    is Mutation.Place -> placed += mutation
+
                     // Ningún comando sobre tareas existentes describe un cambio de
                     // proyecto; si alguno empezara a hacerlo, un lote que lo tragara en
                     // silencio sería un cambio que no llega al disco.
@@ -408,15 +409,102 @@ class TaskReducer(private val clock: Clock = Clock.systemUTC()) {
         val mutations = buildList {
             if (changed.isNotEmpty()) add(Mutation.Upsert(changed.map { current.getValue(it) }))
             if (deleted.isNotEmpty()) add(Mutation.Delete(deleted.toList()))
+            placed.filterTo(this) { it.id !in deleted }
         }
         return Plan(mutations, config)
     }
 
     /**
-     * Una tarea borrada, lista para volver. Tal cual, salvo si entretanto se quitó su
-     * estado o su prioridad de los ajustes: entonces se aparca en la de por defecto con
-     * la marca que la devuelve sola si vuelve, igual que hace la renormalización. Sin
-     * esto volvería a un estado que no pinta ninguna pestaña, que es seguir borrada.
+     * Deshace un [Change]. Ver [TaskCommand.Revert] para qué le pasa a cada fila.
+     *
+     * [Subject.tasks] son las tareas **como están ahora**: lo que el cambio nombra y ya no
+     * existe no está, y es lo que decide si una fila borrada vuelve y si una creada se va.
+     */
+    private fun revert(subject: Subject, change: Change): Plan {
+        val config = subject.config
+        val current = HashMap<TaskId, Task>(subject.tasks.size * 2)
+        subject.tasks.associateByTo(current) { it.id }
+        val back = ArrayList<Task>()
+        val gone = ArrayList<TaskId>()
+
+        for (row in change.rows) {
+            val now = current[row.id]
+            val before = row.before
+            val after = row.after
+            when {
+                before == null -> if (now != null) gone += row.id
+                after == null -> if (now == null) back += restored(before, config)
+                now != null -> {
+                    val reverted = unchange(now, after, before)
+                    if (reverted !== now) back += restored(reverted, config)
+                }
+            }
+        }
+
+        val mutations = buildList {
+            if (back.isNotEmpty()) add(Mutation.Upsert(back))
+            if (gone.isNotEmpty()) add(Mutation.Delete(gone))
+            change.moves
+                .filter { it.id in current && (it.above != null || it.below != null) }
+                .forEach { add(Mutation.Place(it.repo, it.id, it.above, it.below)) }
+        }
+        return Plan(mutations, config)
+    }
+
+    /**
+     * [now] con lo que cambió de [after] a [before] **deshecho donde nadie lo ha vuelto a
+     * tocar**: cada campo vuelve a su valor de [before] sólo si sigue valiendo lo de
+     * [after]. Devuelve [now] tal cual —la misma instancia— si no hay nada que devolver.
+     *
+     * Campo a campo y no la fila entera porque entre el gesto y el `⌘Z` puede haber
+     * escrito alguien que no está en la pila: un agente por MCP, un fichero que se
+     * renombra y arrastra las anclas, un estado que se reasigna en los ajustes. Devolver
+     * la fila entera se llevaría eso por delante sin que nadie lo pidiera.
+     *
+     * `updatedAt` es un campo más, y es lo que hace que deshacer una edición devuelva la
+     * tarea a su grupo de fecha. El cuerpo se deshace con lo que se deriva de él, que es
+     * lo de [before]. El `ord` no se toca: ver [Change.moves].
+     */
+    private fun unchange(now: Task, after: Task, before: Task): Task {
+        fun <T> back(current: T, was: T, then: T): T = if (then != was && current == then) was else current
+
+        val body = before.body != after.body && now.body == after.body
+        val extra = if (after.extra == before.extra) {
+            now.extra
+        } else {
+            val keys = after.extra.keys + before.extra.keys
+            val out = LinkedHashMap(now.extra)
+            for (key in keys) {
+                val was = before.extra[key]
+                if (was != after.extra[key] && now.extra[key] == after.extra[key]) {
+                    if (was == null) out -= key else out[key] = was
+                }
+            }
+            out
+        }
+        val next = now.copy(
+            body = if (body) before.body else now.body,
+            links = if (body) before.links else now.links,
+            attachments = if (body) before.attachments else now.attachments,
+            stateId = back(now.stateId, before.stateId, after.stateId),
+            priorityId = back(now.priorityId, before.priorityId, after.priorityId),
+            updatedAt = back(now.updatedAt, before.updatedAt, after.updatedAt),
+            completedAt = back(now.completedAt, before.completedAt, after.completedAt),
+            tags = back(now.tags, before.tags, after.tags),
+            anchors = back(now.anchors, before.anchors, after.anchors),
+            dueDate = back(now.dueDate, before.dueDate, after.dueDate),
+            bookmarked = back(now.bookmarked, before.bookmarked, after.bookmarked),
+            extra = extra,
+        )
+        return if (next == now) now else next
+    }
+
+    /**
+     * Una tarea que vuelve —borrada, o deshecha—, lista para escribirse. Tal cual, salvo si
+     * entretanto se quitó su estado o su prioridad de los ajustes: entonces se aparca en la
+     * de por defecto con la marca que la devuelve sola si vuelve, igual que hace la
+     * renormalización. Sin esto volvería a un estado que no pinta ninguna pestaña, que es
+     * seguir borrada.
      */
     private fun restored(task: Task, config: TasklaneConfig): Task {
         var next = task

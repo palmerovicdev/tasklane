@@ -23,17 +23,20 @@ import com.intellij.ui.CheckboxTree
 import com.intellij.ui.CheckboxTreeBase
 import com.intellij.ui.CheckedTreeNode
 import com.intellij.ui.DocumentAdapter
+import com.intellij.ui.JBColor
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SearchTextField
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
+import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.tree.TreeUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneConfigService
 import com.tasklane.diagnostics.TasklaneMetrics
+import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.export.ExportScope
 import com.tasklane.domain.model.GroupKey
@@ -66,10 +69,15 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
+import java.awt.BasicStroke
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.Point
 import java.awt.Toolkit
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import java.awt.event.InputEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -103,12 +111,22 @@ import javax.swing.tree.TreeSelectionModel
  * [TasklaneDataKeys.PANEL]. Por eso los métodos de edición son públicos —son la
  * superficie que consumen esas acciones— y por eso el panel implementa
  * `uiDataSnapshot`.
+ *
+ * **También es una columna del tablero** (2.17.0), con [board] puesto: las mismas
+ * tarjetas, el mismo menú y los mismos atajos, sin pestañas, barra ni buscador —los pone
+ * el tablero una vez para todas— y con una [ColumnHeader] arriba. Es la misma clase a
+ * propósito: todo lo que la lista aprenda lo aprende también el tablero.
  */
 internal class TasklanePanel(
     private val project: Project,
     val stateId: StateId,
-    /** Cómo se pide cambiar de estado. Lo atiende [TasklaneWindow], que es quien tiene las tarjetas. */
+    /**
+     * Cómo se pide cambiar de estado. Lo atiende [TasklaneWindow], que es quien tiene las
+     * tarjetas; en el tablero, pasar a la columna de al lado.
+     */
     private val onSelectState: (StateId) -> Unit,
+    /** El tablero, si esta lista es una de sus columnas. `null` en la tool window. */
+    private val board: BoardHost? = null,
 ) : SimpleToolWindowPanel(true, true), Disposable {
 
     private val service = TaskService.getInstance(project)
@@ -176,10 +194,30 @@ internal class TasklanePanel(
          */
         override fun getScrollableTracksViewportWidth(): Boolean = true
 
-        /** La línea de soltar de un arrastre, encima de las tarjetas. */
+        /**
+         * La línea de soltar de un arrastre, encima de las tarjetas: la de reordenar aquí, o
+         * la de unas tarjetas que llegan de otra columna del tablero.
+         */
         override fun paint(g: java.awt.Graphics) {
             super.paint(g)
             reorder?.paint(g)
+            landing?.lineY?.let { y ->
+                g.color = DROP_COLOR
+                g.fillRect(0, y - JBUI.scale(1), width, JBUI.scale(2))
+            }
+        }
+
+        /**
+         * La selección de justo antes de pulsar (2.17.0). El `TreeUI` la reduce a la fila
+         * pulsada en cuanto llega la pulsación, antes que cualquier oyente nuestro; el asa de
+         * una tarjeta que es parte de una selección tiene que poder llevársela entera. Ver
+         * [CardReorder].
+         */
+        var pressedSelection: List<TreePath> = emptyList()
+
+        override fun processMouseEvent(e: MouseEvent) {
+            if (e.id == MouseEvent.MOUSE_PRESSED) pressedSelection = selectionPaths.orEmpty().toList()
+            super.processMouseEvent(e)
         }
 
         /** El ancho con el que se midieron las filas que hay guardadas. */
@@ -257,6 +295,21 @@ internal class TasklanePanel(
     /** Los estados, encima del buscador. Cada panel pinta la suya y marca la propia. */
     private val tabs = StateTabRow(onSelectState)
 
+    /** En el tablero, en lugar de [tabs] y del buscador. Ver [ColumnHeader]. */
+    private val header: ColumnHeader? = board?.let { ColumnHeader() }
+
+    /**
+     * Dónde caerían unas tarjetas que llegan de otra columna del tablero, mientras pasan por
+     * encima de ésta; `null` el resto del tiempo. Ver [carryOver].
+     */
+    private data class Landing(val above: TaskId?, val below: TaskId?, val lineY: Int?)
+
+    private var landing: Landing? = null
+
+    /** Lo que se pidió seleccionar en cuanto llegue a esta columna. Ver [follow]. */
+    private var following: Set<TaskId> = emptySet()
+    private var followTries = 0
+
     /**
      * Scope propio porque la vida de este panel es más corta que la del proyecto.
      * Se cancela en [dispose], que la tool window invoca vía Disposer.
@@ -326,6 +379,7 @@ internal class TasklanePanel(
     init {
         renderer.images = cardImages
         renderer.snippets = cardSnippets
+        renderer.movable = board != null
         tree.isRootVisible = false
         tree.showsRootHandles = false
         // Ni el árbol ni el buscador llevan etiqueta visible —el sitio manda—, así que
@@ -395,13 +449,13 @@ internal class TasklanePanel(
         scroll.viewport.addChangeListener { loadVisibleSentinel() }
 
         setContent(buildContent())
-        toolbar = buildToolbar()
+        if (header == null) toolbar = buildToolbar() else header.target(tree)
         installPopupSelection()
         PopupHandler.installPopupMenu(tree, CONTEXT_MENU_GROUP, ActionPlaces.TOOLWINDOW_POPUP)
 
-        installSearchField()
+        if (board == null) installSearchField()
         installShortcuts()
-        reorder = CardReorder(tree, renderer) { task, above, below ->
+        reorder = CardReorder(tree, renderer, board?.let(::carryTo), { tree.pressedSelection }) { task, above, below ->
             service.apply(TaskCommand.Move(task.repo, task.id, above, below))
         }.also { it.install() }
         RowClicks.install(tree, renderer, project, cardSnippets)
@@ -435,6 +489,12 @@ internal class TasklanePanel(
             }
         }
 
+        // En el tablero no hay buscador en la columna, ni se atiende «enséñame esta tarea»:
+        // eso abre la tool window, y lo hacen sus pestañas.
+        if (board == null) listenToWindow()
+    }
+
+    private fun listenToWindow() {
         uiScope.launch {
             // La consulta es de la ventana, no de la pestaña: se escribe en una y las
             // demás tienen que enseñar lo mismo al cambiar de tab.
@@ -486,12 +546,12 @@ internal class TasklanePanel(
         searchField.border = JBUI.Borders.empty(2, 4)
         // Pestañas y buscador van juntos arriba, en ese orden: la fila dice qué
         // estado se está mirando y el campo acota lo que se ve dentro de él.
-        val header = JPanel(BorderLayout()).apply {
+        val top = header ?: JPanel(BorderLayout()).apply {
             isOpaque = false
             add(tabs, BorderLayout.NORTH)
             add(searchField, BorderLayout.CENTER)
         }
-        add(header, BorderLayout.NORTH)
+        add(top, BorderLayout.NORTH)
         add(scroll, BorderLayout.CENTER)
         add(archiveFooter, BorderLayout.SOUTH)
     }
@@ -607,34 +667,50 @@ internal class TasklanePanel(
         installDoubleClick()
         installGroupToggle()
         installTextSelection()
-        installUndoDelete()
+        installUndo()
     }
 
     /**
-     * `⌘Z` en la lista devuelve lo último que se borró (2.9.0), lo mismo que el *Undo*
-     * del aviso.
+     * `⌘Z` en la lista deshace lo último que se hizo en este repositorio, y `⌘⇧Z` lo rehace
+     * (2.16.0; hasta entonces sólo se deshacía un borrado). Ver `UndoHistory`.
      *
-     * Toma el atajo de *Undo* del keymap, y se **apaga** cuando no hay nada que devolver:
-     * una acción deshabilitada no se queda con la pulsación, así que sin un borrado
-     * pendiente `⌘Z` sigue siendo de quien fuera. Lo mismo que `⌘C` en
+     * Toman los atajos de *Undo* y *Redo* del keymap, y se **apagan** cuando no hay nada que
+     * hacer: una acción deshabilitada no se queda con la pulsación, así que sin nada que
+     * deshacer `⌘Z` sigue siendo de quien fuera. Lo mismo que `⌘C` en
      * [installTextSelection].
      */
-    private fun installUndoDelete() {
+    private fun installUndo() {
+        undoAction(IdeActions.ACTION_UNDO, KeyEvent.VK_Z, shift = false, can = service::canUndo, run = service::undo)
+        undoAction(IdeActions.ACTION_REDO, KeyEvent.VK_Z, shift = true, can = service::canRedo, run = service::redo)
+    }
+
+    private fun undoAction(
+        id: String,
+        key: Int,
+        shift: Boolean,
+        can: (RepoKey) -> Boolean,
+        run: (RepoKey) -> Unit,
+    ) {
         object : DumbAwareAction() {
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
 
             override fun update(e: AnActionEvent) {
-                e.presentation.isEnabled = service.canUndoDelete()
+                e.presentation.isEnabled = can(snapshot.activeRepo)
             }
 
-            override fun actionPerformed(e: AnActionEvent) = service.undoDelete()
-        }.registerCustomShortcutSet(undoShortcut(), tree, this)
+            override fun actionPerformed(e: AnActionEvent) = run(snapshot.activeRepo)
+        }.registerCustomShortcutSet(ideShortcut(id, key, shift), tree, this)
     }
 
-    private fun undoShortcut(): ShortcutSet =
-        ActionManager.getInstance().getAction(IdeActions.ACTION_UNDO)?.shortcutSet
+    private fun ideShortcut(id: String, key: Int, shift: Boolean): ShortcutSet =
+        ActionManager.getInstance().getAction(id)?.shortcutSet
             ?.takeIf { it.shortcuts.isNotEmpty() }
-            ?: CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_Z, Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx))
+            ?: CustomShortcutSet(
+                KeyStroke.getKeyStroke(
+                    key,
+                    Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx or (if (shift) InputEvent.SHIFT_DOWN_MASK else 0),
+                ),
+            )
 
     /**
      * `⌘C` copia el texto marcado dentro de una tarjeta, y `Escape` lo desmarca.
@@ -774,19 +850,6 @@ internal class TasklanePanel(
         return CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, modifiers))
     }
 
-    /**
-     * El atajo de la búsqueda, resuelto igual que lo resuelve [localShortcut]: lo del
-     * keymap si el usuario le asignó algo, y si no el local. Se saca aparte porque el
-     * campo tiene que **escribirlo** y el panel tiene que **registrarlo**, y los dos
-     * tienen que decir lo mismo.
-     */
-    private fun searchShortcut(): ShortcutSet {
-        val assigned = ActionManager.getInstance().getAction(ACTION_FOCUS_SEARCH)?.shortcutSet
-        if (assigned != null && assigned.shortcuts.isNotEmpty()) return assigned
-        val menuMask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
-        return CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_K, menuMask))
-    }
-
     private fun localShortcut(
         actionId: String,
         fallback: ShortcutSet,
@@ -813,7 +876,11 @@ internal class TasklanePanel(
         snapshot = snap
         list.pager = pager
         list.outline = outline
-        tabs.update(snap.config.states, counts, stateId)
+        if (header != null) {
+            header.show(snap.config.state(stateId)?.name.orEmpty(), counts[stateId] ?: 0)
+        } else {
+            tabs.update(snap.config.states, counts, stateId)
+        }
 
         // Una captura pegada puede rellenar un hueco que antes no estaba.
         cardImages.forgetMissing()
@@ -847,6 +914,7 @@ internal class TasklanePanel(
             pendingReveal = emptySet()
             reveal(pending, retry = false)
         }
+        if (following.isNotEmpty()) chase()
     }
 
     private fun updateArchiveFooter(snap: TasklaneSnapshot, found: SearchResults, archive: ViewService.Archive, hidden: Int) {
@@ -1193,7 +1261,11 @@ internal class TasklanePanel(
         tree.requestFocusInWindow()
     }
 
+    /** La lista, para quien tenga que darle el foco sin pedirlo: la pestaña del tablero al abrirse. */
+    val focusTarget: JComponent get() = tree
+
     fun focusSearch() {
+        if (board != null) return board.focusSearch()
         searchField.textEditor.requestFocusInWindow()
         searchField.textEditor.selectAll()
     }
@@ -1373,7 +1445,11 @@ internal class TasklanePanel(
      * selección puede mezclar filas de varios.
      */
     fun moveSelectedTo(target: StateId) {
-        service.applyAll(selectedTasks().map { TaskCommand.ChangeState(it.repo, it.id, target) })
+        val tasks = selectedTasks()
+        service.applyAll(tasks.map { TaskCommand.ChangeState(it.repo, it.id, target) })
+        // En el tablero la selección se va con ellas a su columna (2.17.0). En la tool
+        // window no: sería cambiar de pestaña sin pedirlo.
+        if (target != stateId && tasks.isNotEmpty()) board?.follow(target, tasks.mapTo(HashSet()) { it.id })
     }
 
     /**
@@ -1382,9 +1458,11 @@ internal class TasklanePanel(
      * **No da la vuelta**, ni para mover ni para cambiar de pestaña. Pasar de la última
      * a la primera convertiría «avanza esta tarea» en «devuélvela al principio», que es
      * lo contrario y sin decirlo.
+     *
+     * En el tablero, sólo entre los estados que tienen columna (2.17.1).
      */
     fun neighbourState(delta: Int): StateId? {
-        val all = states
+        val all = board?.let { host -> states.filter { host.shows(it.id) } } ?: states
         val index = all.indexOfFirst { it.id == stateId }
         if (index < 0) return null
         return all.getOrNull(index + delta)?.id
@@ -1393,6 +1471,163 @@ internal class TasklanePanel(
     /** Cambia de pestaña al estado vecino. Es el `Alt+←/→` que se perdió al bajarlas al panel. */
     fun selectNeighbourState(delta: Int) {
         neighbourState(delta)?.let(onSelectState)
+    }
+
+    // ------------------------------------------------------- el tablero (2.17.0)
+
+    /** Avisa cuando la lista coge el foco. El tablero lo usa para saber qué columna es la activa. */
+    fun whenFocused(run: () -> Unit) {
+        tree.addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) = run()
+        })
+    }
+
+    /** Lo que el asa de esta columna le pregunta al tablero. Ver [CardCarry]. */
+    private fun carryTo(host: BoardHost) = object : CardCarry {
+        override fun over(tasks: List<Task>, screen: Point) = host.carry(this@TasklanePanel, tasks, screen)
+        override fun drop(tasks: List<Task>, screen: Point) = host.drop(this@TasklanePanel, tasks, screen)
+    }
+
+    /**
+     * Unas tarjetas de otra columna pasan por encima de ésta, con el ratón en [screen]; o se
+     * han ido, con `null`. Se recuadra la columna, y si va a mano, la línea dice entre qué
+     * dos tarjetas caerían.
+     */
+    fun carryOver(screen: Point?) {
+        screen?.let(::nudge)
+        val next = screen?.let(::landingAt)
+        if (next == landing) return
+        landing = next
+        repaint()
+    }
+
+    /**
+     * Cerca del borde de arriba —o sobre la cabecera— o del de abajo, la lista se desplaza
+     * hacia ese lado: una columna larga tiene que poder recorrerse sin soltar. Un paso por
+     * movimiento del ratón.
+     */
+    private fun nudge(screen: Point) {
+        val viewport = scroll.viewport
+        if (!viewport.isShowing) return
+        val point = Point(screen).also { SwingUtilities.convertPointFromScreen(it, viewport) }
+        val edge = JBUI.scale(NUDGE_EDGE)
+        val step = when {
+            point.y < edge -> -JBUI.scale(NUDGE_STEP)
+            point.y >= viewport.height - edge -> JBUI.scale(NUDGE_STEP)
+            else -> return
+        }
+        val last = (tree.height - viewport.height).coerceAtLeast(0)
+        val position = viewport.viewPosition
+        val y = (position.y + step).coerceIn(0, last)
+        if (y != position.y) viewport.viewPosition = Point(position.x, y)
+    }
+
+    /**
+     * Dónde caerían, con el ratón en [screen].
+     *
+     * **Sólo se elige sitio donde el sitio significa algo**: a mano, sin buscar y sin
+     * grupos. Ordenada sola, la columna decide dónde va cada tarea por su prioridad y su
+     * fecha, y una línea entre dos tarjetas prometería un sitio que no se va a respetar;
+     * agrupada, el grupo sale de la tarea y no de dónde se suelte —lo mismo que al
+     * reordenar, ver [CardReorder]—. En esos casos el destino es la columna entera.
+     */
+    private fun landingAt(screen: Point): Landing {
+        val whole = Landing(null, null, null)
+        if (!renderer.reorderable || grouping != Grouping.NONE) return whole
+        val tasks = CardReorder.tasksOf(root)
+        if (tasks.isEmpty()) return whole
+
+        val point = Point(screen).also { SwingUtilities.convertPointFromScreen(it, tree) }
+        // Por encima de la lista —la cabecera— es el principio.
+        if (point.y < 0) {
+            val first = tree.getPathBounds(TreePath(tasks.first().path)) ?: return whole
+            return Landing(null, tasks.first().task.id, first.y)
+        }
+        val row = rowAtHeight(tree, point.y)
+        // Por debajo de la última, o sobre el centinela de la página siguiente, es después
+        // de la última que se ve: el almacén busca la que de verdad le sigue.
+        val over = tree.getPathForRow(row)?.lastPathComponent as? TaskNode
+        val bounds = over?.let { tree.getRowBounds(row) }
+        if (over == null || bounds == null) {
+            val last = tree.getPathBounds(TreePath(tasks.last().path)) ?: return whole
+            return Landing(tasks.last().task.id, null, last.y + last.height)
+        }
+        val after = point.y >= bounds.y + bounds.height / 2
+        val at = tasks.indexOf(over) + if (after) 1 else 0
+        return Landing(
+            tasks.getOrNull(at - 1)?.task?.id,
+            tasks.getOrNull(at)?.task?.id,
+            if (after) bounds.y + bounds.height else bounds.y,
+        )
+    }
+
+    /**
+     * Se sueltan aquí [tasks], traídas de otra columna: pasan a este estado, y si se eligió
+     * sitio, quedan en él, en el orden en que venían. **Un** lote, así que un `⌘Z` las
+     * devuelve a su columna y a su sitio. Después quedan seleccionadas aquí, que es la única
+     * forma de ver dónde han caído en una columna que se ordena sola.
+     */
+    fun receive(tasks: List<Task>) {
+        val spot = landing
+        carryOver(null)
+        val moving = tasks.filter { it.stateId != stateId }
+        if (moving.isEmpty() || moving.any { service.isReadOnly(it.repo) }) return
+
+        val placing = if (spot?.above == null && spot?.below == null) {
+            emptyList()
+        } else {
+            // Una detrás de otra: la primera entre las dos vecinas, y cada siguiente debajo
+            // de la anterior. Colocarlas todas en el mismo hueco las dejaría en cualquier orden.
+            var above = spot.above
+            moving.map { task -> TaskCommand.Move(task.repo, task.id, above, spot.below).also { above = task.id } }
+        }
+        val commands: List<RepoScoped> = moving.map { TaskCommand.ChangeState(it.repo, it.id, stateId) } + placing
+        service.applyAll(commands)
+        follow(moving.mapTo(HashSet()) { it.id })
+    }
+
+    /**
+     * Selecciona [ids] en esta columna en cuanto estén, y le da el foco. Las tareas llegan en
+     * un repintado posterior —la lista se rehace fuera del EDT—, así que se apuntan y se
+     * buscan al final de cada uno, unas pocas veces: si un filtro las esconde aquí, no van
+     * a llegar nunca, y buscarlas para siempre dejaría una selección pendiente de otra época.
+     */
+    fun follow(ids: Set<TaskId>) {
+        following = ids
+        followTries = FOLLOW_TRIES
+    }
+
+    private fun chase() {
+        val ids = following
+        if (!list.reveal(ids)) {
+            if (--followTries <= 0) following = emptySet()
+            return
+        }
+        following = emptySet()
+        metrics.time(TasklaneMetrics.Op.RENDER) { resync { list.sync() } }
+        val paths = taskNodes().filter { it.task.id in ids }.map { TreePath(it.path) }.toList()
+        if (paths.isEmpty()) return
+        tree.selectionPaths = paths.toTypedArray()
+        TreeUtil.showRowCentered(tree, tree.getRowForPath(paths.first()), false, true)
+        tree.requestFocusInWindow()
+    }
+
+    /** El recuadro de la columna sobre la que se van a soltar tarjetas de otra. Ver [carryOver]. */
+    override fun paintChildren(g: Graphics) {
+        super.paintChildren(g)
+        if (landing == null) return
+        val g2 = g.create() as Graphics2D
+        try {
+            val config = GraphicsUtil.setupAAPainting(g2)
+            val stroke = JBUI.scale(2)
+            g2.color = DROP_COLOR
+            g2.stroke = BasicStroke(stroke.toFloat())
+            val arc = JBUI.scale(8)
+            g2.drawRoundRect(stroke / 2, stroke / 2, width - stroke, height - stroke, arc, arc)
+            config.restore()
+        } finally {
+            g2.dispose()
+        }
     }
 
     override fun dispose() {
@@ -1414,8 +1649,24 @@ internal class TasklanePanel(
         private const val ACTION_MOVE_UP = "Tasklane.MoveUp"
         private const val ACTION_MOVE_DOWN = "Tasklane.MoveDown"
 
-        /** Clave del historial del campo de búsqueda en `PropertiesComponent`. */
-        private const val HISTORY_PROPERTY = "Tasklane.Search"
+        /**
+         * Clave del historial del campo de búsqueda en `PropertiesComponent`. La comparten el
+         * de la ventana y el del tablero: se busca lo mismo en los dos sitios.
+         */
+        internal const val HISTORY_PROPERTY = "Tasklane.Search"
+
+        /**
+         * El atajo de la búsqueda, resuelto igual que lo resuelve [localShortcut]: lo del
+         * keymap si el usuario le asignó algo, y si no el local. Se saca aparte porque el
+         * campo tiene que **escribirlo** y el panel tiene que **registrarlo**, y los dos
+         * tienen que decir lo mismo. Lo usa también el buscador del tablero (2.17.0).
+         */
+        internal fun searchShortcut(): ShortcutSet {
+            val assigned = ActionManager.getInstance().getAction(ACTION_FOCUS_SEARCH)?.shortcutSet
+            if (assigned != null && assigned.shortcuts.isNotEmpty()) return assigned
+            val menuMask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
+            return CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_K, menuMask))
+        }
 
         /**
          * Lo más estrecha que se deja poner la ventana. Es el ancho por debajo del cual
@@ -1423,5 +1674,15 @@ internal class TasklanePanel(
          * distintivos empiezan a caerse. Ver [getMinimumSize].
          */
         private const val MIN_WIDTH = 300
+
+        /** Cuánto antes del borde empieza a desplazarse la columna arrastrando, y cuánto cada vez. Ver [nudge]. */
+        private const val NUDGE_EDGE = 32
+        private const val NUDGE_STEP = 16
+
+        /** Cuántos repintados se espera a unas tareas que se mandaron a esta columna. Ver [follow]. */
+        private const val FOLLOW_TRIES = 3
+
+        /** El de la línea de reordenar, ver [CardReorder.paint]: soltar es soltar, venga de donde venga. */
+        private val DROP_COLOR = JBColor.namedColor("DragAndDrop.borderColor", JBColor.BLUE)
     }
 }

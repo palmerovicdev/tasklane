@@ -92,6 +92,38 @@ class ManualOrderTest {
         assertEquals(listOf("m", "e", "a", "b", "c", "d"), list(db.reader, config(true)))
     }
 
+    /**
+     * Deshacer un reordenar (2.16.0): se guarda entre qué dos estaba, no su `ord`, porque
+     * colocarla puede haber reespaciado el estado entero. Éste es ese caso.
+     */
+    @Test
+    fun `deshacer un reordenar la devuelve a su sitio aunque se haya reespaciado`() = withStore { store, db ->
+        store.apply(
+            config(true),
+            listOf(Mutation.Upsert(listOf(task("a", order = 11), task("b", order = 10), task("c", order = 9)))),
+        )
+        val (above, below) = store.neighbours(TaskId("c"))!!
+        assertEquals(TaskId("b") to null, above to below)
+
+        store.move("c", "a", "b")
+        assertEquals(listOf("a", "c", "b"), list(db.reader, config(true)))
+
+        store.move("c", above?.value, below?.value)
+        assertEquals(listOf("a", "b", "c"), list(db.reader, config(true)))
+    }
+
+    @Test
+    fun `las vecinas son las de su lado de la marca`() = withStore { store, _ ->
+        store.apply(
+            config(true),
+            listOf(Mutation.Upsert(listOf(task("m", order = 100, bookmarked = true)) + seeded())),
+        )
+        assertEquals(null to TaskId("b"), store.neighbours(TaskId("a")))
+        assertEquals(null to null, store.neighbours(TaskId("m")))
+        assertEquals(TaskId("d") to null, store.neighbours(TaskId("e")))
+        assertEquals(null, store.neighbours(TaskId("nadie")))
+    }
+
     @Test
     fun `sembrar deja la lista como se estaba viendo`() = withStore { store, db ->
         val tasks = listOf(

@@ -3,7 +3,9 @@ package com.tasklane.service
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
 import com.intellij.ide.actions.RevealFileAction
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.wm.StatusBar
 import com.tasklane.data.sqlite.StoreRecovery
 import com.tasklane.data.store.LoadAlert
 import com.tasklane.domain.query.TaskQuery
@@ -43,6 +45,7 @@ import com.tasklane.data.store.TasksCodec
 import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TaskStats
 import com.tasklane.diagnostics.TasklaneMetrics
+import com.tasklane.domain.command.Change
 import com.tasklane.domain.command.Mutation
 import com.tasklane.domain.command.RepoScoped
 import com.tasklane.domain.command.TaskCommand
@@ -81,6 +84,7 @@ import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.util.Collections
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Punto único de mutación del modelo y única capa que habla con el almacén.
@@ -257,7 +261,20 @@ class TaskService(
 
     // ------------------------------------------------------------------ API
 
-    fun apply(command: TaskCommand) = metrics.time(TasklaneMetrics.Op.COMMAND) { applyNow(command) }
+    /**
+     * Aplica un comando. Si es un gesto sobre las tareas —de la lista, del diálogo, de crear
+     * desde el editor—, queda en la pila de `⌘Z` (2.16.0); lo que no toca filas, como la
+     * configuración o el repositorio activo, no.
+     *
+     * [undoable] `false` es para quien escribe sin ser el usuario: las herramientas MCP. Lo
+     * que hace un agente se ve en la lista, pero no entra en la pila del usuario. Si
+     * entrara, `⌘Z` para deshacer lo que uno acaba de mover desharía lo último que tocó el
+     * agente por detrás. Deshacer lo propio respeta lo del agente: ver
+     * [TaskCommand.Revert].
+     */
+    fun apply(command: TaskCommand, undoable: Boolean = true) = metrics.time(TasklaneMetrics.Op.COMMAND) {
+        synchronized(gate) { applyLocked(command, onChange = if (undoable) recorder(command) else null) }
+    }
 
     /**
      * La misma edición sobre varias tareas: **una** transacción y **un** snapshot.
@@ -274,7 +291,7 @@ class TaskService(
      * Lo que se aplica es [TaskCommand.Batch], así que la semántica es la de los comandos
      * sueltos por construcción.
      */
-    fun applyAll(commands: List<RepoScoped>) = applyAll(commands, onDeleted = null)
+    fun applyAll(commands: List<RepoScoped>) = applyAll(commands) { command -> recorder(command) }
 
     /**
      * Borra estas tareas y ofrece **deshacerlo** (2.9.0): un aviso con *Undo*, y `⌘Z` en
@@ -286,15 +303,18 @@ class TaskService(
      * lote cuenta filas, que es lo que decide si cabe en el gesto o va en segundo plano.
      */
     fun delete(tasks: List<Task>) {
-        applyAll(tasks.map { TaskCommand.Delete(it.repo, listOf(it.id)) }) { gone -> offerUndo(gone) }
+        applyAll(tasks.map { TaskCommand.Delete(it.repo, listOf(it.id)) }) { command ->
+            { change -> record(command, change)?.let(::offerUndo) ?: notifyForGood(change) }
+        }
     }
 
-    private fun applyAll(commands: List<RepoScoped>, onDeleted: ((List<Task>) -> Unit)?) {
+    /** @param onChange qué hacer con lo que cambió el comando que al final se aplica. */
+    private fun applyAll(commands: List<RepoScoped>, onChange: (TaskCommand) -> ((Change) -> Unit)?) {
         when {
             commands.isEmpty() -> return
             commands.size <= BULK_INLINE -> metrics.time(TasklaneMetrics.Op.COMMAND) {
                 val command = commands.singleOrNull() ?: TaskCommand.Batch(commands)
-                synchronized(gate) { applyLocked(command, onDeleted = onDeleted) }
+                synchronized(gate) { applyLocked(command, onChange = onChange(command)) }
             }
             else -> ProgressManager.getInstance().run(
                 object : ProgressTask.Backgroundable(
@@ -309,14 +329,15 @@ class TaskService(
                                 // La caché grande: una transacción de miles de filas
                                 // repartidas por todos los índices. Medido sobre 100.000
                                 // tareas, dos mil filas pasan de 965 ms a 739.
+                                val command = TaskCommand.Batch(commands)
                                 inBulk {
                                     applyLocked(
-                                        TaskCommand.Batch(commands),
+                                        command,
                                         { done, total ->
                                             indicator.checkCanceled()
                                             indicator.fraction = done.toDouble() / total.coerceAtLeast(1)
                                         },
-                                        onDeleted,
+                                        onChange(command),
                                     )
                                 }
                             }
@@ -354,8 +375,9 @@ class TaskService(
                  * cien mil guardado entero en memoria para un *Undo* que casi nadie pulsa no
                  * compensa, y pasado el tope el aviso dice que no se puede deshacer.
                  */
-                private val gone = ArrayList<Task>()
+                private var gone = Change.NONE
                 private var overflow = false
+                private val repos = LinkedHashSet<RepoKey>()
 
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = false
@@ -364,7 +386,6 @@ class TaskService(
                         // Una selección que busca en todos los repositorios puede mezclar
                         // filas de repositorios en solo lectura. Se hace la comprobación
                         // antes de borrar la primera tanda para no dejarla a medias.
-                        val repos = LinkedHashSet<RepoKey>()
                         frozen.each(query, TaskStore.FORGET_BATCH) { tasks ->
                             tasks.forEach { repos += it.repo }
                         }
@@ -390,7 +411,7 @@ class TaskService(
                                         ) { batch ->
                                             if (overflow || gone.size + batch.size > UNDO_LIMIT) {
                                                 overflow = true
-                                                gone.clear()
+                                                gone = Change.NONE
                                             } else {
                                                 gone += batch
                                             }
@@ -405,113 +426,186 @@ class TaskService(
                 }
 
                 override fun onFinished() {
-                    if (overflow) notifyDeletedForGood(total) else offerUndo(gone)
-                }
-            },
-        )
-    }
-
-    // ------------------------------------------------------------- deshacer (2.9.0)
-
-    /** Lo último que se borró, mientras se pueda deshacer, y su aviso. */
-    private class Deletion(val tasks: List<Task>, val notification: Notification)
-
-    @Volatile
-    private var lastDeletion: Deletion? = null
-
-    /** Si `⌘Z` en la lista tiene algo que devolver. */
-    fun canUndoDelete(): Boolean = lastDeletion != null
-
-    /** Devuelve lo último que se borró. Lo piden el *Undo* del aviso y `⌘Z` en la lista. */
-    fun undoDelete() {
-        val deletion = synchronized(gate) { lastDeletion.also { lastDeletion = null } } ?: return
-        deletion.notification.expire()
-        restore(deletion.tasks)
-    }
-
-    /**
-     * Vuelve a poner [tasks]. Con muchas, en segundo plano como cualquier lote, y **sin**
-     * cancelar: dejar a medias un deshacer sería un segundo borrado que nadie pidió.
-     */
-    private fun restore(tasks: List<Task>) {
-        if (tasks.size <= BULK_INLINE) {
-            apply(TaskCommand.Restore(tasks))
-            return
-        }
-        ProgressManager.getInstance().run(
-            object : ProgressTask.Backgroundable(
-                project,
-                TasklaneBundle.message("undo.progress", tasks.size),
-                false,
-            ) {
-                override fun run(indicator: ProgressIndicator) {
-                    metrics.time(TasklaneMetrics.Op.COMMAND) {
-                        synchronized(gate) { inBulk { applyLocked(TaskCommand.Restore(tasks)) } }
+                    if (overflow) {
+                        history.forget(repos + _snapshot.value.activeRepo)
+                        notifyForGood(total, deleted = true)
+                    } else if (!gone.isEmpty) {
+                        record(null, gone)?.let(::offerUndo)
                     }
                 }
             },
         )
     }
 
+    // ------------------------------------------------------- deshacer y rehacer (2.16.0)
+
+    /** Ver [UndoHistory]. */
+    private val history = UndoHistory()
+
     /**
-     * El aviso de un borrado, con *Undo*. Sustituye al del borrado anterior: sólo se
-     * deshace lo último, como en un editor, y dos avisos con *Undo* a la vez dejarían en
-     * el aire cuál devuelve qué.
+     * El aviso del último borrado, con su *Undo*. Uno a la vez: el de un borrado nuevo
+     * sustituye al anterior, porque dos avisos con *Undo* dejarían en el aire cuál devuelve
+     * qué. El borrado de antes sigue en la pila de `⌘Z`.
+     */
+    private class Notice(val step: UndoHistory.Step, val notification: Notification)
+
+    private val notice = AtomicReference<Notice?>()
+
+    /** Si `⌘Z` en la lista tiene algo que deshacer en [repo]. */
+    fun canUndo(repo: RepoKey): Boolean = !isReadOnly(repo) && history.canUndo(repo)
+
+    /** Si `⌘⇧Z` en la lista tiene algo que rehacer en [repo]. */
+    fun canRedo(repo: RepoKey): Boolean = !isReadOnly(repo) && history.canRedo(repo)
+
+    /** Deshace lo último que se hizo en [repo]. Lo pide `⌘Z` en la lista. */
+    fun undo(repo: RepoKey) {
+        if (isReadOnly(repo)) return
+        history.popUndo(repo)?.let { revert(it, redoing = false) }
+    }
+
+    /** Rehace lo último que se deshizo en [repo]. Lo pide `⌘⇧Z` en la lista. */
+    fun redo(repo: RepoKey) {
+        if (isReadOnly(repo)) return
+        history.popRedo(repo)?.let { revert(it, redoing = true) }
+    }
+
+    /**
+     * Qué hacer con lo que cambie [command]: guardarlo en la pila, si es un gesto sobre las
+     * tareas. Crear, cambiar y borrar lo son. La configuración, el catálogo, reasignar un
+     * estado desde los ajustes o arrastrar las anclas de un fichero renombrado, no: nadie
+     * los hizo desde la lista, y los ajustes tienen su propio *Cancel*.
+     */
+    private fun recorder(command: TaskCommand): ((Change) -> Unit)? = when (command) {
+        is TaskCommand.ForgetRepo -> null
+        is RepoScoped, is TaskCommand.Batch -> { change -> if (record(command, change) == null) notifyForGood(change) }
+        else -> null
+    }
+
+    /**
+     * Guarda un gesto. El paso es de los repositorios de sus tareas y del que estaba
+     * abierto: ver [UndoHistory].
+     *
+     * @return el paso, o `null` si era demasiado grande para guardarlo.
+     */
+    private fun record(command: TaskCommand?, change: Change): UndoHistory.Step? {
+        val snapshot = _snapshot.value
+        val label = UndoLabels.of(command, change, snapshot.config)
+        val text = TasklaneBundle.message(label.key, *label.args.toTypedArray())
+        val step = UndoHistory.Step(change, text, change.repos + snapshot.activeRepo)
+        return step.takeIf(history::record)
+    }
+
+    /**
+     * Deshace o rehace [step], y deja en la otra pila lo que hace falta para volver.
+     *
+     * Con muchas filas, en segundo plano como cualquier lote, y **sin** cancelar: dejar a
+     * medias un deshacer sería un segundo cambio que nadie pidió. Lo que se deshizo se dice
+     * en la barra de estado, porque puede no estar a la vista: deshacer un *Move To* trae
+     * de vuelta tareas que estaban en otra pestaña.
+     */
+    private fun revert(step: UndoHistory.Step, redoing: Boolean) {
+        notice.get()?.takeIf { it.step === step }?.let { if (notice.compareAndSet(it, null)) it.notification.expire() }
+        val command = TaskCommand.Revert(step.change)
+        var reverted = false
+        val keep: (Change) -> Unit = { inverse ->
+            reverted = true
+            val back = UndoHistory.Step(inverse, step.label, step.repos)
+            if (redoing) history.redone(back) else history.undone(back)
+        }
+        if (step.change.size <= BULK_INLINE) {
+            metrics.time(TasklaneMetrics.Op.COMMAND) { synchronized(gate) { applyLocked(command, onChange = keep) } }
+            tell(step.label, redoing, reverted)
+            return
+        }
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(
+                project,
+                TasklaneBundle.message(if (redoing) "redo.progress" else "undo.progress", step.change.size),
+                false,
+            ) {
+                override fun run(indicator: ProgressIndicator) {
+                    metrics.time(TasklaneMetrics.Op.COMMAND) {
+                        synchronized(gate) { inBulk { applyLocked(command, onChange = keep) } }
+                    }
+                }
+
+                override fun onFinished() = tell(step.label, redoing, reverted)
+            },
+        )
+    }
+
+    /**
+     * «Undone: move 3 tasks to Done», en la barra de estado. Si no quedaba nada que
+     * deshacer —las tareas cambiaron o se borraron después—, se dice también: un `⌘Z` que
+     * no hace nada visible y no dice nada parece roto.
+     */
+    private fun tell(label: String, redoing: Boolean, reverted: Boolean) {
+        val key = when {
+            reverted && redoing -> "redo.done"
+            reverted -> "undo.done"
+            redoing -> "redo.stale"
+            else -> "undo.stale"
+        }
+        val text = TasklaneBundle.message(key, label)
+        ApplicationManager.getApplication().invokeLater({ StatusBar.Info.set(text, project) }, project.disposed)
+    }
+
+    /**
+     * El aviso de un borrado, con *Undo*. Deshace **ese** borrado, aunque después se hayan
+     * hecho otras cosas: lo que se hizo después no se toca, porque deshacer va campo a campo
+     * y un borrado sólo devuelve lo que no está.
      *
      * Dice de qué repositorio salieron cuando son de uno solo, que es casi siempre: todo
      * Tasklane habla del repositorio activo, y un aviso que no lo nombra obliga a adivinar.
      */
-    private fun offerUndo(tasks: List<Task>) {
-        if (tasks.isEmpty()) return
-        val repos = tasks.mapTo(LinkedHashSet()) { it.repo }
-        val content = repos.singleOrNull()?.let { repo ->
-            TasklaneBundle.message("undo.deleted.repo", tasks.size, displayName(repo))
-        } ?: TasklaneBundle.message("undo.deleted", tasks.size)
+    private fun offerUndo(step: UndoHistory.Step) {
+        val count = step.change.rows.size
+        val content = step.change.repos.singleOrNull()?.let { repo ->
+            TasklaneBundle.message("undo.deleted.repo", count, displayName(repo))
+        } ?: TasklaneBundle.message("undo.deleted", count)
 
         val notification = NotificationGroupManager.getInstance()
             .getNotificationGroup(NOTIFICATION_GROUP)
             .createNotification(content, NotificationType.INFORMATION)
-        val deletion = Deletion(tasks, notification)
         notification.addAction(
             NotificationAction.createSimpleExpiring(TasklaneBundle.message("undo.action")) {
-                val mine = synchronized(gate) {
-                    (lastDeletion === deletion).also { if (it) lastDeletion = null }
-                }
-                if (mine) restore(deletion.tasks)
+                if (history.take(step)) revert(step, redoing = false)
             },
         )
-        val previous = synchronized(gate) { lastDeletion.also { lastDeletion = deletion } }
-        previous?.notification?.expire()
+        notice.getAndSet(Notice(step, notification))?.notification?.expire()
         notification.notify(project)
     }
 
-    /** Un borrado demasiado grande para guardarlo: se dice, en vez de callar que no hay *Undo*. */
-    private fun notifyDeletedForGood(count: Int) {
-        val previous = synchronized(gate) { lastDeletion.also { lastDeletion = null } }
-        previous?.notification?.expire()
+    /** Un gesto demasiado grande para guardarlo: se dice, en vez de callar que no hay vuelta. */
+    private fun notifyForGood(change: Change) = notifyForGood(change.size, deleted = change.rows.all { it.after == null })
+
+    private fun notifyForGood(count: Int, deleted: Boolean) {
+        notice.getAndSet(null)?.notification?.expire()
         NotificationGroupManager.getInstance()
             .getNotificationGroup(NOTIFICATION_GROUP)
-            .createNotification(TasklaneBundle.message("undo.tooMany", count, UNDO_LIMIT), NotificationType.INFORMATION)
+            .createNotification(
+                TasklaneBundle.message(if (deleted) "undo.tooMany" else "undo.tooMany.changed", count, UNDO_LIMIT),
+                NotificationType.INFORMATION,
+            )
             .notify(project)
     }
 
     private fun displayName(repo: RepoKey): String =
         _snapshot.value.repositories.firstOrNull { it.key == repo }?.displayName ?: repo.value
 
-    private fun applyNow(command: TaskCommand) = synchronized(gate) { applyLocked(command) }
-
     private fun <T> inBulk(block: () -> T): T = store?.bulk(block = block) ?: block()
 
     /**
-     * @param onDeleted recibe, **tras confirmarse la transacción**, las tareas que el
-     *   comando borró tal como estaban. Es lo que permite deshacer un borrado (2.9.0): se
-     *   leen dentro de la misma transacción que las borra, así que no hay una versión
-     *   anterior de la tarea que pueda colarse entre leerla y borrarla.
+     * @param onChange recibe, **tras confirmarse la transacción**, lo que el comando cambió:
+     *   cada tarea tocada como estaba y como quedó. Es lo que permite deshacerlo (2.16.0; el
+     *   borrado, desde la 2.9.0). Lo de antes se lee dentro de la misma transacción que lo
+     *   escribe, así que no hay una versión intermedia de la tarea que pueda colarse entre
+     *   leerla y cambiarla. `null` es no guardar nada, y entonces no cuesta nada.
      */
     private fun applyLocked(
         command: TaskCommand,
         progress: (Int, Int) -> Unit = { _, _ -> },
-        onDeleted: ((List<Task>) -> Unit)? = null,
+        onChange: ((Change) -> Unit)? = null,
     ) {
         val before = _snapshot.value
         val view = reducer.view(before, command)
@@ -523,7 +617,7 @@ class TaskService(
         }
 
         val repo = (command as? RepoScoped)?.repo ?: before.activeRepo
-        var gone: List<Task> = emptyList()
+        var change = Change.NONE
         var anchored: Set<String> = emptySet()
 
         // Leer el sujeto, planificar y escribir, todo dentro de la misma transacción.
@@ -544,9 +638,15 @@ class TaskService(
                         nextOrder = { store.nextOrder(repo) },
                     )
                     val plan = reducer.plan(subject, command)
-                    if (onDeleted != null) {
-                        val ids = plan.mutations.filterIsInstance<Mutation.Delete>().flatMapTo(HashSet()) { it.ids }
-                        if (ids.isNotEmpty()) gone = subject.tasks.filter { it.id in ids }
+                    if (onChange != null) {
+                        // Dónde estaba lo que se va a reordenar, antes de moverlo. Ver
+                        // `TaskStore.neighbours`: después ya no se sabe.
+                        val moves = plan.mutations.filterIsInstance<Mutation.Place>().mapNotNull { place ->
+                            store.neighbours(place.id)?.let { (above, below) ->
+                                TaskCommand.Move(place.repo, place.id, above, below)
+                            }
+                        }
+                        change = Change.of(subject.tasks, plan.mutations, moves)
                     }
                     anchored = plan.mutations.asSequence()
                         .filterIsInstance<Mutation.Upsert>()
@@ -568,7 +668,7 @@ class TaskService(
         val touched = applied != null && applied.rows > 0
         _snapshot.value = if (touched) view.touched() else view
         applied?.parked?.takeIf { it.count > 0 }?.let(::reportParked)
-        if (applied != null && gone.isNotEmpty()) onDeleted?.invoke(gone)
+        if (touched && !change.isEmpty) onChange?.invoke(change)
         if (applied != null && anchored.isNotEmpty()) _anchorsWritten.tryEmit(anchored)
     }
 
@@ -578,7 +678,7 @@ class TaskService(
         // Un lote con **una** fila de un repositorio en solo lectura no se aplica entero:
         // aplicar el resto dejaría la selección a medias sin decir por qué.
         is TaskCommand.Batch -> command.commands.any { it.repo in readOnly }
-        is TaskCommand.Restore -> command.tasks.any { it.repo in readOnly }
+        is TaskCommand.Revert -> command.change.repos.any { it in readOnly }
         else -> false
     }
 
@@ -1023,8 +1123,14 @@ class TaskService(
      * Las tareas de un repositorio fuera de la base, por tandas —ver
      * [TaskStore.forgetBatch]—, repintando después de cada una: la lista se va vaciando
      * mientras ocurre en vez de congelarse.
+     *
+     * Y su historia de `⌘Z`, antes que nada (2.16.0): vaciarlo no se deshace —lo dice la
+     * confirmación—, y deshacer después un borrado de antes devolvería unas pocas tareas
+     * a un repositorio que el usuario acaba de pedir vacío.
      */
     private fun forgetTasks(store: TaskStore, repo: RepoKey, onProgress: (Long) -> Unit): Long {
+        history.forget(setOf(repo))
+        notice.get()?.takeIf { repo in it.step.repos }?.let { if (notice.compareAndSet(it, null)) it.notification.expire() }
         var removed = 0L
         // Con la caché grande y el volcado del diario espaciado: son cientos de
         // transacciones pequeñas seguidas, justo el caso de `TaskStore.bulk`.

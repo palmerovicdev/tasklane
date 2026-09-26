@@ -173,13 +173,21 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     var reorderable: Boolean = false
 
     /**
-     * Si [point] cae sobre el asa de una tarjeta. Es por donde se arrastra para reordenar;
-     * el resto de la tarjeta se arrastra para seleccionar texto, y los dos gestos no pueden
-     * compartir sitio. Hasta la 2.11.0 el asa era la franja de prioridad, de ocho píxeles:
-     * cuesta atinarle, y nada en ella decía que se pudiera arrastrar.
+     * Si la tarjeta se puede llevar a otra columna (2.17.0): la lista es una columna del
+     * tablero. Enciende el asa aunque la columna no vaya a mano —arrastrarla a la de al lado
+     * no depende del orden de ésta—.
+     */
+    var movable: Boolean = false
+
+    /**
+     * Si [point] cae sobre el asa de una tarjeta. Es por donde se arrastra para reordenar
+     * —y en el tablero, para llevarla a otra columna—; el resto de la tarjeta se arrastra
+     * para seleccionar texto, y los dos gestos no pueden compartir sitio. Hasta la 2.11.0
+     * el asa era la franja de prioridad, de ocho píxeles: cuesta atinarle, y nada en ella
+     * decía que se pudiera arrastrar.
      */
     fun isOnHandle(tree: JTree, point: Point): Boolean =
-        reorderable && targetAt(tree, point) == RowTarget.GRIP
+        (reorderable || movable) && targetAt(tree, point) == RowTarget.GRIP
 
     /**
      * El texto seleccionado a mano, o `null`. Lo mantiene [CardTextSelection]; aquí
@@ -1159,9 +1167,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             else -> EmptyIcon.ICON_16
         }
         more.icon = if (hovered) AllIcons.Actions.More else EmptyIcon.ICON_16
-        gripActive = reorderable
-        grip.icon = if (reorderable && hovered) AllIcons.General.Drag else EmptyIcon.ICON_16
-        grip.isVisible = reorderable
+        val grab = reorderable || movable
+        gripActive = grab
+        grip.icon = if (grab && hovered) AllIcons.General.Drag else EmptyIcon.ICON_16
+        grip.isVisible = grab
         // El hueco del desplegable se reserva ya, aunque quién lo enciende sea
         // [showExpandIcon] más tarde: el ancho que le queda al texto se mide con esta
         // fila puesta, y decidirlo después de envolver cambiaría el resultado de la
