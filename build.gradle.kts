@@ -121,6 +121,18 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.18.0 &mdash; screenshots for AI agents</h3>
+            <ul>
+              <li><b>Agents see the screenshots</b>: <code>tasklane_get_task</code> now gives the
+                  path of each image file of the task, which Claude Code, Junie and other MCP
+                  clients can open. <code>tasklane_list_tasks</code> says how many images a task
+                  has, and its query takes <code>has:image</code>.</li>
+              <li><b>Agents attach screenshots</b>: <code>tasklane_create_task</code> and
+                  <code>tasklane_update_task</code> take <code>images</code>, file paths added at
+                  the end of the body. An image the task already has is not added twice.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.17.1 &mdash; choose where each state shows</h3>
             <ul>
               <li><b>Three more checkboxes per state</b> in <i>Settings &#9656; Tools &#9656; Tasklane

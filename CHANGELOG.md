@@ -9,6 +9,32 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.18.0]
+
+Menor sin cambio de formato: las capturas, también para el agente. Es la P24 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **El agente ve las capturas.** `tasklane_get_task` trae `images`: por cada imagen del cuerpo,
+  su referencia —`tasklane:<sha>`, la que aparece en el cuerpo— y **la ruta de su fichero**, o
+  `missing: true` si ya no está. El servidor MCP del IDE sólo devuelve texto, pero Claude Code,
+  Junie y los demás abren imágenes del disco. `tasklane_list_tasks` dice cuántas tiene cada
+  tarea, y su consulta admite `has:image`.
+- **El agente deja capturas.** `tasklane_create_task` y `tasklane_update_task` aceptan
+  `images`: rutas absolutas o relativas a la raíz del proyecto. Se guardan como una imagen
+  soltada en el diálogo —tal cual, en el repositorio de la tarea— y van al final del cuerpo,
+  una por línea. Al actualizar se añaden: las que la tarea ya tenía siguen.
+
+### Detalles
+- Una captura que el cuerpo ya nombra no se repite: un agente que repite la llamada porque no
+  vio la respuesta no la duplica.
+- Una ruta que no existe, una carpeta o un fichero que no es una imagen fallan con un error que
+  lo dice. Las imágenes se guardan lo último: si un estado, una prioridad o un ancla no
+  encajan, no queda ningún fichero suelto.
+- Las descripciones de las herramientas le piden al agente que conserve las referencias
+  `![](tasklane:…)` cuando reescribe el cuerpo.
+- **Formato:** ninguno.
+
 ## [2.17.1]
 
 Qué estados salen en la tool window, en el tablero y en la barra de estado, elegido en la tabla

@@ -33,6 +33,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P12 · Anclar un rango, no una línea                     | `2.15.0` |
 | ✅ | P15 · Deshacer todo, no sólo el borrado                 | `2.16.0` |
 | ✅ | P19 · Tablero en una pestaña del editor                 | `2.17.0` |
+| ✅ | P24 · Las capturas, también para el agente              | `2.18.0` |
 
 ---
 
@@ -258,7 +259,7 @@ tareas tiene cada una, y aparta la base actual antes de sustituirla, como hace l
 reparación. Y lo que más importa: abrir un proyecto **sin base** pero con copias fuera
 ofrece recuperarlas («Hay una copia de hace 2 días con 340 tareas · Restore»).
 
-### P24 · Las capturas, también para el agente 👾
+### P24 · Las capturas, también para el agente ✅ `2.18.0`
 
 `tasklane_get_task` sólo dice cuántas imágenes tiene la tarea (`images: 2`), y el cuerpo
 lleva `![](tasklane:<sha>)`, que fuera del IDE no significa nada. Media tarea es una
@@ -268,6 +269,12 @@ Claude Code o Junie abren imágenes del disco: `AttachmentService.file()` ya exi
 la llama. En la otra dirección, adjuntar una imagen desde una ruta en `create_task` y
 `update_task`, para que el agente deje la captura de lo que ha hecho o el diagrama que ha
 generado.
+
+En la `2.18.0`: `images` en `tasklane_get_task` trae, por captura, `ref` —lo que aparece en el
+cuerpo— y `path`, o `missing`; y `images` en crear y actualizar son rutas que se añaden al final
+del cuerpo sin repetir las que ya están. Se comprobó que el servidor MCP del IDE sigue sin
+contenido de imagen (sólo `Text`), y que Claude Code abre un JPEG guardado como `.png`, que es
+como el almacén guarda todo.
 
 ### P25 · Saber qué ha hecho el agente ⏸️
 

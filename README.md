@@ -70,7 +70,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
 | **El código enseña sus tareas** | Una marca en el margen o una pastilla en la línea, con el color de la prioridad, un tooltip con la tarea y un clic que la abre |
 | **Una lista por repositorio** | Varios repositorios Git en la misma ventana, cada uno con sus tareas, un selector, y búsqueda en todos a la vez |
-| **Tareas para agentes de IA** | Con el servidor MCP del IDE encendido, Claude Code, Junie o cualquier cliente MCP leen la lista, abren una tarea con sus anclas en la línea de hoy, apuntan lo que dejan pendiente, marcan la checklist y la cierran al terminar |
+| **Tareas para agentes de IA** | Con el servidor MCP del IDE encendido, Claude Code, Junie o cualquier cliente MCP leen la lista, abren una tarea con sus anclas en la línea de hoy y sus capturas, apuntan lo que dejan pendiente, marcan la checklist y la cierran al terminar |
 | **Crear desde cualquier sitio** | `⌘⌥R` abre el diálogo sin pasar por la Tool Window |
 | **Copiar al portapapeles** | Markdown o texto plano; un estado, un grupo —como parte del día— o sólo la selección |
 | **Guardar y vaciar un repositorio** | Todas sus tareas a un CSV, un Markdown o un texto plano; y, por separado, borrarlas todas |
@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.17.1.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.18.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -538,9 +538,9 @@ servidor.
 |---|---|
 | `tasklane_list_repositories` | Los repositorios con sus tareas abiertas, y los estados y prioridades configurados |
 | `tasklane_list_tasks` | Sin consulta, lo abierto estado por estado y en el orden de la lista; con consulta, los aciertos por relevancia, con [la misma sintaxis](#búsqueda) que el buscador. `repository: "all"` busca en todos |
-| `tasklane_get_task` | Una tarea entera: cuerpo Markdown, casillas numeradas, enlaces y anclas **en la línea de hoy** —`anchoredAtLine` si se movió, `endLine` si es un bloque, `missing` si el fichero ya no está— |
-| `tasklane_create_task` | Crea una tarea, con estado, prioridad, etiquetas, vencimiento y anclas escritas como `src/Auth.kt:42`, o `src/Auth.kt:42-58` para un bloque |
-| `tasklane_update_task` | Cambia sólo lo que se le pasa; `dueDate: "none"` quita el vencimiento |
+| `tasklane_get_task` | Una tarea entera: cuerpo Markdown, casillas numeradas, enlaces y anclas **en la línea de hoy** —`anchoredAtLine` si se movió, `endLine` si es un bloque, `missing` si el fichero ya no está—, y la **ruta del fichero** de cada captura (2.18.0) |
+| `tasklane_create_task` | Crea una tarea, con estado, prioridad, etiquetas, vencimiento y anclas escritas como `src/Auth.kt:42`, o `src/Auth.kt:42-58` para un bloque, y capturas por su ruta en `images` (2.18.0) |
+| `tasklane_update_task` | Cambia sólo lo que se le pasa; `dueDate: "none"` quita el vencimiento, e `images` **añade** capturas al final del cuerpo |
 | `tasklane_complete_task` | La lleva al estado cerrado. Repetirla no la reabre |
 | `tasklane_set_checklist_item` | Marca o desmarca la casilla N. Repetirla no la alterna |
 
@@ -561,6 +561,12 @@ Detalles que importan:
 - **Las anclas leen el disco, no la memoria del IDE.** Un agente edita los ficheros desde
   fuera y pregunta enseguida; antes de responder se refresca ese fichero, así que la línea
   que devuelve es la de después de su edición.
+- **Las capturas van por ruta** (2.18.0). El servidor MCP del IDE sólo devuelve texto, y en el
+  cuerpo una imagen es `![](tasklane:<sha>)`, que fuera del IDE no dice nada; así que
+  `tasklane_get_task` da, por cada una, esa referencia y la ruta de su fichero, que Claude
+  Code o Junie abren. En la otra dirección, `images` al crear o actualizar guarda los ficheros
+  como una imagen soltada en el diálogo y los añade al final del cuerpo, sin repetir los que
+  ya están: repetir la llamada no duplica nada.
 - Sin `repository`, el repositorio es el activo en la ventana. Con varios proyectos
   abiertos, el propio servidor pide al agente que diga cuál.
 
@@ -825,7 +831,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.17.1.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.18.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
