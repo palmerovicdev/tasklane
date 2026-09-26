@@ -56,13 +56,19 @@ internal class SetPriorityActionGroup : ActionGroup(), DumbAware {
  * Cada una de las nueve primeras enseña su tecla, del `1` al `9` (P34): es la que la cambia
  * desde la lista sin abrir el menú, y el menú es donde se descubre. Sólo se enseña; quien la
  * atiende es la lista.
+ *
+ * Se pone con `registerCustomShortcutSet(…, null)` y no con `shortcutSet =`: en la 2026.2
+ * el setter es `@ApiStatus.Internal` y el Plugin Verifier lo marca (2.26.2). Sin componente
+ * no registra nada, sólo guarda el atajo, que es lo que el menú lee para enseñarlo.
  */
 private class SetPriorityAction(position: Int, private val target: TaskPriority) : PanelAction() {
 
     init {
         templatePresentation.text = target.name
         templatePresentation.icon = PriorityDot.menu(target)
-        if (position < DIGITS) shortcutSet = CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_1 + position, 0))
+        if (position < DIGITS) {
+            registerCustomShortcutSet(CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_1 + position, 0)), null)
+        }
     }
 
     override fun update(e: AnActionEvent) {

@@ -125,6 +125,13 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.26.2 &mdash; no internal APIs</h3>
+            <ul>
+              <li>The digit shown next to each entry of <i>Priority</i> no longer goes through an
+                  internal platform API. Nothing changes on screen.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.26.1 &mdash; ready for the Marketplace</h3>
             <ul>
               <li><b>The plugin description is up to date</b>: <i>Hand Off to Agent</i> no longer

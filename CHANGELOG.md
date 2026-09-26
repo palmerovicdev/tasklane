@@ -10,6 +10,24 @@ README (§ *Fases y versiones*): hasta la `1.0.0` la versión media era **la fas
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.26.2]
+
+Sólo correcciones: lo que el Plugin Verifier del Marketplace encontró en la 2.26.1.
+
+### Corregido
+- **Ninguna API interna.** El `1`…`9` que el menú *Priority* enseña junto a cada entrada se
+  ponía con `AnAction.setShortcutSet`, que en la 2026.2 es `@ApiStatus.Internal`. Ahora va
+  con `registerCustomShortcutSet(…, null)`, que sin componente sólo guarda el atajo: en
+  pantalla no cambia nada.
+
+### Detalles
+- **Sigue en la API vieja de *Search Everywhere*.** La 2026.3 depreca
+  `SearchEverywhereContributor` y `SearchEverywhereContributorFactory` —los tres avisos del
+  Verifier— en favor de `SeItemsProvider`, pero esa API es `@ApiStatus.Experimental` entera,
+  también en la build que depreca la vieja: migrar cambiaría un aviso por otro. La vieja no
+  está marcada para retirarse y la plataforma sigue usándola para sus propias búsquedas.
+- **Formato:** ninguno.
+
 ## [2.26.1]
 
 Sólo correcciones, antes de subirla al Marketplace.

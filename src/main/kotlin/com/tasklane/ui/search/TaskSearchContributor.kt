@@ -27,6 +27,13 @@ import javax.swing.ListCellRenderer
  * Sale en la pestaña *All* y en una propia, *Tasks*. Con la consulta vacía no enseña
  * nada: listar tareas al azar debajo de cada `⇧⇧` sería ruido en el diálogo más usado
  * del IDE.
+ *
+ * La 2026.3 depreca `SearchEverywhereContributor` y su fábrica en favor de `SeItemsProvider`,
+ * y el Plugin Verifier lo cuenta. Se queda a propósito (2.26.2): la API nueva es
+ * `@ApiStatus.Experimental` entera —también en la build que depreca la vieja—, así que
+ * migrar sólo cambiaría el aviso por otro, y la propia plataforma sigue envolviendo sus
+ * contributors de clases y símbolos para el diálogo nuevo. La vieja no está
+ * `@ScheduledForRemoval`; se revisa cuando `SeItemsProvider` salga de experimental.
  */
 internal class TaskSearchContributor(private val project: Project) : SearchEverywhereContributor<Task> {
 
