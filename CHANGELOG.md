@@ -9,6 +9,32 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.17.1]
+
+Qué estados salen en la tool window, en el tablero y en la barra de estado, elegido en la tabla
+de estados de los ajustes.
+
+### Añadido
+- **Tres casillas más por estado en la tabla de *States***: *Tool window*, *Board* y *Status
+  bar*. Quitar un estado de la ventana le quita su pestaña; del tablero, su columna. De
+  fábrica, todos salen en los dos sitios, y un estado nuevo también, sin que haya que marcarlo.
+- Si no queda ningún estado en la ventana o en el tablero, lo dicen, con un enlace a los
+  ajustes.
+
+### Cambiado
+- **Los estados que cuenta la barra de estado se eligen en la columna *Status bar*** de la
+  tabla de estados, y no en una fila de casillas aparte que repetía los nombres. Lo de las
+  vencidas sigue en su grupo. Lo ya elegido se conserva tal cual.
+- `⌥←/→` y `⇧⌥←/→` saltan los estados que no se ven: la pestaña o la columna de al lado es la
+  de al lado de verdad. *Move To ▸* sigue ofreciendo todos.
+
+### Detalles
+- Las tres casillas son **tuyas**, no del equipo: van a `workspace.xml`, como antes lo que
+  contaba la barra de estado, y no a `tasklane.xml`. Se guardan los estados **quitados**.
+- Una tarea de un estado sin pestaña no se puede enseñar en la ventana: pulsar su marca en el
+  editor abre la ventana sin ella.
+- **Formato:** ninguno.
+
 ## [2.17.0]
 
 Menor sin cambio de formato: el tablero, en una pestaña del editor. Es la P19 de

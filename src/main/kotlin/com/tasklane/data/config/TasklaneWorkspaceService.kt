@@ -72,6 +72,10 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
         /** Los estados que no salen en el tablero, separados por comas. Ver [boardHidden]. */
         @Attribute
         var boardHidden: String? = null
+
+        /** Los que no salen en la tool window, igual. Ver [windowHidden]. */
+        @Attribute
+        var windowHidden: String? = null
     }
 
     private var state = WorkspaceState()
@@ -171,10 +175,23 @@ class TasklaneWorkspaceService : PersistentStateComponent<TasklaneWorkspaceServi
      * tablero sin que nadie tenga que acordarse de marcarlo, y uno borrado deje de importar.
      */
     var boardHidden: Set<StateId>
-        get() = state.boardHidden?.split(',')?.filter { it.isNotBlank() }?.mapTo(LinkedHashSet(), ::StateId).orEmpty()
+        get() = stateIds(state.boardHidden)
         set(value) {
-            state.boardHidden = value.takeIf { it.isNotEmpty() }?.joinToString(",") { it.value }
+            state.boardHidden = joined(value)
         }
+
+    /** Los estados que **no** tienen pestaña en la tool window (2.17.1). Como [boardHidden]. */
+    var windowHidden: Set<StateId>
+        get() = stateIds(state.windowHidden)
+        set(value) {
+            state.windowHidden = joined(value)
+        }
+
+    private fun stateIds(raw: String?): Set<StateId> =
+        raw?.split(',')?.filter { it.isNotBlank() }?.mapTo(LinkedHashSet(), ::StateId).orEmpty()
+
+    /** Vacío no se escribe: el atributo sólo aparece en `workspace.xml` cuando se ha quitado algo. */
+    private fun joined(ids: Set<StateId>): String? = ids.takeIf { it.isNotEmpty() }?.joinToString(",") { it.value }
 
     /** Formato del portapapeles. Markdown por defecto: es lo que entiende el destino habitual. */
     var exportFormat: ExportFormat

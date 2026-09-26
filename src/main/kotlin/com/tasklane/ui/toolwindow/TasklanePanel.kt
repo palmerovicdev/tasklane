@@ -344,6 +344,8 @@ internal class TasklanePanel(
         val found: SearchResults,
         val filter: TaskFilter,
         val archive: ViewService.Archive,
+        /** Sólo para rehacer la fila de pestañas al quitar o poner un estado (2.17.1). Ver [shown]. */
+        val windowHidden: Set<StateId>,
     )
 
     private class Built(
@@ -463,7 +465,7 @@ internal class TasklanePanel(
         CardTextSelection.install(tree, renderer)
 
         uiScope.launch {
-            combine(service.snapshot, search.results, view.filter, view.archive, ::ViewInput).collect { input ->
+            combine(service.snapshot, search.results, view.filter, view.archive, view.windowHidden, ::ViewInput).collect { input ->
                 val (snap, found, filter, archive) = input
                 // Filtrar, ordenar, agrupar y contar fuera del EDT: es el trabajo que
                 // crece con el número de tareas. Un solo «ahora» para los dos, o el
@@ -879,7 +881,7 @@ internal class TasklanePanel(
         if (header != null) {
             header.show(snap.config.state(stateId)?.name.orEmpty(), counts[stateId] ?: 0)
         } else {
-            tabs.update(snap.config.states, counts, stateId)
+            tabs.update(snap.config.states.filter { shown(it.id) }, counts, stateId)
         }
 
         // Una captura pegada puede rellenar un hueco que antes no estaba.
@@ -1459,14 +1461,21 @@ internal class TasklanePanel(
      * a la primera convertiría «avanza esta tarea» en «devuélvela al principio», que es
      * lo contrario y sin decirlo.
      *
-     * En el tablero, sólo entre los estados que tienen columna (2.17.1).
+     * Sólo entre los estados que se ven (2.17.1): los de la ventana, o los que tienen
+     * columna en el tablero. Ver [shown].
      */
     fun neighbourState(delta: Int): StateId? {
-        val all = board?.let { host -> states.filter { host.shows(it.id) } } ?: states
+        val all = states.filter { shown(it.id) }
         val index = all.indexOfFirst { it.id == stateId }
         if (index < 0) return null
         return all.getOrNull(index + delta)?.id
     }
+
+    /**
+     * Si [state] se ve donde vive esta lista (2.17.1): con pestaña en la tool window, o con
+     * columna en el tablero. Cada sitio tiene su elección en los ajustes.
+     */
+    private fun shown(state: StateId): Boolean = board?.shows(state) ?: (state !in view.windowHidden.value)
 
     /** Cambia de pestaña al estado vecino. Es el `Alt+←/→` que se perdió al bajarlas al panel. */
     fun selectNeighbourState(delta: Int) {

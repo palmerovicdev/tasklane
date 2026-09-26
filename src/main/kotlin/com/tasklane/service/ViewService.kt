@@ -15,7 +15,7 @@ import java.time.ZoneId
 
 /**
  * Cómo se está mirando la lista: el filtro de vista, el archivo de lo terminado y qué
- * estados salen en el tablero.
+ * estados salen en la tool window y en el tablero.
  *
  * Es un servicio aparte y no un campo de [TaskService] porque no es modelo —nada de
  * lo que hay aquí se guarda en el fichero de tareas ni se comparte con el equipo— y
@@ -79,6 +79,16 @@ class ViewService(project: Project) {
     fun setBoardHidden(hidden: Set<StateId>) {
         workspace.boardHidden = hidden
         _boardHidden.value = workspace.boardHidden
+    }
+
+    /** Los estados sin pestaña en la tool window (2.17.1). Ver `TasklaneWorkspaceService.windowHidden`. */
+    private val _windowHidden = MutableStateFlow(workspace.windowHidden)
+    val windowHidden: StateFlow<Set<StateId>> = _windowHidden.asStateFlow()
+
+    /** Lo pide la página de ajustes al aplicar. */
+    fun setWindowHidden(hidden: Set<StateId>) {
+        workspace.windowHidden = hidden
+        _windowHidden.value = workspace.windowHidden
     }
 
     companion object {

@@ -83,14 +83,24 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
      */
     private var statusStates: MutableSet<StateId>? = null
 
+    /** Los estados sin pestaña en la tool window (2.17.1), en la columna *Tool window* de la tabla. */
+    private var windowHidden: MutableSet<StateId> = mutableSetOf()
+
     /** Los estados sin columna en el tablero (2.17.1), en la columna *Board* de la tabla. */
     private var boardHidden: MutableSet<StateId> = mutableSetOf()
 
     /**
-     * Las dos columnas de la tabla que son de la persona y van a `workspace.xml`, no a
+     * Las tres columnas de la tabla que son de la persona y van a `workspace.xml`, no a
      * `tasklane.xml`. Ver [PersonalColumn].
      */
     private val personalColumns: List<PersonalColumn> = listOf(
+        PersonalColumn(
+            TasklaneBundle.message("settings.column.window"),
+            TasklaneBundle.message("settings.column.window.tooltip"),
+            WINDOW_WIDTH,
+            get = { it.id !in windowHidden },
+            set = { row, shown -> if (shown) windowHidden -= row.id else windowHidden += row.id },
+        ),
         PersonalColumn(
             TasklaneBundle.message("settings.column.board"),
             TasklaneBundle.message("settings.column.board.tooltip"),
@@ -294,6 +304,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         val choice = statusCounts.choice.value
         statusStates = choice.states?.toMutableSet()
         statusOverdueCheckBox.isSelected = choice.overdue
+        windowHidden = view.windowHidden.value.toMutableSet()
         boardHidden = view.boardHidden.value.toMutableSet()
         statesTable.refresh()
         stateReassign.clear()
@@ -309,6 +320,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             priorityReassign.isNotEmpty() ||
             archiveDays() != view.archive.value.days ||
             statusChoice() != statusCounts.choice.value ||
+            windowHidden != view.windowHidden.value ||
             boardHidden != view.boardHidden.value
 
     override fun apply() {
@@ -320,6 +332,7 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         val service = TaskService.getInstance(project)
         if (archiveDays() != view.archive.value.days) view.setArchiveDays(archiveDays())
         if (statusChoice() != statusCounts.choice.value) statusCounts.setChoice(statusChoice())
+        if (windowHidden != view.windowHidden.value) view.setWindowHidden(windowHidden.toSet())
         if (boardHidden != view.boardHidden.value) view.setBoardHidden(boardHidden.toSet())
 
         // 1. Reasignaciones explícitas ANTES de tocar la configuración: mientras el
@@ -681,7 +694,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
         /** Diez años: por encima, «todo» dice lo mismo sin el número. */
         private const val MAX_ARCHIVE_DAYS = 3650
 
-        /** Las columnas *Board* y *Status bar* de la tabla de estados: lo que pide su cabecera. */
+        /** Las columnas personales de la tabla de estados: lo que pide su cabecera. */
+        private const val WINDOW_WIDTH = 100
         private const val BOARD_WIDTH = 70
         private const val STATUS_BAR_WIDTH = 90
 

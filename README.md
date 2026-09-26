@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.17.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.17.1.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -343,7 +343,7 @@ para no tener que abrir la ventana para saber cómo va la lista (2.14.0).
 
 | | |
 |---|---|
-| Qué cuenta | Los estados que se elijan en *Settings → Tools → Tasklane → Status bar*, en el orden de las pestañas, y las vencidas si se quiere. De fábrica, los estados no terminales —lo que queda por hacer— y las vencidas |
+| Qué cuenta | Los estados marcados en la columna *Status bar* de la tabla de estados de *Settings → Tools → Tasklane* (en la 2.14.0 eran una fila de casillas aparte), en el orden de las pestañas, y las vencidas si se quiere, en el grupo *Status bar*. De fábrica, los estados no terminales —lo que queda por hacer— y las vencidas |
 | Cómo cuenta | Como las pestañas con el filtro *All tasks*: con el archivo de lo terminado aplicado, pero no el filtro de vista, que es una forma pasajera de mirar la lista |
 | Las vencidas | **En rojo**, y sólo cuando las hay. Se cuentan en el momento en que vencen, sin esperar a que se escriba nada |
 | Un clic | En un estado abre su pestaña; en las vencidas lleva a esas tareas, como el *Show* del aviso; en el icono o en cualquier otro sitio abre Tasklane |
@@ -363,13 +363,13 @@ editor tiene el ancho que a la ventana le falta.
 
 | | |
 |---|---|
-| Las columnas | Una por estado, en el orden de los ajustes, y **cada una es la lista de la ventana**: las mismas tarjetas, el mismo menú, los mismos atajos y el mismo `⌘Z`, con su agrupación y su orden. Se reparten el ancho, y si no caben a 300 px cada una sale la barra horizontal |
+| Las columnas | Una por estado de los marcados en la columna *Board* de la tabla de estados de los ajustes (2.17.1; de fábrica, todos), en su orden, y **cada una es la lista de la ventana**: las mismas tarjetas, el mismo menú, los mismos atajos y el mismo `⌘Z`, con su agrupación y su orden. Se reparten el ancho, y si no caben a 300 px cada una sale la barra horizontal |
 | La cabecera de cada una | El nombre y cuántas tiene; `+` crea una tarea en ese estado y *Group By* cambia cómo se agrupa, que es del estado —cambiarlo aquí lo cambia también en la ventana— |
 | Arrastrar | Por el asa ⋮⋮ de la tarjeta —la del orden manual, que aquí sale siempre— a otra columna: la tarea pasa a ese estado. Si la tarjeta es parte de una selección, se va la selección entera. En una columna **a mano, sin buscar y sin grupos**, cae entre las dos tarjetas donde se suelta, y la línea lo dice antes de soltar; en las demás la columna entera se recuadra y la tarea va donde la ordene la columna. Cerca de los bordes, el tablero y la columna se desplazan solos |
 | Después | Lo movido queda **seleccionado en su columna nueva**, con el foco: en una columna que se ordena sola es la forma de ver dónde ha caído. Lo mismo con *Move To ▸* y `⇧⌥←/→`, así que un segundo `⇧⌥→` sigue llevándolo |
 | Deshacer | Un arrastre es **un** paso: `⌘Z` devuelve las tareas a su columna y a su sitio, y la barra de estado dice *Undone: move 2 tasks to Doing* |
 | Arriba | El buscador, el repositorio y el filtro, **los mismos de la ventana**: buscar aquí es buscar también allí. Son dos vistas de las mismas tareas, y que cada una filtrara distinto obligaría a mirar dos campos para saber qué se ve. `⌘K` en una columna lleva al buscador |
-| El teclado | `⌥←/→` pasa a la columna de al lado; lo demás, como en la ventana |
+| El teclado | `⌥←/→` pasa a la columna de al lado, saltando los estados sin columna; lo demás, como en la ventana. *Move To ▸* sigue ofreciendo todos los estados: mandar una tarea a uno sin columna es una forma de quitarla de delante |
 | La pestaña | Una por proyecto: *Open Board* con ella abierta va a ella |
 
 ## Anclas de código
@@ -736,12 +736,12 @@ actúan al pulsarlos.
 
 | Grupo | Qué se configura |
 |---|---|
-| **States** | Una tabla: nombre, cuál es el de por defecto para las tareas nuevas, cuáles son terminales (cerrar una tarea), cómo agrupa cada uno y por qué fecha. **El orden es el de las pestañas**: se arrastra la fila por su asa o se usan las flechas |
+| **States** | Una tabla: nombre, cuál es el de por defecto para las tareas nuevas, cuáles son terminales (cerrar una tarea), cómo agrupa cada uno y por qué fecha. **El orden es el de las pestañas**: se arrastra la fila por su asa o se usan las flechas. Tres casillas más por estado son **tuyas**, en `workspace.xml` y no en `tasklane.xml` (2.17.1): si tiene pestaña en la **Tool window**, columna en el **Board** y cuenta en la **Status bar**. De fábrica, todos salen en la ventana y en el tablero |
 | **Priorities** | Otra tabla, **de la más alta a la más baja** como en la ventana: nombre, por defecto, trigger y color para tema claro y oscuro, que se cambia pulsando la muestra. Arrastrar las filas es cambiar el orden de prioridad. Debajo, el interruptor de los triggers |
 | **Repositories** | Hasta qué profundidad se detectan repositorios bajo la raíz. Un filtro de vista, nunca un borrado |
 | **Code anchors** | Marca en el margen, pastilla en la línea o ninguna. Es **tuyo**: va a `workspace.xml` |
 | **Due dates** | Encender o apagar el aviso de vencimientos. Tuyo, en `workspace.xml` |
-| **Status bar** | Qué estados cuenta el widget de la barra de estado y si cuenta las vencidas. Las casillas siguen en vivo a la tabla de estados. Tuyo, en `workspace.xml`. Ver [La barra de estado](#la-barra-de-estado) |
+| **Status bar** | Si el widget de la barra de estado cuenta las vencidas; qué estados cuenta es la columna *Status bar* de la tabla de estados. Tuyo, en `workspace.xml`. Ver [La barra de estado](#la-barra-de-estado) |
 | **Completed tasks** | Esconder de la lista de un estado terminal lo cerrado hace más de N días, o verlo todo (de fábrica). Tuyo, en `workspace.xml`. Ver [Archivar lo terminado](#archivar-lo-terminado) |
 | **Images** | El peso de las imágenes del repositorio activo, *Delete Unused Images*, *Delete All Images…* y el umbral del aviso. Ver [Imágenes](#imágenes) |
 | Enlaces | *Save as template for new projects* y *Configure shortcuts in Keymap* |
@@ -825,7 +825,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.17.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.17.1.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

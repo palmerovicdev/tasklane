@@ -10,17 +10,13 @@ import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.keymap.KeymapUtil
-import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
 import com.intellij.ui.SearchTextField
-import com.intellij.ui.components.ActionLink
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.Task
@@ -30,7 +26,7 @@ import com.tasklane.service.SearchService
 import com.tasklane.service.TaskService
 import com.tasklane.service.ViewService
 import com.tasklane.ui.actions.TasklaneDataKeys
-import com.tasklane.ui.settings.TasklaneConfigurable
+import com.tasklane.ui.common.noStatesPanel
 import com.tasklane.ui.toolwindow.BoardHost
 import com.tasklane.ui.toolwindow.RepoSelectorAction
 import com.tasklane.ui.toolwindow.TasklanePanel
@@ -48,9 +44,7 @@ import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Container
 import java.awt.Dimension
-import java.awt.FlowLayout
 import java.awt.Graphics
-import java.awt.GridBagLayout
 import java.awt.LayoutManager
 import java.awt.Point
 import java.awt.Rectangle
@@ -111,23 +105,8 @@ internal class TaskBoard(private val project: Project) :
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
     )
 
-    /**
-     * Lo que se ve si no queda ningún estado en el tablero: se dice, y se lleva a los ajustes,
-     * que es donde se deshace. Un tablero en blanco sin más parecería roto.
-     */
-    private val empty = JPanel(GridBagLayout()).apply {
-        add(
-            JPanel(FlowLayout(FlowLayout.CENTER, JBUI.scale(4), 0)).apply {
-                isOpaque = false
-                add(JBLabel(TasklaneBundle.message("board.empty")).apply { foreground = UIUtil.getContextHelpForeground() })
-                add(
-                    ActionLink(TasklaneBundle.message("board.empty.settings")) {
-                        ShowSettingsUtil.getInstance().showSettingsDialog(project, TasklaneConfigurable::class.java)
-                    },
-                )
-            },
-        )
-    }
+    /** Si no queda ningún estado en el tablero. Ver [noStatesPanel]. */
+    private val empty = noStatesPanel(project, TasklaneBundle.message("board.empty"))
 
     private val cards = CardLayout()
     private val center = JPanel(cards).apply {

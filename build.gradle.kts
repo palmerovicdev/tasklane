@@ -121,6 +121,20 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.17.1 &mdash; choose where each state shows</h3>
+            <ul>
+              <li><b>Three more checkboxes per state</b> in <i>Settings &#9656; Tools &#9656; Tasklane
+                  &#9656; States</i>: <i>Tool window</i>, <i>Board</i> and <i>Status bar</i>. Out
+                  of the box every state has a tab in the tool window and a column on the board,
+                  new states too.</li>
+              <li>The states the status bar counts are now picked in that column, instead of a
+                  separate row of checkboxes; overdue tasks stay in their own group.</li>
+              <li><code>&#8997;&larr;/&rarr;</code> and <code>&#8679;&#8997;&larr;/&rarr;</code> skip the
+                  states you do not show.</li>
+              <li>The three are yours alone, not shared with the project.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.17.0 &mdash; the board</h3>
             <ul>
               <li><b>Every state side by side, in an editor tab</b>: <i>Open Board</i> in the tool

@@ -207,6 +207,10 @@ y repositorio son los de la ventana. La pestaña es `tasklane://<proyecto>`, un 
 ficheros propio pensado para que se reabra con el proyecto; eso no llegó a comprobarse, y la
 documentación no lo promete.
 
+En la `2.17.1`, tres casillas por estado en la tabla de estados de los ajustes: si sale en la
+tool window, en el tablero y en la barra de estado (ésta dejó su fila de casillas aparte).
+Son de la persona, en `workspace.xml`; de fábrica, todo sale en la ventana y en el tablero.
+
 ### P20 · Tarea desde un fallo ⏸️
 
 En la consola de Run/Debug y en el árbol de tests: *Create Tasklane Task* sobre un test

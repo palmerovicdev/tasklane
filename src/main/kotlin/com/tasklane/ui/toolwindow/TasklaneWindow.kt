@@ -7,15 +7,19 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.ui.content.ContentFactory
+import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneWorkspaceService
 import com.tasklane.domain.model.RepositoryRef
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskState
 import com.tasklane.service.TaskService
+import com.tasklane.service.ViewService
+import com.tasklane.ui.common.noStatesPanel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -38,6 +42,10 @@ import javax.swing.JPanel
  * conservan su árbol, su selección y sus grupos plegados. La identidad es el
  * [StateId] —nunca la posición ni el nombre, que son lo que el usuario puede
  * cambiar—, así que renombrar o reordenar estados en *Settings* tampoco tira nada.
+ *
+ * **Sólo los estados que se hayan dejado en la ventana** en la tabla de estados de los
+ * ajustes (2.17.1), que de fábrica son todos. Quitar uno le quita su pestaña, y con ella su
+ * panel; volver a ponerlo lo crea de nuevo.
  */
 internal class TasklaneWindow(
     private val project: Project,
@@ -45,8 +53,12 @@ internal class TasklaneWindow(
 ) : Disposable {
 
     private val workspace = TasklaneWorkspaceService.getInstance(project)
+    private val view = ViewService.getInstance(project)
     private val cards = CardLayout()
-    private val root = JPanel(cards)
+    private val root = JPanel(cards).apply {
+        // Si se quitaron todos los estados de la ventana. Ver [noStatesPanel].
+        add(noStatesPanel(project, TasklaneBundle.message("toolwindow.noStates")), EMPTY)
+    }
     private val panels = mutableMapOf<StateId, TasklanePanel>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -58,7 +70,7 @@ internal class TasklaneWindow(
         // Primera pasada síncrona: `createToolWindowContent` ya está en el EDT y así
         // la ventana nunca llega a pintarse vacía.
         val first = service.snapshot.value
-        sync(first.config.states)
+        sync(inWindow(first.config.states, view.windowHidden.value))
         // El estado que estaba abierto la última vez. Si ya no existe, el primero.
         select(workspace.selectedState?.let(::StateId), focus = false)
         syncTitle(first.repositories)
@@ -76,8 +88,7 @@ internal class TasklaneWindow(
         toolWindow.setTitleActions(listOf(RepoSelectorAction(project), ViewFilterAction(project)))
 
         scope.launch {
-            service.snapshot
-                .map { it.config.states }
+            combine(service.snapshot.map { it.config.states }, view.windowHidden, ::inWindow)
                 .distinctUntilChanged()
                 .collect { states -> withContext(Dispatchers.EDT) { sync(states) } }
         }
@@ -99,6 +110,10 @@ internal class TasklaneWindow(
         if (toolWindow.isDisposed) return
         toolWindow.setTitle(repositories.singleOrNull()?.displayName.orEmpty())
     }
+
+    /** Los estados con pestaña, en el orden de la configuración. */
+    private fun inWindow(states: List<TaskState>, hidden: Set<StateId>): List<TaskState> =
+        states.filter { it.id !in hidden }
 
     private fun sync(states: List<TaskState>) {
         if (toolWindow.isDisposed) return
@@ -137,7 +152,12 @@ internal class TasklaneWindow(
      * foco al arrancar el IDE es de las cosas que más molestan de un plugin.
      */
     fun select(id: StateId?, focus: Boolean = true) {
-        val target = id?.takeIf { it in panels } ?: panels.keys.firstOrNull() ?: return
+        val target = id?.takeIf { it in panels } ?: panels.keys.firstOrNull()
+        if (target == null) {
+            selected = null
+            cards.show(root, EMPTY)
+            return
+        }
         selected = target
         workspace.selectedState = target.value
         cards.show(root, target.value)
@@ -151,5 +171,8 @@ internal class TasklaneWindow(
 
     companion object {
         internal val KEY: Key<TasklaneWindow> = Key.create("Tasklane.window")
+
+        /** La tarjeta de «no hay estados». Ningún `StateId` puede llamarse así: todos llevan prefijo. */
+        private const val EMPTY = "tasklane.noStates"
     }
 }

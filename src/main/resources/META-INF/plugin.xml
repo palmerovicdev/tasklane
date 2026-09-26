@@ -330,7 +330,10 @@
                 done, how it groups its tasks and which date it groups by. The order is the order
                 of the tabs: drag a row by its handle or use the arrows. Deleting a state asks where
                 its tasks should go, and making a state terminal offers to fill in completion dates
-                from the last modification.</li>
+                from the last modification. Three more checkboxes per state are yours alone, not
+                shared with the project: whether it has a tab in the <b>tool window</b>, a column
+                on the <b>board</b>, and a count in the <b>status bar</b>. Out of the box every
+                state shows in the tool window and on the board.</li>
             <li><b>Priorities</b>, highest first as in the tool window: name, default, trigger, and
                 a colour for light and dark themes picked with the platform colour picker. Drag
                 rows to change the priority order; deleting one asks where its tasks should
@@ -346,8 +349,8 @@
                 and is not shared with the project.</li>
             <li><b>Due dates</b>: turn the overdue / due-today reminder on or off. Yours alone,
                 like the anchor marks.</li>
-            <li><b>Status bar</b>: which states the widget counts, and whether it counts overdue
-                tasks. Yours alone too.</li>
+            <li><b>Status bar</b>: whether the widget counts overdue tasks &mdash; which states it
+                counts is a column of the states table. Yours alone too.</li>
             <li><b>Completed tasks</b>: hide tasks completed more than N days ago from the list of
                 a done state, or show them all (the default). Yours alone.</li>
             <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
