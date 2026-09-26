@@ -26,6 +26,8 @@ import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SearchTextField
+import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.GraphicsUtil
@@ -52,6 +54,7 @@ import com.tasklane.domain.model.TaskId
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneSnapshot
+import com.tasklane.domain.text.TaskCopyText
 import com.tasklane.paging.GroupOutline
 import com.tasklane.paging.PageQuery
 import com.tasklane.paging.TaskPager
@@ -79,6 +82,7 @@ import java.awt.FlowLayout
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Point
+import java.awt.Rectangle
 import java.awt.Toolkit
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
@@ -145,6 +149,26 @@ internal class TasklanePanel(
     /** El arrastre por el asa en una pestaña a mano (2.11.0). Ver [CardReorder]. */
     private var reorder: CardReorder? = null
 
+    /**
+     * El distintivo de la tarjeta seleccionada que tiene el foco del teclado: el [index] de
+     * sus [TaskTreeRenderer.hotspots]. `null` si el foco es de la tarjeta entera. Lo mueve
+     * `Tab` (P34); ver [installBadgeWalk].
+     */
+    private data class Badge(val task: TaskId, val index: Int)
+
+    private var badge: Badge? = null
+
+    /** La última medida de [badge], y de qué fila y qué tarea era. Ver [focusedBadge]. */
+    private class BadgeMeasure(
+        val badge: Badge,
+        val task: Task,
+        val row: Rectangle,
+        val width: Int,
+        val placed: TaskTreeRenderer.Placed?,
+    )
+
+    private var badgeMeasure: BadgeMeasure? = null
+
     private val tree = object : CheckboxTree(
         renderer,
         root,
@@ -206,6 +230,7 @@ internal class TasklanePanel(
          */
         override fun paint(g: java.awt.Graphics) {
             super.paint(g)
+            paintBadge(g)
             reorder?.paint(g)
             landing?.lineY?.let { y ->
                 g.color = DROP_COLOR
@@ -621,16 +646,10 @@ internal class TasklanePanel(
     private fun installSearchField() {
         // El atajo se enseña dentro del campo. Es la única pista de que existe: no
         // hay botón de búsqueda que pueda llevar un tooltip con él, y ⌘K aquí no es
-        // el ⌘K del resto del IDE.
-        // Una lambda y no `KeymapUtil::getShortcutText`: la referencia a función de un
-        // `object` de Kotlin se compila leyendo su `INSTANCE`, y en la 2026.1 `KeymapUtil`
-        // es todavía una clase Java sin ese campo —el verificador del Marketplace lo
-        // marcaba como `NoSuchFieldError`—. La llamada directa es un `invokestatic`, que
-        // existe en las dos.
-        val hint = searchShortcut().shortcuts.firstOrNull()?.let { KeymapUtil.getShortcutText(it) }
-        searchField.textEditor.emptyText.text =
-            if (hint.isNullOrBlank()) TasklaneBundle.message("search.placeholder")
-            else TasklaneBundle.message("search.placeholder.shortcut", hint)
+        // el ⌘K del resto del IDE. Ver [showSearchHint].
+        showSearchHint(searchField)
+        // Reasignar el atajo en el Keymap cambia la pista sin reabrir la ventana (P34).
+        onKeymapChange(this) { showSearchHint(searchField) }
         searchField.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(e: DocumentEvent) {
                 if (!updatingSearchField) search.setQuery(searchField.text)
@@ -687,6 +706,31 @@ internal class TasklanePanel(
         // Subir y bajar a mano (2.11.0), con las teclas de *Move Line Up/Down* del IDE.
         localShortcut(ACTION_MOVE_UP, metaShiftArrow(KeyEvent.VK_UP), tree) { moveSelectedBy(-1) }
         localShortcut(ACTION_MOVE_DOWN, metaShiftArrow(KeyEvent.VK_DOWN), tree) { moveSelectedBy(1) }
+        // Lo que dejó escrito `docs/plan-atajos.md` (P34). Crear, tachar y marcar son lo que
+        // más se repite en la lista, y hasta la 2.24 las tres obligaban a soltar el teclado.
+        // `⌘N` es lo que hace en cualquier lista del IDE; el espacio, el gesto de una lista de
+        // tareas —el `CheckboxTree` ya lo atendía, pero tarea a tarea: un paso de `⌘Z` por
+        // fila—; el marcador, la tecla del marcador del IDE, que es `F3` en macOS y `F11` en
+        // los demás.
+        localShortcut(ACTION_NEW_TASK, menuKey(KeyEvent.VK_N), tree, enabled = ::isEditable) { createTask() }
+        localShortcut(
+            ACTION_TOGGLE_COMPLETE,
+            CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0)),
+            tree,
+            enabled = { badge != null || selectedTasks().isNotEmpty() },
+        ) { if (!activateBadge()) toggleSelected() }
+        localShortcut(
+            ACTION_TOGGLE_BOOKMARK,
+            KeymapShortcut(IDE_TOGGLE_BOOKMARK, CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_F11, 0))),
+            tree,
+            enabled = ::isSelectionEditable,
+        ) { toggleBookmarkSelected() }
+        // «`Enter` abre la tarea, `⌘Enter` la enseña aquí».
+        localShortcut(ACTION_TOGGLE_EXPAND, menuKey(KeyEvent.VK_ENTER), tree, enabled = ::canToggleExpandSelected) {
+            toggleExpandSelected()
+        }
+        installPriorityKeys()
+        installBadgeWalk()
 
         installDoubleClick()
         installGroupToggle()
@@ -745,14 +789,19 @@ internal class TasklanePanel(
     }
 
     private fun ideShortcut(id: String, key: Int, shift: Boolean): ShortcutSet =
-        ActionManager.getInstance().getAction(id)?.shortcutSet
-            ?.takeIf { it.shortcuts.isNotEmpty() }
-            ?: CustomShortcutSet(
+        KeymapShortcut(
+            id,
+            CustomShortcutSet(
                 KeyStroke.getKeyStroke(
                     key,
                     Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx or (if (shift) InputEvent.SHIFT_DOWN_MASK else 0),
                 ),
-            )
+            ),
+        )
+
+    /** La tecla con el modificador de los menús: `⌘` en macOS, `Ctrl` en los demás. */
+    private fun menuKey(keyCode: Int): ShortcutSet =
+        CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx))
 
     /**
      * `⌘C` copia el texto marcado dentro de una tarjeta, y `Escape` lo desmarca.
@@ -778,6 +827,15 @@ internal class TasklanePanel(
         action(CommonShortcuts.getCopy()) {
             CardTextSelection.selectedText(tree, renderer)?.let(CardTextSelection::copy)
         }
+        // Sin nada marcado, `⌘C` copia las tareas seleccionadas enteras, como el botón de
+        // copiar de la tarjeta (P34). Nunca a la vez que la de arriba: una de las dos está
+        // apagada, así que la pulsación no tiene que elegir.
+        localShortcut(
+            ACTION_COPY_TASK_TEXT,
+            CommonShortcuts.getCopy(),
+            tree,
+            enabled = { renderer.selection?.isEmpty != false && selectedTasks().isNotEmpty() },
+        ) { copySelectedText() }
         action(CommonShortcuts.ESCAPE) {
             renderer.selection = null
             tree.repaint()
@@ -861,6 +919,7 @@ internal class TasklanePanel(
      * con el teclado, y no tendría sentido que sólo respondiera al ratón.
      */
     private fun activateSelected() {
+        if (activateBadge()) return
         val node = tree.selectionPaths?.singleOrNull()?.lastPathComponent
         if (node is MoreNode) {
             loadMore(node)
@@ -892,17 +951,205 @@ internal class TasklanePanel(
         return CustomShortcutSet(KeyStroke.getKeyStroke(keyCode, modifiers))
     }
 
+    /**
+     * Un atajo de la lista: el que tenga [actionId] en el Keymap o, si no tiene, [fallback].
+     * Se lee en cada pulsación, así que reasignarlo se nota al momento (P34): ver
+     * [KeymapShortcut].
+     *
+     * [enabled] apagado deja pasar la tecla a quien la tuviera antes: es lo que permite que
+     * `⌘C` o el espacio sólo sean de la lista cuando la lista tiene algo que hacer con ellos.
+     */
     private fun localShortcut(
         actionId: String,
         fallback: ShortcutSet,
         component: JComponent,
+        enabled: () -> Boolean = { true },
         run: () -> Unit,
     ) {
-        val assigned = ActionManager.getInstance().getAction(actionId)?.shortcutSet
-        val shortcuts = assigned?.takeIf { it.shortcuts.isNotEmpty() } ?: fallback
         object : DumbAwareAction() {
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = enabled()
+            }
+
             override fun actionPerformed(e: AnActionEvent) = run()
-        }.registerCustomShortcutSet(shortcuts, component, this)
+        }.registerCustomShortcutSet(KeymapShortcut(actionId, fallback), component, this)
+    }
+
+    /**
+     * `1`…`9` cambian la prioridad de la selección (P34), en el orden del menú *Priority ▸*:
+     * `1` es la más alta. Sin modificador y sólo dentro de la lista, así que no se le quitan a
+     * nadie; apagadas sin una selección que se pueda tocar, y la que no tiene prioridad
+     * detrás —con tres prioridades, del `4` al `9`— también.
+     */
+    private fun installPriorityKeys() {
+        for (n in 1..PRIORITY_KEYS) {
+            object : DumbAwareAction() {
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = isSelectionEditable() && priorities.getOrNull(n - 1) != null
+                }
+
+                override fun actionPerformed(e: AnActionEvent) {
+                    priorities.getOrNull(n - 1)?.let { setPrioritySelected(it.id) }
+                }
+            }.registerCustomShortcutSet(
+                CustomShortcutSet(
+                    KeyStroke.getKeyStroke(KeyEvent.VK_0 + n, 0),
+                    KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0 + n, 0),
+                ),
+                tree,
+                this,
+            )
+        }
+    }
+
+    // ------------------------------------------ recorrer la tarjeta con el teclado (P34)
+
+    /**
+     * La fila seleccionada si es **una** tarea. Con varias, o con una cabecera, no hay
+     * tarjeta que recorrer ni que desplegar.
+     */
+    private fun selectedTaskRow(): Int? =
+        tree.selectionRows?.singleOrNull()?.takeIf { tree.getPathForRow(it)?.lastPathComponent is TaskNode }
+
+    private fun taskOfRow(row: Int): Task? = (tree.getPathForRow(row)?.lastPathComponent as? TaskNode)?.task
+
+    /** Dónde va `Tab` —o `⇧Tab`— desde el distintivo que tiene ahora el foco. Ver [BadgeWalk]. */
+    private fun badgeStep(forward: Boolean): BadgeWalk.Step {
+        val row = selectedTaskRow() ?: return BadgeWalk.Step.Out
+        val task = taskOfRow(row) ?: return BadgeWalk.Step.Out
+        val current = badge?.takeIf { it.task == task.id }?.index
+        if (!forward && current == null) return BadgeWalk.Step.Out
+        return BadgeWalk.step(current, renderer.hotspots(tree, row).size, forward)
+    }
+
+    private fun walkBadges(forward: Boolean) {
+        val task = selectedTaskRow()?.let(::taskOfRow) ?: return
+        when (val step = badgeStep(forward)) {
+            is BadgeWalk.Step.To -> {
+                badge = Badge(task.id, step.index)
+                focusedBadge()?.let { tree.scrollRectToVisible(it.bounds) }
+            }
+
+            BadgeWalk.Step.Card -> badge = null
+            BadgeWalk.Step.Out -> return
+        }
+        tree.repaint()
+    }
+
+    /**
+     * `Tab` y `⇧Tab` recorren los distintivos de la tarjeta seleccionada; `Escape` devuelve el
+     * foco a la tarjeta. Van con teclas fijas y sin acción declarada: son el tabulador, y
+     * reasignarlo no tendría sentido.
+     *
+     * Cuando no hay adonde ir dentro de la tarjeta la acción está **apagada**, y el tabulador
+     * sigue su camino de siempre —estados, buscador, lista—: el despachador del IDE atiende la
+     * tecla antes que el recorrido de foco de Swing, y sólo se la queda si la acción la usa.
+     */
+    private fun installBadgeWalk() {
+        fun key(stroke: KeyStroke, enabled: () -> Boolean, run: () -> Unit) {
+            object : DumbAwareAction() {
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = enabled()
+                }
+
+                override fun actionPerformed(e: AnActionEvent) = run()
+            }.registerCustomShortcutSet(CustomShortcutSet(stroke), tree, this)
+        }
+
+        key(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), { badgeStep(true) != BadgeWalk.Step.Out }) { walkBadges(true) }
+        key(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, InputEvent.SHIFT_DOWN_MASK), { badgeStep(false) != BadgeWalk.Step.Out }) {
+            walkBadges(false)
+        }
+        // Después del texto marcado, que tiene su propio `Escape`: nunca las dos a la vez.
+        key(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), { badge != null && renderer.selection?.isEmpty != false }) {
+            clearBadge()
+        }
+
+        // Otra tarjeta, u otra ventana, se llevan el foco del distintivo. Un repintado que
+        // vuelve a seleccionar la misma tarea no: marcar una casilla repinta la lista, y el
+        // foco tiene que seguir en ella para marcar la siguiente.
+        tree.addTreeSelectionListener {
+            val current = badge ?: return@addTreeSelectionListener
+            if (selectedTaskRow()?.let(::taskOfRow)?.id != current.task) clearBadge()
+        }
+        tree.addFocusListener(object : FocusAdapter() {
+            override fun focusLost(e: FocusEvent) = clearBadge()
+        })
+    }
+
+    private fun clearBadge() {
+        if (badge == null) return
+        badge = null
+        badgeMeasure = null
+        tree.repaint()
+    }
+
+    /**
+     * El distintivo con el foco y dónde está, si la tarjeta sigue seleccionada y lo sigue
+     * teniendo. Se recuerda la medida mientras la fila no cambie: se pregunta en cada
+     * repintado de la lista, y medir es barrer la fila.
+     */
+    private fun focusedBadge(): TaskTreeRenderer.Placed? {
+        val current = badge ?: return null
+        val row = selectedTaskRow() ?: return null
+        val task = taskOfRow(row)?.takeIf { it.id == current.task } ?: return null
+        val bounds = tree.getRowBounds(row) ?: return null
+        badgeMeasure?.takeIf { it.badge == current && it.task === task && it.row == bounds && it.width == tree.width }
+            ?.let { return it.placed }
+        val placed = renderer.hotspots(tree, row).getOrNull(current.index)
+        badgeMeasure = BadgeMeasure(current, task, bounds, tree.width, placed)
+        return placed
+    }
+
+    /** `Enter` y el espacio sobre un distintivo con el foco hacen lo que haría un clic. `false` si no hay ninguno. */
+    private fun activateBadge(): Boolean {
+        val placed = focusedBadge() ?: return false
+        val bounds = placed.bounds
+        RowClicks.activate(project, tree, renderer, placed.hotspot, RelativePoint(tree, Point(bounds.x, bounds.y + bounds.height)))
+        return true
+    }
+
+    /** El anillo de foco alrededor del distintivo, con el color de foco del tema. */
+    private fun paintBadge(g: java.awt.Graphics) {
+        val bounds = focusedBadge()?.bounds ?: return
+        val g2 = g.create() as Graphics2D
+        try {
+            GraphicsUtil.setupAAPainting(g2)
+            val stroke = JBUI.scale(BADGE_STROKE)
+            val arc = JBUI.scale(BADGE_ARC)
+            g2.color = JBUI.CurrentTheme.Focus.focusColor()
+            g2.stroke = BasicStroke(stroke.toFloat())
+            g2.drawRoundRect(bounds.x, bounds.y, bounds.width - 1, bounds.height - 1, arc, arc)
+        } finally {
+            g2.dispose()
+        }
+    }
+
+    // ------------------------------------------------ desplegar y copiar (P34)
+
+    /** Si *Expand Card* tiene algo que hacer: una sola tarea, y una tarjeta que esconde algo o ya está abierta. */
+    fun canToggleExpandSelected(): Boolean = selectedTaskRow()?.let { renderer.isExpandable(tree, it) } == true
+
+    fun isSelectedExpanded(): Boolean = selectedTaskRow()?.let(::taskOfRow)?.let(renderer::isExpanded) == true
+
+    /** Despliega o pliega la tarjeta seleccionada, y la deja a la vista: desplegada puede bajar del hueco. */
+    fun toggleExpandSelected() {
+        val row = selectedTaskRow() ?: return
+        val task = taskOfRow(row) ?: return
+        toggleExpanded(task)
+        tree.getRowBounds(row)?.let(tree::scrollRectToVisible)
+    }
+
+    /** El texto de las tareas seleccionadas, como el botón de copiar de la tarjeta, una detrás de otra. */
+    fun copySelectedText() {
+        val tasks = selectedTasks().ifEmpty { return }
+        CardTextSelection.copy(tasks.joinToString("\n\n") { TaskCopyText.plain(it) })
     }
 
     // ------------------------------------------------------------- rendering
@@ -1384,6 +1631,8 @@ internal class TasklanePanel(
      */
     fun toggleExpanded(task: Task) {
         renderer.toggleExpanded(task)
+        // Desplegada tiene otros distintivos, y el que tenía el foco ya no es el mismo.
+        clearBadge()
         remeasureRows()
     }
 
@@ -1756,6 +2005,20 @@ internal class TasklanePanel(
         private const val ACTION_MOVE_NEXT_STATE = "Tasklane.MoveToNextState"
         private const val ACTION_MOVE_UP = "Tasklane.MoveUp"
         private const val ACTION_MOVE_DOWN = "Tasklane.MoveDown"
+        private const val ACTION_NEW_TASK = "Tasklane.NewTask"
+        private const val ACTION_TOGGLE_COMPLETE = "Tasklane.ToggleComplete"
+        private const val ACTION_TOGGLE_BOOKMARK = "Tasklane.ToggleBookmark"
+        private const val ACTION_TOGGLE_EXPAND = "Tasklane.ToggleExpand"
+        private const val ACTION_COPY_TASK_TEXT = "Tasklane.CopyTaskText"
+
+        /** El marcador del IDE: su tecla es la del nuestro dentro de la lista. */
+        private const val IDE_TOGGLE_BOOKMARK = "ToggleBookmark"
+
+        /** Del `1` al `9`: ver [installPriorityKeys]. */
+        private const val PRIORITY_KEYS = 9
+
+        private const val BADGE_STROKE = 2
+        private const val BADGE_ARC = 6
 
         /**
          * Clave del historial del campo de búsqueda en `PropertiesComponent`. La comparten el
@@ -1770,10 +2033,24 @@ internal class TasklanePanel(
          * tienen que decir lo mismo. Lo usa también el buscador del tablero (2.17.0).
          */
         internal fun searchShortcut(): ShortcutSet {
-            val assigned = ActionManager.getInstance().getAction(ACTION_FOCUS_SEARCH)?.shortcutSet
-            if (assigned != null && assigned.shortcuts.isNotEmpty()) return assigned
             val menuMask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
-            return CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_K, menuMask))
+            return KeymapShortcut(ACTION_FOCUS_SEARCH, CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_K, menuMask)))
+        }
+
+        /**
+         * La pista del buscador con el atajo que lo enfoca dentro: es la única pista de que
+         * existe. La usan la ventana y el tablero, y las dos la rehacen si cambia el Keymap.
+         */
+        internal fun showSearchHint(field: SearchTextField) {
+            // Una lambda y no `KeymapUtil::getShortcutText`: la referencia a función de un
+            // `object` de Kotlin se compila leyendo su `INSTANCE`, y en la 2026.1 `KeymapUtil`
+            // es todavía una clase Java sin ese campo —el verificador del Marketplace lo
+            // marcaba como `NoSuchFieldError`—. La llamada directa es un `invokestatic`, que
+            // existe en las dos.
+            val hint = searchShortcut().shortcuts.firstOrNull()?.let { KeymapUtil.getShortcutText(it) }
+            field.textEditor.emptyText.text =
+                if (hint.isNullOrBlank()) TasklaneBundle.message("search.placeholder")
+                else TasklaneBundle.message("search.placeholder.shortcut", hint)
         }
 
         /**

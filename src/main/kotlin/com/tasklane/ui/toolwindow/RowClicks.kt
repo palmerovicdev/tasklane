@@ -147,60 +147,42 @@ internal object RowClicks {
 
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount != 1 || e.button != MouseEvent.BUTTON1 || e.isPopupTrigger) return
-                when (val hotspot = renderer.hotspotAt(tree, e.point)) {
-                    is TaskTreeRenderer.Hotspot.Links -> {
-                        e.consume()
-                        TaskLinks.open(hotspot.links, RelativePoint(e))
-                    }
-
-                    is TaskTreeRenderer.Hotspot.Anchor -> {
-                        e.consume()
-                        CodeAnchors.open(project, hotspot.anchor)
-                    }
-
-                    is TaskTreeRenderer.Hotspot.Priority -> {
-                        e.consume()
-                        PriorityPopup.show(project, renderer.config, hotspot.task, RelativePoint(e))
-                    }
-
-                    is TaskTreeRenderer.Hotspot.Image -> {
-                        e.consume()
-                        ImagePreviewPopup.show(project, hotspot.repo, hotspot.id, RelativePoint(e), tree)
-                    }
-
-                    is TaskTreeRenderer.Hotspot.Images -> {
-                        e.consume()
-                        ImagePreviewPopup.show(project, hotspot.repo, hotspot.ids, RelativePoint(e), tree)
-                    }
-
-                    is TaskTreeRenderer.Hotspot.Copy -> {
-                        e.consume()
-                        CardTextSelection.copy(TaskCopyText.plain(hotspot.task))
-                    }
-
-                    // La casilla escribe su `x` en el cuerpo (2.11.0). En un repositorio en
-                    // solo lectura el servicio no aplica el comando y la casilla se queda
-                    // como estaba, igual que la de completar.
-                    is TaskTreeRenderer.Hotspot.Check -> {
-                        e.consume()
-                        TaskService.getInstance(project).apply(
-                            TaskCommand.ToggleCheck(hotspot.task.repo, hotspot.task.id, hotspot.offset),
-                        )
-                    }
-
-                    // Al buscador de la ventana, que es también el del tablero (P30): la
-                    // búsqueda se ve y se deshace donde se escribe, y pulsar otra vez la quita.
-                    is TaskTreeRenderer.Hotspot.Tag -> {
-                        e.consume()
-                        search.setQuery(TagToggle.toggle(search.rawQuery.value, hotspot.name))
-                    }
-
-                    null -> Unit
-                }
+                val hotspot = renderer.hotspotAt(tree, e.point) ?: return
+                e.consume()
+                activate(project, tree, renderer, hotspot, RelativePoint(e))
             }
         }
         tree.addMouseListener(mouse)
         tree.addMouseMotionListener(mouse)
+    }
+
+    /**
+     * Lo que hace [hotspot] al pulsarlo, con el ratón o con el teclado (P34): el `Enter` sobre
+     * un distintivo recorrido con el tabulador hace lo mismo que un clic en él. [where] es
+     * dónde abrir lo que se abra: el ratón, o debajo del distintivo.
+     */
+    fun activate(project: Project, tree: JTree, renderer: TaskTreeRenderer, hotspot: TaskTreeRenderer.Hotspot, where: RelativePoint) {
+        when (hotspot) {
+            is TaskTreeRenderer.Hotspot.Links -> TaskLinks.open(hotspot.links, where)
+            is TaskTreeRenderer.Hotspot.Anchor -> CodeAnchors.open(project, hotspot.anchor)
+            is TaskTreeRenderer.Hotspot.Priority -> PriorityPopup.show(project, renderer.config, hotspot.task, where)
+            is TaskTreeRenderer.Hotspot.Image -> ImagePreviewPopup.show(project, hotspot.repo, hotspot.id, where, tree)
+            is TaskTreeRenderer.Hotspot.Images -> ImagePreviewPopup.show(project, hotspot.repo, hotspot.ids, where, tree)
+            is TaskTreeRenderer.Hotspot.Copy -> CardTextSelection.copy(TaskCopyText.plain(hotspot.task))
+
+            // La casilla escribe su `x` en el cuerpo (2.11.0). En un repositorio en solo
+            // lectura el servicio no aplica el comando y la casilla se queda como estaba,
+            // igual que la de completar.
+            is TaskTreeRenderer.Hotspot.Check -> TaskService.getInstance(project).apply(
+                TaskCommand.ToggleCheck(hotspot.task.repo, hotspot.task.id, hotspot.offset),
+            )
+
+            // Al buscador de la ventana, que es también el del tablero (P30): la búsqueda
+            // se ve y se deshace donde se escribe, y pulsar otra vez la quita.
+            is TaskTreeRenderer.Hotspot.Tag -> SearchService.getInstance(project).let { search ->
+                search.setQuery(TagToggle.toggle(search.rawQuery.value, hotspot.name))
+            }
+        }
     }
 
     /**

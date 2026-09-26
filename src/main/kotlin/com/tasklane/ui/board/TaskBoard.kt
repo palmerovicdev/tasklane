@@ -9,7 +9,6 @@ import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
-import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.DocumentAdapter
@@ -30,6 +29,7 @@ import com.tasklane.ui.search.QuerySearchField
 import com.tasklane.ui.toolwindow.BoardHost
 import com.tasklane.ui.toolwindow.RepoSelectorAction
 import com.tasklane.ui.toolwindow.TasklanePanel
+import com.tasklane.ui.toolwindow.onKeymapChange
 import com.tasklane.ui.toolwindow.ViewFilterAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -197,11 +197,8 @@ internal class TaskBoard(private val project: Project) :
 
     private fun installSearchField() {
         searchField.textEditor.accessibleContext.accessibleName = TasklaneBundle.message("a11y.search")
-        // Una lambda y no una referencia a función: ver el mismo aviso en `TasklanePanel`.
-        val hint = TasklanePanel.searchShortcut().shortcuts.firstOrNull()?.let { KeymapUtil.getShortcutText(it) }
-        searchField.textEditor.emptyText.text =
-            if (hint.isNullOrBlank()) TasklaneBundle.message("search.placeholder")
-            else TasklaneBundle.message("search.placeholder.shortcut", hint)
+        TasklanePanel.showSearchHint(searchField)
+        onKeymapChange(this) { TasklanePanel.showSearchHint(searchField) }
         searchField.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(e: DocumentEvent) {
                 if (!updatingSearchField) search.setQuery(searchField.text)

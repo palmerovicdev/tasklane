@@ -349,6 +349,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private var menuActive = false
     private var expandActive = false
 
+    /** Si la tarjeta montada se puede desplegar o plegar, esté o no el ratón encima. Ver [isExpandable]. */
+    private var expandable = false
+
     /**
      * Sin hueco entre uno y otro: cada icono ya trae [ICON_PAD] a cada lado, y con el de
      * los distintivos encima los tres se leían como controles sueltos. Juntos son un
@@ -484,6 +487,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         bookmarkActive = false
         menuActive = false
         expandActive = false
+        expandable = false
         extraLines.forEach { it.isVisible = false }
         imageViews.forEach { it.isVisible = false }
         pendingImagesShown = false
@@ -1399,7 +1403,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * que desplegar, y un botón que no hace nada es peor que ninguno—.
      */
     private fun showExpandIcon(open: Boolean, hidden: Boolean, hovered: Boolean) {
-        expandActive = open || (hidden && hovered)
+        expandable = open || hidden
+        expandActive = expandable && (open || hovered)
         expand.icon = when {
             !expandActive -> EmptyIcon.ICON_16
             open -> AllIcons.General.ArrowUp
@@ -1688,8 +1693,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      */
     fun hotspotAt(tree: JTree, point: Point): Hotspot? {
         val hit = taskAt(tree, point) ?: return null
-        val task = hit.node.task
-        return when (val tag = tagAt(tree, hit, point)) {
+        return tagAt(tree, hit, point)?.let { hotspotOf(hit.node.task, it) }
+    }
+
+    /** Lo que hace el fragmento etiquetado [tag] de la tarjeta de [task]. Ver [hotspotAt]. */
+    private fun hotspotOf(task: Task, tag: Any): Hotspot? =
+        when (tag) {
             LINKS -> Hotspot.Links(task.links)
             is TaskLink -> Hotspot.Links(listOf(tag))
             is CodeAnchor -> Hotspot.Anchor(tag)
@@ -1704,6 +1713,63 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             is CheckTag -> Hotspot.Check(tag.task, tag.offset)
             is TagChip -> Hotspot.Tag(tag.name)
             else -> null
+        }
+
+    /** Un distintivo pulsable de una fila y dónde se pinta, en coordenadas del árbol. Ver [hotspots]. */
+    class Placed(val hotspot: Hotspot, val bounds: Rectangle)
+
+    /**
+     * Lo pulsable de la fila [row] en el orden en que se lee: las líneas de arriba abajo y
+     * cada una de izquierda a derecha, con la de distintivos al final. Es lo que recorre el
+     * tabulador (P34).
+     *
+     * Se barre la fila montada píxel a píxel con la misma pregunta que contesta un clic
+     * —[tagIn]— en vez de reconstruirlo por otro camino: así lo que se alcanza con el
+     * teclado es, por construcción, lo que se alcanza con el ratón, y el foco se pinta justo
+     * donde respondería el clic. Barrer cuesta, pero sólo se hace al pulsar una tecla o al
+     * pintar el foco, nunca por cada fila de la lista.
+     */
+    fun hotspots(tree: JTree, row: Int): List<Placed> {
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
+        val bounds = paintedRowBounds(tree, row) ?: return emptyList()
+        prepare(tree, node, row, bounds)
+        meta.doLayout()
+
+        val out = mutableListOf<Placed>()
+        fun add(tag: Any?, x: Int, y: Int, width: Int, height: Int) {
+            val hotspot = tag?.let { hotspotOf(node.task, it) } ?: return
+            out += Placed(hotspot, Rectangle(bounds.x + lines.x + x, bounds.y + lines.y + y, width, height))
+        }
+        for (line in lines.components) {
+            if (!line.isVisible || line.width <= 0) continue
+            when {
+                line is CardImageView -> add(line.attachment, line.x, line.y, line.width, line.height)
+                // Por donde se ven y no por el orden en que se añadieron.
+                line === meta -> for (chip in meta.components.sortedWith(compareBy({ it.y }, { it.x }))) {
+                    if (!chip.isVisible || chip.width <= 0 || chip !is SimpleColoredComponent) continue
+                    sweep(chip) { tag, from, to -> add(tag, meta.x + chip.x + from, meta.y + chip.y, to - from, chip.height) }
+                }
+                line is SimpleColoredComponent ->
+                    sweep(line) { tag, from, to -> add(tag, line.x + from, line.y, to - from, line.height) }
+            }
+        }
+        return out
+    }
+
+    /**
+     * Los tramos etiquetados de [target], de izquierda a derecha: cada uno con su etiqueta y
+     * de qué `x` a qué `x` va. Dos fragmentos seguidos con la misma etiqueta son un tramo: un
+     * enlace partido por el resaltado de la búsqueda se sigue pulsando como uno.
+     */
+    private fun sweep(target: SimpleColoredComponent, span: (Any, Int, Int) -> Unit) {
+        var current: Any? = null
+        var from = 0
+        for (x in 0..target.width) {
+            val tag = if (x < target.width) tagIn(target, x) else null
+            if (tag == current) continue
+            current?.let { span(it, from, x) }
+            current = tag
+            from = x
         }
     }
 
@@ -1775,10 +1841,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             line = childAt(meta, x, y) ?: return null
         }
         val target = line as? SimpleColoredComponent ?: return null
+        return tagIn(target, x - target.x)
+    }
+
+    /** La etiqueta de lo que hay a [local] píxeles del borde izquierdo de [target]. Ver [tagAt]. */
+    private fun tagIn(target: SimpleColoredComponent, local: Int): Any? {
         // Un distintivo reducido a su icono es entero el icono, y no lleva fragmento.
         iconTags[target]?.let { return it }
-
-        val local = x - target.x
         if (local < 0) return null
         // El icono no es un fragmento con etiqueta, pero es la mitad visible de un
         // distintivo pequeño, y muchas veces la mitad a la que se apunta: el punto de
@@ -1937,6 +2006,18 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val bounds = paintedRowBounds(tree, row) ?: return emptyList()
         prepare(tree, node, row, bounds)
         return pendingCard.map { runs -> marked(runs).filter { it.second }.map { it.first.text } }
+    }
+
+    /**
+     * Si la tarjeta de la fila [row] tiene algo que desplegar, o ya está desplegada: lo que
+     * enseñaría el botón con el ratón encima. Es lo que pregunta *Expand Card* desde el
+     * teclado (P34), que no tiene ratón que lo haga aparecer.
+     */
+    fun isExpandable(tree: JTree, row: Int): Boolean {
+        val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return false
+        val bounds = paintedRowBounds(tree, row) ?: return false
+        prepare(tree, node, row, bounds)
+        return expandable
     }
 
     /** Deja el renderer montado y medido para la fila [row], que es el único estado que tiene. */
