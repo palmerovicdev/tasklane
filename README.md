@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.25.1.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.26.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -177,6 +177,15 @@ filtro. El precio es que `Alt+←/→` ya no cambia de estado.
 El filtro **no** es una consulta: no se escribe, no tiene sintaxis y borrar la búsqueda
 no se lo lleva por delante. Son dos cosas que se acumulan —«vencidas» *y* lo que diga
 el campo—, y por eso el desplegable está en la cabecera y no dentro del campo.
+
+**Un repositorio sin tareas enseña por dónde empezar** (2.26.0). La lista vacía no dice
+«pulsa el +» sino qué se puede hacer, con un enlace que lo hace y su atajo al lado: crear una
+tarea (`⌘N`), crearla desde cualquier sitio (`⌘⌥R`), anclarla al cursor del editor que se
+está viendo (`⌘⌥⇧R`; sin editor abierto, un globo dice cómo), importar los `TODO` del proyecto
+y, si el IDE trae el plugin *MCP Server*, conectar un agente —abre sus ajustes—. Sale sólo con
+el repositorio **del todo vacío**, sin búsqueda ni filtro; en una pestaña vacía de un
+repositorio con tareas sigue diciendo lo de siempre, y en el tablero no sale. La lista sigue
+debajo: `⌘V` y soltar funcionan igual, y son la otra forma de empezar.
 
 **Listas enormes.** La lista se carga a páginas de cincuenta y anuncia lo que queda
 —«4.213 more»—: llegar a esa fila desplazándose, pulsarla o `Enter` sobre ella trae la
@@ -509,6 +518,11 @@ las marcas las pone el **modelo**, no el analizador del IDE: mover una tarea a *
 apaga la suya en ese momento, no en el siguiente pase — y funcionan igual en un `.txt`
 que en un `.kt`.
 
+**La primera vez que se ancla una tarea**, un *Got It* debajo de la línea lo cuenta (2.26.0):
+qué hace la marca, que la ficha de la tarjeta vuelve ahí y que el ancla sigue al código. Sale
+si el fichero es el del editor activo y la línea se ve —desde *from Here* o `Alt+Enter`, casi
+siempre—; si no, espera a la próxima. Con las marcas apagadas no sale.
+
 ## Quick Add
 
 `⌘⌥R` abre **el mismo diálogo** que *New Task*, desde cualquier sitio del IDE y sin
@@ -714,6 +728,7 @@ cualquier otra edición.
 | Fijar la ventana | La chincheta de su cabecera la deja **encima del editor** y deja de cerrarse al pulsar fuera, para programar con la captura delante. Fijada se cierra con su ✕, o con `Escape` estando encima de ella |
 | Quitar | Se selecciona el `[image]` y `Supr`. Al irse la referencia se va la imagen |
 | Buscar | `has:image` filtra las tareas que llevan alguna |
+| La primera vez | Un *Got It* debajo de la miniatura —o del contador— de la tarjeta cuenta que se amplía, que se fija y dónde se guarda (2.26.0). Sale cuando esa tarjeta se ve en la lista |
 
 **El nombre del fichero es el SHA-256 de su contenido.** De ahí salen tres cosas
 gratis: la misma captura pegada en dos tareas ocupa un fichero y no dos, no hay
@@ -944,7 +959,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.25.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.26.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

@@ -125,6 +125,21 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.26.0 &mdash; first steps</h3>
+            <ul>
+              <li><b>An empty repository shows where to start</b>: links to create a task
+                  (<code>&#8984;N</code>), quick-add from anywhere (<code>&#8984;&#8997;R</code>),
+                  anchor a task to the code at the editor's caret
+                  (<code>&#8984;&#8997;&#8679;R</code>), import the project's TODO comments and,
+                  with the IDE's MCP Server plugin, connect an AI agent.</li>
+              <li><b>A <i>Got It</i> the first time you anchor a task</b>, right under the line:
+                  what the mark does, and that the anchor follows the code.</li>
+              <li><b>A <i>Got It</i> the first time a task gets a screenshot</b>, under its
+                  thumbnail in the list: click to enlarge, pin it over the editor, and it stays
+                  in <code>.idea/tasklane</code>, out of version control.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.25.1 &mdash; handing off doesn't move the task</h3>
             <ul>
               <li><b><i>Hand Off to Agent</i> leaves the task where it is</b>: no more

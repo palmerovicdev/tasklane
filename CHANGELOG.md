@@ -9,6 +9,36 @@ de ahí manda semver sobre lo publicado.
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.26.0]
+
+Menor sin cambio de formato: los primeros pasos, en la propia lista. Es la P35 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Un repositorio sin tareas enseña por dónde empezar.** En lugar de «Press the + button to
+  create one», la lista vacía trae enlaces que lo hacen, cada uno con su atajo del Keymap al
+  lado: *Create a task* (`⌘N`), *Quick add from anywhere* (`⌘⌥R`), *Anchor to the code*
+  (`⌘⌥⇧R`), *Import TODO comments…* y, con el plugin *MCP Server* del IDE, *Connect an AI agent
+  (MCP)*, que abre sus ajustes. *Anchor to the code* crea la tarea anclada al cursor del
+  editor que se está viendo; sin editor abierto, un globo dice cómo se hace.
+- **Un *Got It* la primera vez que se ancla una tarea**, en el editor y debajo de la línea: qué
+  hace la marca, que la ficha de la tarjeta vuelve ahí y que el ancla sigue al código al
+  editar, renombrar o mover el fichero. Con un enlace a cómo se marcan las líneas.
+- **Un *Got It* la primera vez que una tarea gana una captura**, debajo de su miniatura —o de su
+  contador— en la lista: que se amplía con un clic, que se fija encima del editor y que se
+  guarda en `.idea/tasklane`, fuera del control de versiones.
+
+### Detalles
+- Los primeros pasos sólo salen con el repositorio **del todo vacío** —tampoco archivadas—,
+  sin búsqueda ni filtro y mientras se pueda escribir en él. Con tareas en otros estados, la
+  pestaña vacía dice lo de siempre, y en el tablero tampoco salen: serían los mismos enlaces
+  en cada columna.
+- Los *Got It* salen donde se está mirando o no salen: el del ancla, si su fichero es el del
+  editor activo y la línea se ve; el de la captura, si su tarjeta se ve en la lista. Si no,
+  esperan a la próxima. Se dan por vistos al pulsar *Got It* o `Escape`, una vez por
+  instalación, y lo que hace un agente por MCP no los enseña.
+- **Formato:** ninguno.
+
 ## [2.25.1]
 
 Encargar una tarea a un agente ya no la mueve de estado: la cierra el agente al acabar.

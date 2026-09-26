@@ -1366,7 +1366,9 @@ internal class TasklanePanel(
             filter != TaskFilter.ALL ->
                 tree.emptyText.text = TasklaneBundle.message("toolwindow.tree.noFilterMatches")
 
-            untouched && board == null && isEditable() -> FirstSteps.fill(
+            // Mientras se importa un `tasks.xml` de antes de la 2.0 el repositorio parece
+            // vacío y no lo está.
+            untouched && board == null && isEditable() && snapshot.activeRepo !in snapshot.loading -> FirstSteps.fill(
                 tree.emptyText,
                 project,
                 tree,

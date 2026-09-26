@@ -41,6 +41,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P30 · Etiquetas de verdad                               | `2.23.0` |
 | ✅ | P31 · Vencimiento y etiquetas desde el menú             | `2.24.0` |
 | ✅ | P34 · El teclado, entero de verdad                      | `2.25.0` |
+| ✅ | P35 · Primeros pasos en una lista vacía                 | `2.26.0` |
 
 ---
 
@@ -465,7 +466,7 @@ Priority/Tag*, *Don't Group*, *Manual Order*, los cuatro *Show … Tasks*, *Next
 *Expand Card* y *Copy Task Text*. Los atajos se leen del Keymap en cada pulsación
 (`KeymapShortcut`).
 
-### P35 · Primeros pasos en una lista vacía 👾
+### P35 · Primeros pasos en una lista vacía ✅ `2.26.0`
 
 Un proyecto nuevo enseña «No tasks yet · Press the + button to create one», en texto sin
 enlace. Es justo cuando quien acaba de instalar el plugin decide si le sirve, y no se entera
@@ -473,6 +474,19 @@ de lo que lo distingue: `⌘⌥R` desde cualquier sitio, *New Tasklane Task from
 editor, *Import TODO Comments…* y conectar un agente por MCP. Propuesta: esas cuatro como
 enlaces en la lista vacía, y un *Got It* la primera vez que se crea un ancla o se pega una
 captura. Pesa más ahora, a las puertas del Marketplace.
+
+Salió así (`FirstSteps`, `FirstStepTips`, `AnchorGotIt`): la lista vacía es el `emptyText` del
+árbol, no un panel encima —`⌘V` y soltar siguen funcionando—, con *Create a task* delante de
+las cuatro, cada enlace con su atajo leído del Keymap y rehecho si cambia. Sale sólo con el
+repositorio **del todo vacío** (ni archivadas), sin búsqueda ni filtro, escribible, y no en el
+tablero. *Anchor to the code* ancla al cursor del editor a la vista, o dice cómo sin editor;
+*Connect an AI agent* abre *Settings → Tools → MCP Server* y sólo sale con ese plugin. Los dos
+*Got It* salen de una señal nueva del servicio, `added`, calculada del mismo `Change` que
+`⌘Z` (`Additions`: anclas a ficheros nuevos y tareas con capturas nuevas), así que lo del
+agente no cuenta; se escucha sólo hasta que se dice *Got It*. El del ancla, en el editor debajo
+de la línea, si su fichero es el del editor activo y se ve; el de la captura, debajo de su
+miniatura o contador en la tarjeta. Nunca se enseñan si lo señalado no se ve: la plataforma
+esconde el globo fuera de lo visible como si se hubiera pulsado *Got It*.
 
 ---
 

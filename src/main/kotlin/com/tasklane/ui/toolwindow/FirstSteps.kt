@@ -55,37 +55,39 @@ internal object FirstSteps {
     private const val LINK_GAP = 4
     private const val DEFAULT_GAP = 2
 
+    /** Una línea: lo que dice, su atajo si lo tiene y lo que hace al pulsarla. */
+    class Step(val text: String, val shortcut: String?, val run: (ActionEvent) -> Unit)
+
     /**
      * Rellena [status]. [newTaskShortcut] es el de *New Task* dentro de la lista —`⌘N`, o el
      * que diga el Keymap—, que es local y no se deduce del id.
      */
     fun fill(status: StatusText, project: Project, owner: JComponent, newTaskShortcut: String?, newTask: () -> Unit) {
+        val steps = buildList {
+            add(Step(TasklaneBundle.message("firststeps.new"), newTaskShortcut) { newTask() })
+            add(Step(TasklaneBundle.message("firststeps.quickAdd"), shortcutOf(QUICK_ADD)) { run(QUICK_ADD, owner, it) })
+            add(Step(TasklaneBundle.message("firststeps.fromHere"), shortcutOf(FROM_HERE)) { fromHere(project, owner, it) })
+            add(Step(TasklaneBundle.message("firststeps.importTodos"), null) { run(IMPORT_TODOS, owner, it) })
+            if (hasMcpServer()) add(Step(TasklaneBundle.message("firststeps.agent"), null) { openMcpSettings(project) })
+        }
+        paint(status, TasklaneBundle.message("toolwindow.tree.empty"), steps)
+    }
+
+    /** Lo que se ve, sin buscar nada en el IDE: es lo que se prueba a lo estrecho. */
+    fun paint(status: StatusText, title: String, steps: List<Step>) {
         status.clear()
         // El hueco se fija al crear cada línea y se queda puesto para las siguientes, también
         // para los otros textos vacíos de esta lista: se devuelve al de fábrica al final.
         status.withUnscaledGapAfter(TITLE_GAP)
-        status.appendText(TasklaneBundle.message("toolwindow.tree.empty"))
+        status.appendText(title)
         status.withUnscaledGapAfter(LINK_GAP)
-
-        link(status, TasklaneBundle.message("firststeps.new"), newTaskShortcut) { newTask() }
-        link(status, TasklaneBundle.message("firststeps.quickAdd"), shortcutOf(QUICK_ADD)) { event ->
-            run(QUICK_ADD, owner, event)
-        }
-        link(status, TasklaneBundle.message("firststeps.fromHere"), shortcutOf(FROM_HERE)) { event ->
-            fromHere(project, owner, event)
-        }
-        link(status, TasklaneBundle.message("firststeps.importTodos"), null) { event ->
-            run(IMPORT_TODOS, owner, event)
-        }
-        if (hasMcpServer()) {
-            link(status, TasklaneBundle.message("firststeps.agent"), null) { openMcpSettings(project) }
+        for (step in steps) {
+            status.appendLine(step.text, SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { step.run(it) }
+            if (!step.shortcut.isNullOrBlank()) {
+                status.appendText("  ${step.shortcut}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+            }
         }
         status.withUnscaledGapAfter(DEFAULT_GAP)
-    }
-
-    private fun link(status: StatusText, text: String, shortcut: String?, run: (ActionEvent) -> Unit) {
-        status.appendLine(text, SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { run(it) }
-        if (!shortcut.isNullOrBlank()) status.appendText("  $shortcut", SimpleTextAttributes.GRAYED_ATTRIBUTES)
     }
 
     /** Llamada directa y no referencia a función: ver el KDoc de `showSearchHint`. */
