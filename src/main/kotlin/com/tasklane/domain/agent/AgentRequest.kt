@@ -19,9 +19,9 @@ import com.tasklane.domain.model.Task
  *
  * Las plantillas son dos, y son de la persona (ver `AgentSettings`):
  *
- * - **La orden**, de fábrica [DEFAULT_COMMAND]. [PROMPT] es la petición **ya entrecomillada**
- *   para la shell de la pestaña; [ID] y [TITLE], igual. Si la orden no dice dónde va la
- *   petición, va al final: `codex` a secas tiene que funcionar.
+ * - **La orden**, una por [Agent] (2.27.0); de fábrica, [DEFAULT_AGENTS]. [PROMPT] es la
+ *   petición **ya entrecomillada** para la shell de la pestaña; [ID] y [TITLE], igual. Si la
+ *   orden no dice dónde va la petición, va al final: `codex` a secas tiene que funcionar.
  * - **La petición**, de fábrica [DEFAULT_PROMPT]. [ID] y [TITLE] van tal cual, porque es
  *   texto para el agente y no para la shell.
  */
@@ -33,6 +33,12 @@ object AgentRequest {
 
     /** Claude Code, que es el que habla con el servidor MCP del IDE desde la 2.12.0. */
     const val DEFAULT_COMMAND = "claude $PROMPT"
+
+    /**
+     * Los agentes de quien no ha tocado la lista: sólo Claude Code. Con uno solo, *Hand Off to
+     * Agent* es una entrada del menú; con dos o más, un submenú.
+     */
+    val DEFAULT_AGENTS: List<Agent> = listOf(Agent("Claude Code", DEFAULT_COMMAND))
 
     /**
      * Qué se le pide. Nombra las herramientas de Tasklane porque el agente sólo tiene el id: el
@@ -112,19 +118,25 @@ object AgentRequest {
     private val PLACEHOLDER = Regex("\\{(?:prompt|id|title)}")
 
     /**
-     * «claude · Arreglar el login»: el programa y la tarea, para distinguir varias pestañas. El
-     * programa es la primera palabra de la orden que no sea una variable de entorno
-     * (`FOO=1 claude …`).
+     * «Claude Code · Arreglar el login»: el agente y la tarea, para distinguir varias pestañas.
+     * Un agente sin nombre pone su programa: «claude · Arreglar el login».
      */
-    fun tabName(template: String, task: Task): String {
-        val program = oneLine(template).split(' ')
+    fun tabName(agent: Agent, task: Task): String {
+        val label = oneLine(agent.label)
+        val title = oneLine(task.title).let { if (it.length > TAB_TITLE) it.take(TAB_TITLE - 1).trimEnd() + "…" else it }
+        return if (title.isEmpty()) label else "$label · $title"
+    }
+
+    /**
+     * El programa de [template]: la primera palabra que no sea una variable de entorno
+     * (`FOO=1 claude …`) ni un marcador, sin su ruta.
+     */
+    fun program(template: String): String =
+        oneLine(template).split(' ')
             .firstOrNull { it.isNotEmpty() && '=' !in it && !it.startsWith('{') }
             ?.substringAfterLast('/')
             ?.substringAfterLast('\\')
             ?: "agent"
-        val title = oneLine(task.title).let { if (it.length > TAB_TITLE) it.take(TAB_TITLE - 1).trimEnd() + "…" else it }
-        return if (title.isEmpty()) program else "$program · $title"
-    }
 
     /** Todo espacio —saltos incluidos— a uno solo, y fuera los caracteres de control. */
     private fun oneLine(text: String): String =

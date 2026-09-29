@@ -7,6 +7,7 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.AgentSettings
+import com.tasklane.domain.agent.Agent
 import com.tasklane.domain.agent.AgentRequest
 import com.tasklane.domain.model.Task
 import com.tasklane.service.ExportService
@@ -21,24 +22,26 @@ import com.tasklane.service.TaskService
  */
 internal object AgentHandOff {
 
-    /** Si *Hand Off to Agent* puede abrir algo: con terminal y con una orden. */
-    fun canOpen(): Boolean = AgentTerminal.find() != null && AgentSettings.getInstance().command.isNotBlank()
+    /**
+     * A quién se puede encargar: los agentes de los ajustes, o ninguno sin terminal. Con uno,
+     * *Hand Off to Agent* lo abre directamente; con más, pregunta cuál (2.27.0).
+     */
+    fun agents(): List<Agent> = if (AgentTerminal.find() == null) emptyList() else AgentSettings.getInstance().agents
 
     /**
-     * Abre una pestaña de la terminal en el repositorio de [task], con el agente trabajando en
+     * Abre una pestaña de la terminal en el repositorio de [task], con [agent] trabajando en
      * ella. Devuelve si la abrió. La tarea no se mueve: la cierra el agente al acabar.
      *
      * Se abre en **la raíz del repositorio de la tarea** y no en la del proyecto: con varios
      * repositorios, el agente tiene que empezar donde está el código del que habla la tarea.
      */
-    fun open(project: Project, task: Task): Boolean {
+    fun open(project: Project, task: Task, agent: Agent): Boolean {
         val terminal = AgentTerminal.find() ?: return false
-        val settings = AgentSettings.getInstance()
-        val template = settings.command
+        val template = agent.command
         if (template.isBlank()) return false
-        val prompt = AgentRequest.prompt(settings.prompt, task)
+        val prompt = AgentRequest.prompt(AgentSettings.getInstance().prompt, task)
         return try {
-            terminal.open(project, directoryOf(project, task), AgentRequest.tabName(template, task)) { shell ->
+            terminal.open(project, directoryOf(project, task), AgentRequest.tabName(agent, task)) { shell ->
                 AgentRequest.command(template, prompt, task, shell).orEmpty()
             }
             true

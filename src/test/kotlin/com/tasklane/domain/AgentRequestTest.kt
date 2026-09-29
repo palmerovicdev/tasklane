@@ -1,5 +1,6 @@
 package com.tasklane.domain
 
+import com.tasklane.domain.agent.Agent
 import com.tasklane.domain.agent.AgentRequest
 import com.tasklane.domain.agent.Shell
 import com.tasklane.domain.model.RepoKey
@@ -154,15 +155,21 @@ class AgentRequestTest {
     // ------------------------------------------------------------- pestaña
 
     @Test
-    fun `la pestana lleva el programa y el titulo`() {
-        assertEquals("claude \u00b7 Arreglar el login", AgentRequest.tabName("claude {prompt}", task("Arreglar el login")))
-        assertEquals("gemini \u00b7 x", AgentRequest.tabName("FOO=1 /usr/local/bin/gemini -i {prompt}", task("x")))
-        assertEquals("agent \u00b7 x", AgentRequest.tabName("{prompt}", task("x")))
+    fun `la pestana lleva el nombre del agente y el titulo`() {
+        assertEquals("Codex \u00b7 Arreglar el login", AgentRequest.tabName(Agent("Codex", "codex {prompt}"), task("Arreglar el login")))
+        assertEquals("Claude Code \u00b7 x", AgentRequest.tabName(AgentRequest.DEFAULT_AGENTS.single(), task("x")))
+    }
+
+    @Test
+    fun `sin nombre la pestana lleva el programa`() {
+        assertEquals("claude \u00b7 Arreglar el login", AgentRequest.tabName(Agent("", "claude {prompt}"), task("Arreglar el login")))
+        assertEquals("gemini \u00b7 x", AgentRequest.tabName(Agent("  ", "FOO=1 /usr/local/bin/gemini -i {prompt}"), task("x")))
+        assertEquals("agent \u00b7 x", AgentRequest.tabName(Agent("", "{prompt}"), task("x")))
     }
 
     @Test
     fun `un titulo largo se corta en la pestana`() {
-        val name = AgentRequest.tabName("claude", task("a".repeat(100)))
+        val name = AgentRequest.tabName(Agent("", "claude"), task("a".repeat(100)))
 
         assertEquals("claude \u00b7 " + "a".repeat(39) + "\u2026", name)
     }

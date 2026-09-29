@@ -20,6 +20,7 @@ import com.intellij.openapi.ui.MessageDialogBuilder
 import com.intellij.openapi.ui.Messages
 import com.tasklane.TasklaneBundle
 import com.tasklane.data.config.TasklaneWorkspaceService
+import com.tasklane.data.sqlite.TaskArchive
 import com.tasklane.data.sqlite.TasksXmlWriter
 import com.tasklane.data.store.StorageLayout
 import com.tasklane.data.sqlite.RepoSnapshot
@@ -236,21 +237,152 @@ class ExportService(private val project: Project) {
      * mira si se canceló y mueve la barra: son las dos cosas que una operación de minutos
      * le debe a quien espera.
      */
-    private fun write(request: TasklanePanel.ExportRequest, stream: TaskExporter.Stream, indicator: ProgressIndicator): Int {
+    private fun write(request: TasklanePanel.ExportRequest, stream: TaskExporter.Stream, indicator: ProgressIndicator): Int =
+        writeSections(request, indicator, stream::section, stream::task)
+
+    private fun writeSections(
+        request: TasklanePanel.ExportRequest,
+        indicator: ProgressIndicator,
+        onSection: (String, LocalDate?) -> Unit,
+        onTask: (Task) -> Unit,
+    ): Int {
         indicator.isIndeterminate = false
         val total = request.size.coerceAtLeast(1)
+        var written = 0
         request.pager.snapshot { pager ->
             for (section in request.sections) {
                 indicator.checkCanceled()
-                stream.section(section.heading, section.date)
+                onSection(section.heading, section.date)
                 section.read(pager) { chunk ->
                     indicator.checkCanceled()
-                    chunk.forEach(stream::task)
-                    indicator.fraction = stream.written.toDouble() / total
+                    chunk.forEach(onTask)
+                    written += chunk.size
+                    indicator.fraction = written.toDouble() / total
                 }
             }
         }
-        return stream.written
+        return written
+    }
+
+    /**
+     * *Save to File*: la selección, un grupo o un estado a un fichero, **en el formato que
+     * diga la extensión** —`.md`, `.csv` o `.txt`—. Una acción por alcance y un diálogo, en
+     * vez de una acción por alcance y formato: son cuatro entradas en el menú, no doce.
+     */
+    internal fun save(request: TasklanePanel.ExportRequest) {
+        if (request.size == 0) {
+            notify(TasklaneBundle.message("export.empty"), NotificationType.INFORMATION)
+            return
+        }
+        val target = chooseFile(request.name, *FileFormat.entries.map { it.extension }.toTypedArray()) ?: return
+        val format = formatOf(target)
+        val config = TaskService.getInstance(project).snapshot.value.config
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(project, TasklaneBundle.message("export.file.progress", request.size), true) {
+                private var written = 0
+
+                override fun run(indicator: ProgressIndicator) {
+                    written = writeAtomically(target) { out ->
+                        when (format) {
+                            FileFormat.CSV -> {
+                                val csv = TaskCsvWriter(out, config)
+                                csv.begin()
+                                writeSections(request, indicator, { _, _ -> }, csv::task)
+                            }
+
+                            FileFormat.MARKDOWN, FileFormat.PLAIN -> {
+                                val text = if (format == FileFormat.MARKDOWN) ExportFormat.MARKDOWN else ExportFormat.PLAIN
+                                write(request, TaskExporter.Stream(out, config, text), indicator)
+                            }
+                        }
+                    }
+                }
+
+                override fun onSuccess() = notifyFile(TasklaneBundle.message("export.file.done", written, target), target)
+
+                override fun onThrowable(error: Throwable) {
+                    thisLogger().warn("Tasklane: no se pudo guardar en $target", error)
+                    notify(TasklaneBundle.message("export.file.failed", error.message.orEmpty()), NotificationType.ERROR)
+                }
+            },
+        )
+    }
+
+    private fun formatOf(file: Path): FileFormat {
+        val extension = file.fileName.toString().substringAfterLast('.', "").lowercase()
+        return FileFormat.entries.firstOrNull { it.extension == extension } ?: FileFormat.MARKDOWN
+    }
+
+    // ------------------------------------------------------- archivo .zip (2.28.0)
+
+    /**
+     * El repositorio activo entero —tareas **e imágenes**— a un `.zip` que *Import* sabe
+     * volver a leer. Ver [TaskArchive].
+     *
+     * Por el mismo camino que [exportXml] y [saveRepo]: una foto de la base, en segundo
+     * plano, cancelable, a tandas y a un temporal. Las imágenes se leen una a una del disco
+     * y se van al zip sin cargarlas enteras.
+     */
+    fun exportArchive(ref: RepositoryRef) {
+        val service = TaskService.getInstance(project)
+        val repo = ref.key
+        if (service.migrationPending(repo)) {
+            notify(TasklaneBundle.message("export.xml.pending"), NotificationType.WARNING)
+            return
+        }
+        val total = service.countOf(repo)
+        if (total == 0) {
+            notify(TasklaneBundle.message("export.repo.empty", ref.displayName), NotificationType.INFORMATION)
+            return
+        }
+        val target = chooseFile("tasklane-${ref.displayName}", "zip") ?: return
+        val attachments = AttachmentService.getInstance(project)
+        val version = com.intellij.ide.plugins.PluginManager
+            .getPluginByClass(ExportService::class.java)?.version.orEmpty()
+
+        ProgressManager.getInstance().run(
+            object : ProgressTask.Backgroundable(project, TasklaneBundle.message("export.archive.progress", total, ref.displayName), true) {
+                private var tasks = 0
+                private var images = 0
+                private var missing = 0
+
+                override fun run(indicator: ProgressIndicator) {
+                    indicator.isIndeterminate = false
+                    writeAtomically(target, text = false) { _, stream ->
+                        TaskArchive.Writer(stream, ref.displayName, version).use { archive ->
+                            service.snapshotOf(repo) { snapshot ->
+                                archive.tasks(repo) { xml ->
+                                    snapshot.eachInOrder { chunk ->
+                                        indicator.checkCanceled()
+                                        archive.note(chunk)
+                                        xml.write(chunk)
+                                        indicator.fraction = xml.written.toDouble() / snapshot.total.coerceAtLeast(1) * 0.8
+                                    }
+                                }
+                            }
+                            indicator.text = TasklaneBundle.message("export.archive.images")
+                            archive.attachments { id ->
+                                indicator.checkCanceled()
+                                attachments.file(repo, id)?.let(Files::newInputStream)
+                            }
+                            tasks = total
+                            missing = archive.missing.size
+                            images = archive.attachmentCount
+                        }
+                    }
+                }
+
+                override fun onSuccess() {
+                    val note = if (missing > 0) " " + TasklaneBundle.message("export.archive.missing", missing) else ""
+                    notifyFile(TasklaneBundle.message("export.archive.done", tasks, images, target) + note, target)
+                }
+
+                override fun onThrowable(error: Throwable) {
+                    thisLogger().warn("Tasklane: no se pudo escribir el archivo $target", error)
+                    notify(TasklaneBundle.message("export.file.failed", error.message.orEmpty()), NotificationType.ERROR)
+                }
+            },
+        )
     }
 
     // ------------------------------------------------------------ tasks.xml
@@ -519,7 +651,7 @@ class ExportService(private val project: Project) {
      * cancelable, a tandas, y a un temporal que sólo sustituye al fichero cuando está
      * entero. Con un millón de tareas lo retenido sigue siendo una tanda.
      */
-    fun saveRepo(ref: RepositoryRef, format: FileFormat) {
+    fun saveRepo(ref: RepositoryRef, requested: FileFormat?) {
         val service = TaskService.getInstance(project)
         val repo = ref.key
         if (service.migrationPending(repo)) {
@@ -531,7 +663,8 @@ class ExportService(private val project: Project) {
             notify(TasklaneBundle.message("export.repo.empty", ref.displayName), NotificationType.INFORMATION)
             return
         }
-        val target = chooseFile("${ref.displayName}-tasks", format.extension) ?: return
+        val target = chooseFile("${ref.displayName}-tasks", *extensionsFor(requested)) ?: return
+        val format = requested ?: formatOf(target)
         val config = service.snapshot.value.config
 
         ProgressManager.getInstance().run(
@@ -638,20 +771,28 @@ class ExportService(private val project: Project) {
 
     // ---------------------------------------------------------------- disco
 
-    /** Pregunta dónde guardar, con la extensión de lo que se va a escribir dentro. */
-    private fun chooseFile(name: String, extension: String): Path? {
+    /** Las extensiones que se ofrecen: la del formato pedido, o todas y decide el usuario. */
+    private fun extensionsFor(format: FileFormat?): Array<String> =
+        if (format != null) arrayOf(format.extension) else FileFormat.entries.map { it.extension }.toTypedArray()
+
+    /**
+     * Pregunta dónde guardar. [extensions] son las que el diálogo acepta; la primera es la
+     * del nombre propuesto, y una que el usuario escriba sin extensión se completa con ella.
+     */
+    private fun chooseFile(name: String, vararg extensions: String): Path? {
         val descriptor = FileSaverDescriptor(
             TasklaneBundle.message("export.file.title"),
             TasklaneBundle.message("export.file.description"),
-            extension,
-        )
+        ).apply { withExtensionFilter(extensions.first().uppercase(), *extensions) }
         val base: Path? = project.basePath?.let { Path.of(it) }
         val safe = name.replace(Regex("[^\\p{L}\\p{N}._ -]+"), "-").trim('-', ' ').ifEmpty { "tasks" }
-        return FileChooserFactory.getInstance()
+        val chosen = FileChooserFactory.getInstance()
             .createSaveFileDialog(descriptor, project)
-            .save(base, "$safe-${LocalDate.now()}.$extension")
+            .save(base, "$safe-${LocalDate.now()}.${extensions.first()}")
             ?.file
-            ?.toPath()
+            ?.toPath() ?: return null
+        val given = chosen.fileName.toString().substringAfterLast('.', "").lowercase()
+        return if (given in extensions) chosen else chosen.resolveSibling("${chosen.fileName}.${extensions.first()}")
     }
 
     /** Markdown o texto según el formato de la copia, que es lo que se va a escribir. */

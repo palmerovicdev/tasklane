@@ -124,12 +124,13 @@ class StoreRecoveryTest {
     // ----------------------------------------------------------------- cabecera
 
     /**
-     * **La cabecera, rota: el fichero ni abre.** Es el `ReadResult.Corrupt` sin nada
-     * legible: cuarentena, todo desde la copia, y se dice que se recuperó —con lo que se
-     * perdió desde la copia—.
+     * **La cabecera, rota: el fichero ni abre.** Antes de la 2.28 esto era «todo desde la
+     * copia» y se perdía lo de después. Las hojas están enteras, así que ahora se leen a
+     * pelo —ver [RawSalvage]— y salen **todas**, las posteriores a la copia también; y lo
+     * borrado desde la copia **no reaparece**, porque la copia sólo tapa huecos.
      */
     @Test
-    fun `una cabecera rota abre en recuperacion y tira de la copia`() = withScenario { s ->
+    fun `una cabecera rota se lee a pelo y no pierde lo de despues de la copia`() = withScenario { s ->
         val damaged = Files.readAllBytes(s.file).also { it.fill(0x5A, 0, 100) }
         Files.write(s.file, damaged)
 
@@ -138,13 +139,37 @@ class StoreRecoveryTest {
         assertTrue(StoreRecovery.pending(s.dir))
 
         val outcome = StoreRecovery.recover(s.dir, s.backup)!!
+        assertFalse("a pelo nunca es limpia", outcome.clean)
+        assertEquals(620, outcome.salvaged)
+        assertEquals(0, outcome.restored)
+        assertTrue(outcome.alert() is LoadAlert.Recovered)
+        assertFalse(StoreRecovery.pending(s.dir))
+        assertArrayEquals("la cuarentena es el fichero tal cual", damaged, Files.readAllBytes(outcome.quarantined!!))
+
+        reopened(s) { _, store ->
+            assertEquals(620, store.countOf(REPO))
+            assertTrue("lo editado desde la copia", bodyOf(store, "t-110")!!.startsWith("EDITADA-110"))
+            assertTrue("lo nuevo desde la copia", bodyOf(store, "new-1")!!.startsWith("NUEVA-1"))
+            assertNull("lo borrado desde la copia no reaparece", store.task(TaskId("t-205")))
+        }
+    }
+
+    /**
+     * **Nada legible en el fichero: todo desde la copia**, el `ReadResult.Corrupt` de
+     * siempre. Es el caso que antes era «la cabecera rota».
+     */
+    @Test
+    fun `un fichero ilegible entero tira de la copia`() = withScenario { s ->
+        val damaged = Files.readAllBytes(s.file).also { it.fill(0x5A) }
+        Files.write(s.file, damaged)
+        assertTrue(TaskDb.openChecked(s.dir) is TaskDb.Opening.Damaged)
+
+        val outcome = StoreRecovery.recover(s.dir, s.backup)!!
         assertFalse(outcome.clean)
         assertEquals(0, outcome.salvaged)
         assertEquals(600, outcome.restored)
         assertTrue(outcome.alert() is LoadAlert.Recovered)
         assertNotNull(outcome.backupAt)
-        assertFalse(StoreRecovery.pending(s.dir))
-        assertArrayEquals("la cuarentena es el fichero tal cual", damaged, Files.readAllBytes(outcome.quarantined!!))
 
         reopened(s) { _, store ->
             assertEquals(600, store.countOf(REPO))
@@ -161,7 +186,7 @@ class StoreRecoveryTest {
     @Test
     fun `una copia sin la columna de los rangos trae sus anclas`() = withScenario { s ->
         Sql(s.backup).let { sql -> try { sql.execute("ALTER TABLE anchor DROP COLUMN span") } finally { sql.close() } }
-        Files.write(s.file, Files.readAllBytes(s.file).also { it.fill(0x5A, 0, 100) })
+        Files.write(s.file, Files.readAllBytes(s.file).also { it.fill(0x5A) })
         assertTrue(TaskDb.openChecked(s.dir) is TaskDb.Opening.Damaged)
 
         val outcome = StoreRecovery.recover(s.dir, s.backup)!!
@@ -175,7 +200,7 @@ class StoreRecoveryTest {
     @Test
     fun `sin copia y sin nada legible se dice que se perdio`() = withScenario { s ->
         Files.delete(s.backup)
-        Files.write(s.file, Files.readAllBytes(s.file).also { it.fill(0x5A, 0, 100) })
+        Files.write(s.file, Files.readAllBytes(s.file).also { it.fill(0x5A) })
         assertTrue(TaskDb.openChecked(s.dir) is TaskDb.Opening.Damaged)
 
         val outcome = StoreRecovery.recover(s.dir, s.backup)!!
@@ -294,6 +319,92 @@ class StoreRecoveryTest {
             db.close()
         }
         assertFalse(StoreRecovery.pending(crashed))
+    }
+
+    // ------------------------------------------------------ esquema ilegible (a pelo)
+
+    /**
+     * **El esquema roto, las tareas enteras** —el daño del 2026-09-28—. Se destroza lo que
+     * hay en la página 1 después de la cabecera: SQLite ya no consigue ni abrir, pero cada
+     * hoja de `task` está donde estaba. Sin copia de por medio, tienen que salir **todas**,
+     * con sus etiquetas y sus anclas, leídas del formato de fichero.
+     */
+    @Test
+    fun `un esquema ilegible se recupera leyendo las paginas sin copia`() = withScenario { s ->
+        val page1 = Files.readAllBytes(s.file).also { java.util.Arrays.fill(it, 100, 4096, 0x5A) }
+        Files.write(s.file, page1)
+        Files.deleteIfExists(s.backup)
+
+        val opened = TaskDb.openChecked(s.dir)
+        assertTrue("SQLite no tenía que poder abrirlo: $opened", opened is TaskDb.Opening.Damaged)
+        val outcome = StoreRecovery.recover(s.dir, null)!!
+        assertTrue("se leyó el fichero dañado", outcome.opened)
+        assertFalse("a pelo nunca se da por limpia", outcome.clean)
+        assertEquals(620, outcome.salvaged)
+
+        reopened(s) { _, store ->
+            assertEquals(620, store.countOf(REPO))
+            assertTrue(bodyOf(store, "new-7")!!.startsWith("NUEVA-7"))
+            assertTrue(bodyOf(store, "t-110")!!.startsWith("EDITADA-110"))
+            assertEquals(listOf(CodeAnchor.of("src/Main.kt", 10, 0, "fun main")), store.task(TaskId("t-3"))!!.anchors)
+            assertEquals(2, store.task(TaskId("t-3"))!!.tags.size)
+        }
+    }
+
+    /**
+     * El diario de **otra generación** sobre la base: es lo que pasó. Las tareas que sólo
+     * están en el WAL tienen que salir igual, y las que sólo están en la base también.
+     */
+    @Test
+    fun `a pelo se leen las tareas que solo estan en el diario`() = withScenario { s ->
+        val live = TaskDb.open(s.dir)!!
+        val crashed = s.dir.resolveSibling("caida").also(Files::createDirectories)
+        try {
+            val store = TaskStore(live)
+            store.apply(CONFIG, listOf(Mutation.Upsert((0 until 30).map { i -> task("wal-$i", "WAL-$i ${filler(i)}", later) })))
+            Files.copy(live.file, crashed.resolve(TaskDb.FILE_NAME))
+            Files.copy(TaskDb.walOf(live.file), crashed.resolve("${TaskDb.FILE_NAME}-wal"))
+        } finally {
+            live.close()
+        }
+        val file = crashed.resolve(TaskDb.FILE_NAME)
+        val wal = TaskDb.walOf(file)
+        assertTrue("el escenario necesita un diario con algo dentro", Files.size(wal) > 32)
+        val bytes = Files.readAllBytes(file).also { java.util.Arrays.fill(it, 100, 4096, 0x5A) }
+        Files.write(file, bytes)
+
+        val salvaged = RawSalvage.read(file)
+        val ids = salvaged.tasks.map { it[1] as String }.toSet()
+        assertTrue("del diario", (0 until 30).all { "wal-$it" in ids })
+        assertTrue("de la base", (0 until 600).filter { it !in 200 until 230 }.all { "t-$it" in ids })
+        assertTrue(salvaged.tags.isNotEmpty() && salvaged.anchors.isNotEmpty())
+    }
+
+    /**
+     * Cada tarea sale con un `seq` propio. La colisión real —dos tareas distintas con el mismo
+     * rowid, por mezclar generaciones— se vio con la base de verdad (nueve tareas perdidas por
+     * un `INSERT OR IGNORE`); aquí se fija sólo la garantía: sin repetidos.
+     */
+    @Test
+    fun `a pelo cada tarea sale con un seq unico`() = withScenario { s ->
+        val salvaged = RawSalvage.read(s.file)
+        val seqs = salvaged.tasks.map { it[0] as Long }
+        assertEquals(seqs.size, seqs.toSet().size)
+        assertEquals(620, salvaged.tasks.size)
+    }
+
+    @Test
+    fun `a pelo un fichero sin tareas no devuelve nada ni falla`() {
+        val dir = Files.createTempDirectory("tasklane-raw")
+        try {
+            val file = dir.resolve("x.db")
+            Files.write(file, ByteArray(10_000) { 0x5A })
+            assertTrue(RawSalvage.read(file).isEmpty)
+            Files.write(file, ByteArray(10))
+            assertTrue(RawSalvage.read(file).isEmpty)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
     }
 
     // ------------------------------------------------------------------ reanudar

@@ -8,6 +8,7 @@ import com.tasklane.domain.export.ExportFormat
 import com.tasklane.domain.export.FileFormat
 import com.tasklane.domain.export.ExportScope
 import com.tasklane.service.ExportService
+import com.tasklane.service.ImportService
 
 /**
  * Exportar al portapapeles: la pestaña entera, el grupo de fecha donde está la
@@ -26,6 +27,52 @@ internal class ExportGroupAction : ExportAction(ExportScope.GROUP) {
 
 internal class ExportSelectionAction : ExportAction(ExportScope.SELECTION) {
     override fun isAvailable(e: AnActionEvent): Boolean = panelOf(e)?.selectedTasks()?.isNotEmpty() == true
+}
+
+/**
+ * *Save to File*: los mismos tres alcances que copiar, con un fichero como destino. El
+ * formato lo decide la extensión que se elija en el diálogo —`.md`, `.csv`, `.txt`—.
+ */
+internal class SaveStateAction : ExportAction(ExportScope.STATE, toFile = true)
+
+internal class SaveGroupAction : ExportAction(ExportScope.GROUP, toFile = true) {
+    override fun isAvailable(e: AnActionEvent): Boolean = panelOf(e)?.hasSelectedGroup() == true
+}
+
+internal class SaveSelectionAction : ExportAction(ExportScope.SELECTION, toFile = true) {
+    override fun isAvailable(e: AnActionEvent): Boolean = panelOf(e)?.selectedTasks()?.isNotEmpty() == true
+}
+
+/** El repositorio entero a un fichero de texto; el formato, por la extensión. */
+internal class SaveRepoFileAction : SaveRepoAction(null)
+
+/** El repositorio entero, tareas **e imágenes**, a un `.zip` que *Import* vuelve a leer. */
+internal class ExportArchiveAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = panelOf(e)?.activeRepository != null
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val ref = panelOf(e)?.activeRepository ?: return
+        ExportService.getInstance(project).exportArchive(ref)
+    }
+}
+
+/** *Import ▸ Archive…*: un `.zip` del disco, sumado al repositorio activo. Ver [ImportService]. */
+internal class ImportArchiveAction : PanelAction() {
+
+    override fun update(e: AnActionEvent) {
+        val panel = panelOf(e)
+        e.presentation.isEnabled = panel != null && panel.activeRepository != null && panel.isEditable()
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val ref = panelOf(e)?.activeRepository ?: return
+        ImportService.getInstance(project).importArchive(ref)
+    }
 }
 
 /**
@@ -55,7 +102,7 @@ internal class ExportXmlAction : PanelAction() {
  * puede buscar por su nombre y asignar a un atajo, que un diálogo con un desplegable no
  * permitiría. Ver [ExportService.saveRepo].
  */
-internal abstract class SaveRepoAction(private val format: FileFormat) : PanelAction() {
+internal abstract class SaveRepoAction(private val format: FileFormat?) : PanelAction() {
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabled = panelOf(e)?.activeRepository != null
@@ -96,7 +143,7 @@ internal class ClearRepoAction : PanelAction() {
     }
 }
 
-internal abstract class ExportAction(private val scope: ExportScope) : PanelAction() {
+internal abstract class ExportAction(private val scope: ExportScope, private val toFile: Boolean = false) : PanelAction() {
 
     protected open fun isAvailable(e: AnActionEvent): Boolean = panelOf(e) != null
 
@@ -107,7 +154,8 @@ internal abstract class ExportAction(private val scope: ExportScope) : PanelActi
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val panel = panelOf(e) ?: return
-        ExportService.getInstance(project).copy(panel.exportRequest(scope))
+        val service = ExportService.getInstance(project)
+        if (toFile) service.save(panel.exportRequest(scope)) else service.copy(panel.exportRequest(scope))
     }
 }
 

@@ -164,7 +164,9 @@ que estaba abierto se recuerda al reabrir el proyecto.
 | *Edit* / *Delete* | Abren la tarea seleccionada / borran la selección. También con `Enter` y `Supr` |
 | *Group By* | Cómo agrupa esta pestaña: sin agrupar, por fecha, por prioridad o por etiqueta |
 | *Search All Repositories* | Busca en todos los repositorios de la ventana. Sólo aparece si hay más de uno |
-| *Export* | Copiar al portapapeles, guardar el repositorio, exportarlo a XML, vaciarlo y quitar uno ausente. Ver [Exportación](#exportación) |
+| *Export* | Copiar al portapapeles, guardar a fichero (estado, grupo, selección o repositorio), archivo `.zip` con imágenes y `tasks.xml`. Ver [Exportación](#exportación) |
+| *Import* | Meter un archivo `.zip` elegido del disco, o los `TODO` del código. Ver [Importar](#importar) |
+| *Maintenance* | Reparar la base, vaciar el repositorio y quitar uno ausente. Ver [Reparar la base](#reparar-la-base) |
 | *Settings* | Abre *Settings → Tools → Tasklane* |
 | Selector de repositorio | En la cabecera de la ventana. Con un solo repositorio se esconde y su nombre va al título |
 | Filtro de vista | *All tasks* / *Open* / *Overdue* / *Bookmarked*, en la cabecera. Es de la ventana entera y se recuerda en `workspace.xml` |
@@ -676,10 +678,16 @@ claude 'Work on the Tasklane task <id>: "<título>". Read it in full with taskla
 El agente sólo recibe el id y el título: el cuerpo, la lista y las anclas los lee él con
 `tasklane_get_task`, así que tiene que estar conectado al servidor MCP del IDE (ver arriba).
 
+Desde la `2.27.0` puedes tener **tantos agentes como quieras** —Claude Code, Codex, Gemini, el
+mismo con otro modelo…—. Con uno, *Hand Off to Agent* es una entrada del menú, como siempre;
+con dos o más es un submenú, *Hand Off to Agent ▸*, con uno por agente en el orden de los
+ajustes. Desde el atajo del Keymap o *Find Action*, con varios, pregunta a cuál.
+
 | | |
 |---|---|
-| La orden | *Settings → Tools → Tasklane → AI agent*. `{prompt}` es la petición **ya entrecomillada** para la shell de la terminal; `{id}` y `{title}`, igual. Sin `{prompt}` la petición va al final, así que `codex` a secas vale; `gemini -i {prompt}` la pone donde la pide Gemini. Vacía, no se abre nada |
-| La petición | También en los ajustes, con `{id}` y `{title}`. Va en una línea y sin caracteres de control, porque se escribe en una terminal. Vacía, vuelve la de fábrica |
+| Los agentes | *Settings → Tools → Tasklane → AI agent*: una tabla con el **nombre** y la **orden** de cada uno; se añaden con `+`, se quitan con `-` y se ordenan arrastrando por el asa o con las flechas. El nombre sale en el menú y en la pestaña (sin nombre, el programa de la orden: `codex`); una fila sin orden no se guarda. De fábrica, uno: *Claude Code*. Sin ninguno, no se abre nada |
+| La orden | `{prompt}` es la petición **ya entrecomillada** para la shell de la terminal; `{id}` y `{title}`, igual. Sin `{prompt}` la petición va al final, así que `codex` a secas vale; `gemini -i {prompt}` la pone donde la pide Gemini |
+| La petición | También en los ajustes, con `{id}` y `{title}`, y **una para todos los agentes**: habla de las herramientas de Tasklane, no del agente. Va en una línea y sin caracteres de control, porque se escribe en una terminal. Vacía, vuelve la de fábrica |
 | Las comillas | La petición lleva el título de la tarea, y ése lo puede haber escrito cualquiera —un agente por MCP, un XML importado—. Va entre las comillas **sin expansión** de la shell con la que arranca la pestaña —zsh, bash, fish, PowerShell o `cmd`—, así que un `$(…)` en un título es texto y no una orden |
 | El estado | Encargarla no la mueve: se queda donde estaba mientras el agente trabaja. La petición de fábrica le pide que **no toque el estado** y que, al acabar, la cierre con `tasklane_complete_task`, que la lleva de un salto al primer estado cerrado —*Done* con los de fábrica—, sin pasar por *Doing*. Si escribes tu propia petición, pídeselo igual. Hasta la `2.25.0` pasaba a *Doing* al encargarla |
 | Una cada vez | Con varias tareas seleccionadas no se ofrece: serían varios agentes a la vez sobre los mismos ficheros |
@@ -689,7 +697,9 @@ El agente sólo recibe el id y el título: el cuerpo, la lista y las anclas los 
 
 Estos ajustes son **tuyos y de todos tus proyectos**: van a `tasklane-agent.xml`, en la
 configuración del IDE, y no a `.idea`. Qué agente tienes instalado es cosa de tu máquina,
-no del proyecto.
+no del proyecto. La lista va en `<agents>`; `command` sigue guardando la orden del primero,
+así que una versión anterior a la `2.27.0` que reciba estos ajustes por *Settings Sync*
+encarga a ése, y uno de antes se lee como un agente sin nombre.
 
 ## Enlaces
 
@@ -772,8 +782,22 @@ una imagen ni un enlace.
 
 ## Exportación
 
-El menú *Export* de la barra —y el del clic derecho— llevan lo que se está viendo al
-portapapeles. Con una búsqueda activa se exporta el resultado de la búsqueda: es lo
+Desde la `2.28.0` el menú *Export* de la barra —y el del clic derecho— sólo **saca datos**, y
+está ordenado por adónde van:
+
+```
+Export ▸  Copy ▸          This State · This Date Group · Selection · ✓ As Markdown
+          Save to File ▸  This State… · This Date Group… · Selection… · Whole Repository…
+          Repository Archive (.zip)…
+          Repository to tasks.xml
+Import ▸  Archive (.zip)… · Import TODO Comments…
+Maintenance ▸  Repair Database… · Delete All Tasks in "…"… · Export and Remove "…"
+```
+
+*Import* y *Maintenance* son menús aparte: antes *Import TODO Comments* y *Delete All Tasks*
+colgaban de *Export*, y ni una ni otra es exportar.
+
+*Copy* lleva lo que se está viendo al portapapeles. Con una búsqueda activa se exporta el resultado de la búsqueda: es lo
 único que se puede revisar antes de pegarlo.
 
 | Alcance | Qué copia |
@@ -838,23 +862,77 @@ formato que cualquier versión del plugin sabe leer. Se escribe entero o no se e
 a un temporal que sólo sustituye al fichero cuando está completo. Un carácter que XML no
 admite —la salida de una terminal pegada— se sustituye por `U+FFFD` y se dice cuántos.
 
-**Guardar el repositorio en un fichero** (*Export ▸ Save Repository As*): todas las tareas
-del repositorio activo, estado a estado y en el orden de la lista, en uno de tres formatos.
+**Guardar a un fichero** (*Export ▸ Save to File*): la selección, un grupo, un estado o el
+repositorio entero. **El formato lo decide la extensión** que se escriba en el diálogo —`.md`,
+`.csv` o `.txt`—, así que son cuatro entradas y no doce. Las de un estado, un grupo o la
+selección guardan lo que se ve —con su búsqueda—; *Whole Repository…* guarda todas las tareas
+del repositorio activo, estado a estado y en el orden de la lista. Los tres formatos:
 
 | Formato | Qué sale |
 |---|---|
-| CSV… | Una fila por tarea: título, descripción, estado, prioridad, etiquetas, vencimiento, marcada, anclas, enlaces, creada, modificada, completada e id. Con BOM, para que Excel lea los acentos |
-| Markdown… | Un apartado por estado y `- [ ] título` debajo, como la copia al portapapeles |
-| Plain Text… | Lo mismo con guiones |
+| `.csv` | Una fila por tarea: título, descripción, estado, prioridad, etiquetas, vencimiento, marcada, anclas, enlaces, creada, modificada, completada e id. Con BOM, para que Excel lea los acentos |
+| `.md` | Un apartado por estado y `- [ ] título` debajo, como la copia al portapapeles |
+| `.txt` | Lo mismo con guiones |
 
 Sin tope de portapapeles —va siempre a fichero—, en segundo plano, cancelable y sobre una
 foto de la base.
 
-**Vaciar el repositorio** (*Export ▸ Delete All Tasks in "…"…*) borra todas sus tareas de
+**Vaciar el repositorio** (*Maintenance ▸ Delete All Tasks in "…"…*) borra todas sus tareas de
 la base, en todos los estados, después de una pregunta que dice cuántas son. Va separado
 de guardar a propósito —vaciar no obliga a exportar—, y como todo en Tasklane sólo toca el
 **repositorio activo**, que se queda en la lista, vacío. Las capturas que ya no nombra
 ninguna tarea las recoge el mantenimiento de siempre.
+
+**El archivo `.zip`** (*Export ▸ Repository Archive…*) es la copia completa y portátil de un
+repositorio: `tasks.xml` —el formato de siempre—, **las imágenes** que nombran las tareas en
+`attachments/<sha256>` y un `manifest.properties` con la versión, la fecha y las cuentas. Sólo
+el `tasks.xml` no bastaba: las capturas pegadas viven fuera del XML y una tarea importada en
+otro sitio las perdería. Y si todo lo demás falla, el zip se abre con cualquier programa y el
+texto de las tareas está ahí, legible.
+
+## Importar
+
+*Import ▸ Archive (.zip)…* abre un selector de ficheros del disco, lee el archivo **sin tocar
+nada** y enseña un resumen antes de importar:
+
+> Archive of "boostibeauty", saved 28 Sep 2026: 196 tasks.
+> • 12 new • 3 newer than the ones here (they will be updated) • 181 already here, left as they are
+
+Sólo entonces se importa, y **suma, no reemplaza**. La regla es por id:
+
+| En el archivo | Aquí | Pasa |
+|---|---|---|
+| No está | — | Se añade |
+| Más reciente (`updatedAt`) | Está | Se actualiza |
+| Igual o más antigua | Está | Se queda la de aquí |
+| — | Está en **otro** repositorio | No se toca: es la misma tarea movida |
+
+Un estado o una prioridad que el proyecto no tiene cae en los de por defecto. Antes de escribir
+se hace una copia de la base (`tasklane.db.before-import`, una sola: la última), y las imágenes
+que ya estén no se vuelven a guardar. Repetir la importación no cambia nada, y cancelarla a
+medias es seguro: lo escrito es válido y la siguiente completa lo que falte. Un archivo que
+no es un zip, sin manifiesto, de un formato futuro, o con entradas que no son imágenes, se
+rechaza diciendo por qué.
+
+## Reparar la base
+
+Si aparece `[SQLITE_CORRUPT] The database disk image is malformed`, o *Export* falla con eso,
+o simplemente se sospecha: *Maintenance ▸ Repair Database…* comprueba la base **ahora**, con
+una conexión nueva y con la comprobación de integridad. Si algo falla, la marca y ofrece
+*Reopen Project and Repair*. Cualquier conexión que vea el daño —una exportación, la búsqueda,
+las marcas del editor— hace lo mismo sola. Nada se recupera en caliente y **nada se borra**: el
+fichero dañado se guarda como `tasklane.db.corrupt-<fecha>`.
+
+La recuperación lee tabla a tabla con SQL y, si el **esquema** es lo roto —el fallo `malformed
+database schema (…)`, donde ninguna consulta funciona—, **lee las páginas del fichero a pelo**,
+con el diario WAL encima, y reconoce cada tabla por la forma de sus filas. Es lo que pasó el
+2026-09-28: el fichero `tasklane.db` se sustituyó por otro con el `-wal` de la sesión anterior
+aún al lado, SQLite pegó un diario que no era de esa base y el esquema quedó apuntando a hojas
+de otra tabla; las 196 tareas estaban intactas. Se cuenta como recuperación **con posible
+pérdida**, nunca como limpia: puede reaparecer alguna tarea borrada cuya página no se reutilizó.
+
+> **No cambies `tasklane.db` por otro fichero con el IDE abierto**, ni copies `.idea/tasklane`
+> entre proyectos abiertos: el `-wal` y el `-shm` son de la base que los escribió.
 
 ## Ajustes
 
@@ -873,7 +951,7 @@ actúan al pulsarlos.
 | **Status bar** | Si el widget de la barra de estado cuenta las vencidas; qué estados cuenta es la columna *Status bar* de la tabla de estados. Tuyo, en `workspace.xml`. Ver [La barra de estado](#la-barra-de-estado) |
 | **Completed tasks** | Esconder de la lista de un estado terminal lo cerrado hace más de N días, o verlo todo (de fábrica). Tuyo, en `workspace.xml`. Ver [Archivar lo terminado](#archivar-lo-terminado) |
 | **Images** | El peso de las imágenes del repositorio activo, *Delete Unused Images*, *Delete All Images…* y el umbral del aviso. Ver [Imágenes](#imágenes) |
-| **AI agent** | La orden y la petición de *Hand Off to Agent* y el botón que copia las instrucciones para `CLAUDE.md`. Tuyo y **de todos tus proyectos**, en `tasklane-agent.xml`. Ver [Encargar una tarea a un agente](#encargar-una-tarea-a-un-agente) |
+| **AI agent** | Los agentes (nombre y orden de cada uno) y la petición de *Hand Off to Agent* y el botón que copia las instrucciones para `CLAUDE.md`. Tuyo y **de todos tus proyectos**, en `tasklane-agent.xml`. Ver [Encargar una tarea a un agente](#encargar-una-tarea-a-un-agente) |
 | Enlaces | *Save as template for new projects* y *Configure shortcuts in Keymap* |
 
 - **Borrar un estado o una prioridad con tareas** pregunta adónde van. Siempre queda al

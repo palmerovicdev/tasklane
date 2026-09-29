@@ -215,8 +215,18 @@ internal object StoreRecovery {
         sql.execute("PRAGMA cache_size = -${TaskStore.BULK_CACHE_KB}")
 
         progress("salvage")
+        // El diario, antes de abrir nada: cerrar el fichero con SQLite lo vuelca y lo borra.
+        val walPages = quarantine?.let(RawSalvage::preload)
         val source = quarantine?.let(::openSource)
         val copy = backup?.takeIf(Files::exists)?.let(::openBackup)
+        // Sin esquema legible no hay SQL que valga —`malformed database schema`—, pero las filas
+        // pueden estar enteras: se leen del formato de fichero, sin SQLite. Ver [RawSalvage].
+        val raw = if (source == null && quarantine != null) {
+            runCatching { RawSalvage.read(quarantine, walPages) }
+                .onFailure { thisLogger().warn("Tasklane: no se pudo leer el fichero dañado a pelo", it) }
+                .getOrNull()
+                ?.takeUnless { it.isEmpty }
+        } else null
         var salvaged = 0
         var restored = 0
         var unreadable = 0
@@ -238,11 +248,19 @@ internal object StoreRecovery {
                 unreadable = salvage.second
             }
 
+            if (raw != null) {
+                salvaged = sql.transaction { insertRaw(sql, raw) }
+                // Se leyó sin saber qué tablas eran ni qué se borró: nunca se da por limpia.
+                unreadable += 1
+            }
+
             progress("backup")
             if (copy != null) {
                 // Todo lo de la copia si el dañado no se pudo ni abrir; si se abrió, sólo los
                 // huecos de `task`.
-                val holes = if (source == null) listOf(0L..Long.MAX_VALUE) else lostTasks
+                // Con el fichero leído a pelo tampoco: lo leyó todo lo que había en sus hojas, y
+                // rellenar desde la copia sólo haría reaparecer lo borrado desde entonces.
+                val holes = if (source == null && raw == null) listOf(0L..Long.MAX_VALUE) else lostTasks
                 restored = sql.transaction { restoreFromBackup(copy, sql, holes) }
                 sql.transaction {
                     for (table in listOf("imported", "blob")) copyTable(copy, sql, table, orIgnore = true)
@@ -271,7 +289,7 @@ internal object StoreRecovery {
             partial = partial,
             backupAt = if (copy != null && (restored > 0 || source == null)) runCatching { Files.getLastModifiedTime(backup!!).toMillis() }.getOrNull() else null,
             stamp = stamp,
-            opened = source != null || quarantine == null,
+            opened = source != null || raw != null || quarantine == null,
         )
         sql.transaction {
             saveChore(sql, RECOVERED, stamp, if (outcome.clean) 0 else 1)
@@ -283,6 +301,21 @@ internal object StoreRecovery {
         val problems = StoreAudit.check(sql)
         check(problems.isEmpty()) { "la base reconstruida no cuadra: $problems" }
         return outcome
+    }
+
+    /** Mete lo que [RawSalvage] leyó. Sólo si la forma de la tabla nueva es la que se buscó. */
+    private fun insertRaw(sql: Sql, raw: RawSalvage.Salvaged): Int {
+        fun put(table: String, expected: Int, rows: List<Array<Any>>): Int {
+            val columns = columnsOf(sql, table)
+            if (columns.size != expected || rows.isEmpty()) return 0
+            val names = columns.joinToString(", ") { it.first }
+            sql.batch("INSERT OR IGNORE INTO $table ($names) VALUES (${Sql.placeholders(expected)})", expected, rows.asSequence())
+            return rows.size
+        }
+        val tasks = put("task", RawSalvage.TASK_COLUMNS, raw.tasks)
+        put("tag", RawSalvage.TAG_COLUMNS, raw.tags)
+        put("anchor", RawSalvage.ANCHOR_COLUMNS, raw.anchors)
+        return tasks
     }
 
     // ------------------------------------------------------------ salvar filas

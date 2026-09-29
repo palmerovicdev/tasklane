@@ -125,6 +125,43 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.28.1 &mdash; fixes</h3>
+            <ul>
+              <li>Removed the use of an internal platform API and a deprecated file-dialog
+                  constructor. No format changes.</li>
+            </ul>
+            <h3>2.28.0 &mdash; export, import and repair</h3>
+            <ul>
+              <li><b>Import a <code>.zip</code> archive</b> from disk (<i>Import &#9656; Archive</i>).
+                  You see how many tasks are new, updated or already there before anything is
+                  written; it adds, never replaces, and the most recent version of a task wins.
+                  A copy of the database is made first.</li>
+              <li><b>Repository Archive</b>: tasks, images and a manifest in one <code>.zip</code>.</li>
+              <li><b>Save to File</b> a state, a date group, the selection or the whole repository;
+                  the extension (<code>.md</code>, <code>.csv</code>, <code>.txt</code>) picks the format.</li>
+              <li>The <i>Export</i> menu only exports now: <i>Import</i> and <i>Maintenance</i> are
+                  menus of their own.</li>
+              <li><b>Repair Database</b> checks the database on demand, and any connection that sees
+                  damage now says so. A database whose schema is unreadable
+                  (<code>malformed database schema</code>) is recovered by reading its pages
+                  directly, without losing what was written after the last backup.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
+            <h3>2.27.0 &mdash; more than one agent</h3>
+            <ul>
+              <li><b>As many AI agents as you like</b> in <i>Settings &#9656; Tools &#9656;
+                  Tasklane &#9656; AI agent</i>: a table with a name and a command for each one
+                  &mdash; Claude Code, Codex, Gemini, the same agent with another model&hellip;
+                  &mdash; to add, remove and reorder.</li>
+              <li>With more than one, <b><i>Hand Off to Agent</i> becomes a submenu</b> to pick
+                  the agent, in the order of the table. From its Keymap shortcut, it asks which
+                  one. The terminal tab carries the agent's name.</li>
+              <li>The prompt stays one for all of them. Your current command becomes the only
+                  agent, unnamed, until you change it.</li>
+            </ul>
+            <p><b>Compatibility:</b> no format change.</p>
+
             <h3>2.26.2 &mdash; no internal APIs</h3>
             <ul>
               <li>The digit shown next to each entry of <i>Priority</i> no longer goes through an

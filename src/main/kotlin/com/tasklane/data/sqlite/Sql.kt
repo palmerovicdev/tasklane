@@ -45,7 +45,7 @@ import java.util.concurrent.locks.ReentrantLock
  * **Bloqueante.** Todo lo de aquí va fuera del EDT salvo las páginas de la lista, que son
  * un salto de índice y cincuenta filas — ver `SqlitePager`.
  */
-internal class Sql(file: Path, readOnly: Boolean = false) : AutoCloseable {
+internal class Sql(file: Path, readOnly: Boolean = false, private val signal: CorruptionSignal? = null) : AutoCloseable {
 
     val connection: Connection = SQLiteConfig()
         .apply { setReadOnly(readOnly) }
@@ -196,6 +196,11 @@ internal class Sql(file: Path, readOnly: Boolean = false) : AutoCloseable {
         lock.lock()
         try {
             return block()
+        } catch (e: Throwable) {
+            // Se avisa desde aquí, no desde quien llama: el fallo que dejó a un usuario sin
+            // exportar salió en una lectura suelta, y ningún `catch` de arriba lo miraba.
+            if (signal != null && StoreRecovery.isCorruption(e)) signal.raise(e)
+            throw e
         } finally {
             lock.unlock()
         }
@@ -223,5 +228,20 @@ internal class Sql(file: Path, readOnly: Boolean = false) : AutoCloseable {
          * SQLite sabe aprovechar.
          */
         const val MAX_VARIABLES = 500
+    }
+}
+
+/**
+ * El aviso de «esta base está dañada», **compartido por todas las conexiones de una
+ * misma base** —la de escritura, la de lectura y las que se abren para exportar o copiar—.
+ * Quien tiene la base abierta se apunta con [listener] y se entera aunque el fallo lo vea
+ * una lectura cualquiera. Ver `TaskService.bind`.
+ */
+internal class CorruptionSignal {
+    @Volatile
+    var listener: ((Throwable) -> Unit)? = null
+
+    fun raise(error: Throwable) {
+        listener?.let { runCatching { it(error) } }
     }
 }

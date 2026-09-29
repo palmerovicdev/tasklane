@@ -237,8 +237,10 @@
             <li><b>Hand Off to Agent</b> in the card menu opens a tab of the IDE's terminal in the
                 task's repository, with your agent working on that task &mdash; <code>claude</code>
                 out of the box. The task stays where it is while the agent works, and the agent
-                completes it when it is done. The command and the prompt are yours in <i>Settings &#9656; Tools &#9656; Tasklane &#9656; AI agent</i>
-                (<code>codex {prompt}</code>, <code>gemini -i {prompt}</code>&hellip;), and the
+                completes it when it is done. Add as many agents as you like in <i>Settings &#9656; Tools &#9656; Tasklane &#9656; AI agent</i>,
+                each with its name and command (<code>codex {prompt}</code>,
+                <code>gemini -i {prompt}</code>&hellip;): with more than one, <i>Hand Off to
+                Agent</i> becomes a submenu to pick one. The prompt is yours too, and the
                 request is quoted for your shell, so a task title never runs as a command.
                 <b>Copy Agent Prompt</b> copies the same request for an agent's chat, and <b>Copy
                 Agent Instructions</b> a paragraph for <code>CLAUDE.md</code> or
@@ -336,25 +338,34 @@
             <li><b>Everything that deletes acts on the active repository only.</b></li>
         </ul>
 
-        <h3>Export and clean up</h3>
+        <h3>Export, import and maintenance</h3>
+        <p>The <i>Export</i> menu only exports; <i>Import</i> and <i>Maintenance</i> are menus of
+            their own.</p>
         <ul>
             <li><b>Copy to the clipboard</b> as Markdown or plain text: this whole tab, the date
                 group the selection is in, or just the selected rows. With a search active you copy
                 the search result. A date group comes out as the log of its day &mdash;
                 <code>## 2026-09-11</code> and a numbered list &mdash; ready for a journal or a
                 weekly report. Past 10,000 tasks you are offered a file instead.</li>
-            <li><b>Save a whole repository to a file</b> from <i>Export &#9656; Save Repository
-                As</i>: <b>CSV</b> &mdash; one row per task with title, description, state,
-                priority, tags, due date, bookmark, code anchors, links, dates and id, readable by
-                Excel with accents intact &mdash;, <b>Markdown</b> or <b>plain text</b>, state by
-                state.</li>
-            <li><b>Delete all the tasks of a repository</b> with <i>Delete All Tasks in
-                &hellip;</i>, after a confirmation that says how many. The repository stays,
-                empty.</li>
-            <li><b>Export the repository to XML</b>, the <code>tasks.xml</code> interchange format
-                any version of the plugin can read. Characters XML cannot hold &mdash; pasted
-                terminal output &mdash; are replaced and counted instead of failing the
-                export.</li>
+            <li><b>Save to a file</b> from <i>Export &#9656; Save to File</i>: a state, a date group,
+                the selection or the whole repository. The extension you type picks the format:
+                <b>CSV</b> &mdash; one row per task with title, description, state, priority, tags,
+                due date, bookmark, code anchors, links, dates and id, readable by Excel with
+                accents intact &mdash;, <b>Markdown</b> or <b>plain text</b>.</li>
+            <li><b>Repository Archive</b>: the whole repository as one <code>.zip</code> &mdash;
+                <code>tasks.xml</code>, the pasted images and a manifest.</li>
+            <li><b>Import an archive</b> from <i>Import &#9656; Archive</i>, picking the
+                <code>.zip</code> from disk. You see how many tasks are new, updated or already
+                there before anything is written. It adds and never replaces: the most recent
+                version of a task wins, and a copy of the database is made first.</li>
+            <li><b>Repository to XML</b>, the <code>tasks.xml</code> interchange format any version
+                of the plugin can read. Characters XML cannot hold &mdash; pasted terminal output
+                &mdash; are replaced and counted instead of failing the export.</li>
+            <li><b>Repair Database</b> in <i>Maintenance</i> checks the task database on demand and,
+                if it is damaged, reopens the project and recovers it without deleting anything.</li>
+            <li><b>Delete all the tasks of a repository</b> with <i>Maintenance &#9656; Delete All
+                Tasks in &hellip;</i>, after a confirmation that says how many. The repository
+                stays, empty.</li>
             <li><b>Export and Remove</b> a repository whose folder is gone: every task is exported
                 and counted before anything is deleted.</li>
             <li>Exports run in the background, can be cancelled, capture the list <b>as it was
@@ -418,7 +429,8 @@
                 a done state, or show them all (the default). Yours alone.</li>
             <li><b>Images</b>: their weight for the active repository, the two clean-up buttons and
                 the warning threshold.</li>
-            <li><b>AI agent</b>: the command and the prompt of <i>Hand Off to Agent</i>, and the
+            <li><b>AI agent</b>: your agents &mdash; a name and a command each &mdash; and the
+                prompt of <i>Hand Off to Agent</i>, and the
                 button that copies the instructions for
                 <code>CLAUDE.md</code>. Yours alone, for every project.</li>
             <li><b>Save as template for new projects</b>, so configuring per project does not mean
@@ -791,6 +803,18 @@
                 class="com.tasklane.ui.actions.ExportAndRemoveRepoAction"
                 icon="AllIcons.Actions.GC"/>
 
+        <!-- Guardar a un fichero (2.28.0): los mismos alcances que copiar; el formato lo decide
+             la extension. Y el archivo .zip —tareas e imagenes— con su Import. -->
+        <action id="Tasklane.SaveState" class="com.tasklane.ui.actions.SaveStateAction"/>
+        <action id="Tasklane.SaveGroup" class="com.tasklane.ui.actions.SaveGroupAction"/>
+        <action id="Tasklane.SaveSelection" class="com.tasklane.ui.actions.SaveSelectionAction"/>
+        <action id="Tasklane.SaveRepoFile" class="com.tasklane.ui.actions.SaveRepoFileAction"/>
+        <action id="Tasklane.ExportArchive" class="com.tasklane.ui.actions.ExportArchiveAction"
+                icon="AllIcons.Actions.MenuSaveall"/>
+        <action id="Tasklane.RepairDatabase" class="com.tasklane.ui.actions.RepairDatabaseAction"/>
+        <action id="Tasklane.ImportArchive" class="com.tasklane.ui.actions.ImportArchiveAction"
+                icon="AllIcons.ToolbarDecorator.Import"/>
+
         <!-- Encargar la tarea a un agente de IA (P26). Hand Off to Agent solo sale con el
              plugin Terminal y una orden en los ajustes; Copy Agent Prompt, siempre. Las
              instrucciones para CLAUDE.md no son de una tarea: se buscan por nombre y estan en
@@ -798,6 +822,11 @@
         <action id="Tasklane.HandOffToAgent"
                 class="com.tasklane.ui.actions.HandOffToAgentAction"
                 icon="AllIcons.Nodes.Console"/>
+        <!-- Varios agentes (2.27.0): en el menu contextual, con uno sale la accion de arriba
+             y con dos o mas un submenu, uno por agente. Lo decide el grupo en cada apertura. -->
+        <group id="Tasklane.HandOffToAgentMenu"
+               class="com.tasklane.ui.actions.HandOffToAgentGroup"
+               icon="AllIcons.Nodes.Console"/>
         <action id="Tasklane.CopyAgentPrompt"
                 class="com.tasklane.ui.actions.CopyAgentPromptAction"
                 icon="AllIcons.Actions.Copy"/>
@@ -811,12 +840,8 @@
                 class="com.tasklane.ui.actions.SaveRepoMarkdownAction"/>
         <action id="Tasklane.SaveRepoText"
                 class="com.tasklane.ui.actions.SaveRepoTextAction"/>
-        <group id="Tasklane.SaveRepo" popup="true" icon="AllIcons.Actions.MenuSaveall">
-            <reference ref="Tasklane.SaveRepoCsv"/>
-            <reference ref="Tasklane.SaveRepoMarkdown"/>
-            <reference ref="Tasklane.SaveRepoText"/>
-        </group>
-
+        <!-- Las acciones por formato siguen registradas —se buscan por nombre y aceptan atajo—,
+             pero ya no estan en el menu: Save to File elige el formato por la extension. -->
         <!-- Vaciar el repositorio activo. Sin atajo: es destructiva, y se busca por nombre. -->
         <action id="Tasklane.ClearRepo"
                 class="com.tasklane.ui.actions.ClearRepoAction"
@@ -831,16 +856,40 @@
         <group id="Tasklane.Grouping" popup="true" class="com.tasklane.ui.actions.GroupingActionGroup"
                icon="/icons/group_by.svg"/>
 
-        <group id="Tasklane.Export" popup="true" icon="AllIcons.ToolbarDecorator.Export">
+        <!-- Export / Import (2.28.0). Export sólo saca datos: copiar, guardar a fichero y las
+             dos copias completas. Import mete un archivo. Lo destructivo —vaciar, quitar— ya
+             no cuelga de Export: tiene su propio submenu. -->
+        <group id="Tasklane.ExportCopy" popup="true" icon="AllIcons.Actions.Copy">
             <reference ref="Tasklane.ExportState"/>
             <reference ref="Tasklane.ExportGroup"/>
             <reference ref="Tasklane.ExportSelection"/>
             <separator/>
             <reference ref="Tasklane.ExportMarkdown"/>
+        </group>
+
+        <group id="Tasklane.ExportSave" popup="true" icon="AllIcons.Actions.MenuSaveall">
+            <reference ref="Tasklane.SaveState"/>
+            <reference ref="Tasklane.SaveGroup"/>
+            <reference ref="Tasklane.SaveSelection"/>
             <separator/>
-            <reference ref="Tasklane.SaveRepo"/>
+            <reference ref="Tasklane.SaveRepoFile"/>
+        </group>
+
+        <group id="Tasklane.Export" popup="true" icon="AllIcons.ToolbarDecorator.Export">
+            <reference ref="Tasklane.ExportCopy"/>
+            <reference ref="Tasklane.ExportSave"/>
+            <separator/>
+            <reference ref="Tasklane.ExportArchive"/>
             <reference ref="Tasklane.ExportXml"/>
+        </group>
+
+        <group id="Tasklane.Import" popup="true" icon="AllIcons.ToolbarDecorator.Import">
+            <reference ref="Tasklane.ImportArchive"/>
             <reference ref="Tasklane.ImportTodos"/>
+        </group>
+
+        <group id="Tasklane.Maintenance" popup="true" icon="AllIcons.General.Settings">
+            <reference ref="Tasklane.RepairDatabase"/>
             <separator/>
             <reference ref="Tasklane.ClearRepo"/>
             <reference ref="Tasklane.ExportAndRemoveRepo"/>
@@ -856,6 +905,7 @@
             <reference ref="Tasklane.OpenBoard"/>
             <separator/>
             <reference ref="Tasklane.Export"/>
+            <reference ref="Tasklane.Import"/>
             <reference ref="Tasklane.Settings"/>
         </group>
 
@@ -879,10 +929,12 @@
             <reference ref="Tasklane.MoveUp"/>
             <reference ref="Tasklane.MoveDown"/>
             <separator/>
-            <reference ref="Tasklane.HandOffToAgent"/>
+            <reference ref="Tasklane.HandOffToAgentMenu"/>
             <reference ref="Tasklane.CopyAgentPrompt"/>
             <separator/>
             <reference ref="Tasklane.Export"/>
+            <reference ref="Tasklane.Import"/>
+            <reference ref="Tasklane.Maintenance"/>
             <separator/>
             <reference ref="Tasklane.DeleteTask"/>
         </group>

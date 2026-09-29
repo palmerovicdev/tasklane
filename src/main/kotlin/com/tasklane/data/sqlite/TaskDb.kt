@@ -58,6 +58,8 @@ internal class TaskDb private constructor(
      * sobre un `fsync`, un volumen de red, un `.idea` restaurado a medias.
      */
     val dirty: Boolean,
+    /** El aviso de daño de todas las conexiones de esta base. Ver [CorruptionSignal]. */
+    val corruption: CorruptionSignal = CorruptionSignal(),
 ) : AutoCloseable {
 
     /**
@@ -91,7 +93,7 @@ internal class TaskDb private constructor(
      * Para lo que tiene que ver la base quieta mientras dura —exportar, copiar,
      * comprobar— sin congelar lo que ve la ventana. Quien la abre la cierra.
      */
-    fun openReader(): Sql = Sql(file, readOnly = true).also { sql ->
+    fun openReader(): Sql = Sql(file, readOnly = true, corruption).also { sql ->
         for (pragma in TaskSchema.READ_PRAGMAS) sql.execute(pragma)
     }
 
@@ -237,7 +239,8 @@ internal class TaskDb private constructor(
             val wal = walOf(file)
             val dirty = runCatching { Files.exists(wal) && Files.size(wal) > 0 }.getOrDefault(false)
 
-            val writer = Sql(file)
+            val signal = CorruptionSignal()
+            val writer = Sql(file, signal = signal)
             var reader: Sql? = null
             val version: Int
             val future: Boolean
@@ -264,7 +267,7 @@ internal class TaskDb private constructor(
                     }
                 }
 
-                reader = Sql(file, readOnly = true)
+                reader = Sql(file, readOnly = true, signal = signal)
                 for (pragma in TaskSchema.READ_PRAGMAS) reader.execute(pragma)
             } catch (e: Exception) {
                 // Un fichero dañado falla aquí, y la recuperación lo tiene que poder mover:
@@ -281,6 +284,7 @@ internal class TaskDb private constructor(
                 version = maxOf(version, TaskSchema.VERSION),
                 readOnly = future,
                 dirty = dirty,
+                corruption = signal,
             )
         }
     }

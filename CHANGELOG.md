@@ -10,6 +10,76 @@ README (§ *Fases y versiones*): hasta la `1.0.0` la versión media era **la fas
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.28.1]
+
+### Corregido
+- La versión del plugin para el archivo del repositorio se leía con
+  `PluginManagerCore.getPlugin` (API interna); ahora `PluginManager.getPluginByClass`.
+- El diálogo de guardar usaba el constructor deprecado de `FileSaverDescriptor` con las
+  extensiones; ahora las pone `withExtensionFilter`. Sin cambios de formato.
+- `SearchEverywhereContributor` sigue a propósito (ver `TaskSearchContributor`): la API
+  nueva es experimental entera.
+
+## [2.28.0]
+
+Export e import de verdad, un menú *Export* que sólo exporta, y una recuperación que sabe leer
+una base cuyo esquema está roto.
+
+### Añadido
+- **Importar un archivo `.zip`** (*Import ▸ Archive (.zip)…*) elegido del disco. Lee sin tocar
+  nada, enseña cuántas tareas son nuevas, cuáles se actualizan y cuáles ya están, y sólo
+  entonces importa: **suma**, no reemplaza, y por id gana la más reciente. Copia la base antes
+  (`tasklane.db.before-import`) y trae las imágenes que falten.
+- **El archivo `.zip`** (*Export ▸ Repository Archive…*): `tasks.xml` + las imágenes +
+  `manifest.properties`. Antes exportar a XML dejaba las capturas fuera.
+- **Guardar a fichero** un estado, un grupo, la selección o el repositorio entero
+  (*Export ▸ Save to File*); el formato —`.md`, `.csv`, `.txt`— lo decide la extensión.
+- **Reparar a demanda** (*Maintenance ▸ Repair Database…*): comprueba con una conexión nueva
+  y, si hay daño, ofrece reabrir y recuperar.
+- **Cualquier conexión avisa del daño.** Antes sólo lo veía una escritura o la comprobación
+  tras un cierre sucio: una exportación fallaba con `SQLITE_CORRUPT` y nadie más se enteraba.
+
+### Cambiado
+- **El menú *Export*, ordenado**: *Copy ▸*, *Save to File ▸*, el archivo y `tasks.xml`.
+  *Import TODO Comments…* pasa a *Import ▸* y *Delete All Tasks…* / *Export and Remove…* a
+  *Maintenance ▸*. Las acciones por formato (`Tasklane.SaveRepoCsv`…) siguen registradas.
+- **Recuperar una base con el esquema roto** (`malformed database schema (…)`): antes sólo
+  quedaba la copia diaria; ahora se leen las páginas del fichero **a pelo**, con el WAL
+  encima, sin necesitar SQLite. Con una cabecera rota ya no se pierde lo posterior a la copia.
+  Con un fichero recuperado a pelo la copia sólo tapa huecos: no resucita lo borrado.
+
+### Corregido
+- Un `INSERT OR IGNORE` descartaba en silencio las tareas cuyo `seq` chocaba al mezclar
+  páginas de dos generaciones del fichero (nueve de 196 en la base real).
+
+### Detalles
+- **Formato de datos:** ninguno. El `.zip` es nuevo y el `tasks.xml` de dentro es el de siempre.
+
+## [2.27.0]
+
+Menor sin cambio de formato: varios agentes para *Hand Off to Agent*. Amplía la P26 de
+[`docs/roadmap.md`](docs/roadmap.md).
+
+### Añadido
+- **Tantos agentes como quieras.** En *Settings → Tools → Tasklane → AI agent*, la orden única
+  pasa a ser una tabla con el **nombre** y la **orden** de cada agente —Claude Code, Codex,
+  Gemini, el mismo con otro modelo…—, que se añaden con `+`, se quitan con `-` y se ordenan
+  arrastrando por el asa o con las flechas, como las prioridades. Una fila sin orden no se
+  guarda; sin nombre, sale el programa de la orden.
+- **Con más de uno, *Hand Off to Agent* es un submenú**, uno por agente en el orden de la
+  tabla. Con uno, sigue siendo la entrada de siempre, con su atajo. Desde el atajo del Keymap o
+  *Find Action*, con varios, pregunta a cuál.
+- **La pestaña de la terminal lleva el nombre del agente**: «Codex · Arreglar el login».
+
+### Detalles
+- **La petición sigue siendo una para todos**: habla de las herramientas de Tasklane, no del
+  agente.
+- **Los ajustes de antes siguen valiendo.** Un `tasklane-agent.xml` con su orden se lee como un
+  agente sin nombre, uno sin tocar da *Claude Code* y uno con la orden vacía, ninguno. La lista
+  va en `<agents>`, y `command` sigue guardando la orden del **primero** —vacía si no hay
+  ninguno—: una versión anterior que reciba estos ajustes por *Settings Sync* encarga a ése.
+- **Formato:** ninguno. `tasklane-agent.xml` es de la aplicación, no del proyecto.
+
 ## [2.26.2]
 
 Sólo correcciones: lo que el Plugin Verifier del Marketplace encontró en la 2.26.1.

@@ -42,6 +42,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P31 · Vencimiento y etiquetas desde el menú             | `2.24.0` |
 | ✅ | P34 · El teclado, entero de verdad                      | `2.25.0` |
 | ✅ | P35 · Primeros pasos en una lista vacía                 | `2.26.0` |
+| ✅ | P5 · Compartir tareas (importar un archivo)             | `2.28.0` |
 
 ---
 
@@ -75,11 +76,16 @@ color si hay algo vencido. Hoy no hay ningún `StatusBarWidget`.
 Salió como «ToDo 3 · Doing 1 · 2 overdue»: se elige qué estados cuenta y si cuenta las
 vencidas (en rojo, sólo si las hay), y cada cuenta abre su pestaña o sus tareas.
 
-### P5 · Compartir tareas (importar XML) ⏸️
+### P5 · Compartir tareas (importar XML) ✅ `2.28.0`
 
 Mínimo: *Import XML…* en el menú *Export*, fusionando por id —`TasksXmlReader` ya existe y
 no tiene acción—. Ambicioso: tareas marcadas como compartidas que van a un fichero
 versionado, `.idea/tasklane-shared.xml`, pensado para que Git lo fusione bien.
+
+Salió la parte mínima, pero con un `.zip` en vez del XML a secas —lleva también las
+imágenes— y elegido del disco: *Import ▸ Archive (.zip)…* fusiona por id y gana el
+`updatedAt` mayor, con resumen previo y copia de la base. **Lo ambicioso no se hizo**: el fichero
+versionado `.idea/tasklane-shared.xml` que Git fusione sigue sin existir.
 
 ### P6 · Tareas recurrentes ⏸️
 
@@ -322,6 +328,12 @@ En la `2.25.1`, a petición del usuario, **encargarla ya no la mueve**: ni *Doin
 casilla de los ajustes se fue con el paso. La petición de fábrica le dice al agente que no toque
 el estado y que, al acabar, la cierre con `tasklane_complete_task`: de donde estaba a *Done* de
 un salto.
+
+En la `2.27.0`, también a petición suya, **varios agentes**: la orden única pasa a ser una tabla
+de agentes con nombre y orden (se añaden, se quitan y se ordenan como las prioridades), y con
+más de uno *Hand Off to Agent* es un submenú con uno por agente; desde el atajo, pregunta a
+cuál. La petición sigue siendo una para todos. Un `tasklane-agent.xml` de antes se lee como un
+agente sin nombre, y `command` sigue guardando la orden del primero para las versiones viejas.
 
 ### P27 · Pegar y soltar en la lista ✅ `2.19.0`
 

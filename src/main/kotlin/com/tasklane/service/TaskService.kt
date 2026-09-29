@@ -6,6 +6,7 @@ import com.intellij.ide.actions.RevealFileAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.StatusBar
+import com.tasklane.data.sqlite.ImportMerge
 import com.tasklane.data.sqlite.StoreRecovery
 import com.tasklane.data.store.LoadAlert
 import com.tasklane.domain.query.TaskQuery
@@ -804,6 +805,41 @@ class TaskService(
     /** Cuántas tareas tiene un repositorio. De `counter`: cinco filas, no un recorrido. */
     fun countOf(repo: RepoKey): Int = store?.countOf(repo) ?: 0
 
+    // ------------------------------------------------------------ importar un archivo
+
+    /**
+     * Qué pasaría al meter [tasks] en [repo]: cuántas se añaden, se actualizan o se dejan.
+     * **Sólo lee.** Ver [ImportMerge] para la regla.
+     */
+    internal fun planImport(repo: RepoKey, tasks: List<Task>): ImportMerge.Plan? {
+        val store = store ?: return null
+        return ImportMerge.plan(store, repo, _snapshot.value.config, tasks)
+    }
+
+    /** Escribe lo que [planImport] decidió, y refresca la ventana. */
+    internal fun applyImport(plan: ImportMerge.Plan) {
+        val store = store ?: return
+        if (store.readOnly || plan.write.isEmpty()) return
+        synchronized(gate) {
+            ImportMerge.apply(store, _snapshot.value.config, plan)
+            _snapshot.value = _snapshot.value.touched()
+        }
+    }
+
+    /**
+     * Una copia de la base **antes** de importar, aparte de la diaria: `tasklane.db.before-import`.
+     * Una sola, la última; importar dos veces seguidas no acumula gigas.
+     *
+     * @return dónde quedó, o `null` si no se pudo —y entonces quien llama decide si sigue—.
+     */
+    internal fun backupBeforeImport(): Path? {
+        val db = db ?: return null
+        val layout = layout ?: return null
+        return runCatching {
+            layout.root.resolve("${TaskDb.FILE_NAME}.before-import").also { db.backupTo(it) }
+        }.onFailure { thisLogger().warn("Tasklane: no se pudo copiar la base antes de importar", it) }.getOrNull()
+    }
+
     /**
      * Un repositorio entero, congelado, para sacarlo de la base. Ver [RepoSnapshot].
      *
@@ -1232,6 +1268,27 @@ class TaskService(
         return Integrity(problems)
     }
 
+    /**
+     * **Reparar a demanda** (*Maintenance ▸ Repair Database…*): comprueba la base ahora, sin
+     * esperar a un cierre sucio, y si algo falla la marca para recuperarla. Devuelve los
+     * problemas; vacío si está sana.
+     *
+     * Dos comprobaciones y no una: `integrity_check` mira las páginas **de esta conexión**, y
+     * el daño de esta mañana —un fichero cambiado bajo un diario— sólo lo ven las conexiones
+     * *nuevas*, porque la de escritura conserva el esquema que ya cargó. Por eso primero se
+     * abre una conexión de lectura nueva y se le pide el esquema.
+     *
+     * **Bloqueante y caro**: segundo plano.
+     */
+    internal fun checkHealthNow(): List<String> {
+        val db = db ?: return emptyList()
+        val fresh = runCatching { db.openReader().use { it.count("SELECT count(*) FROM sqlite_master") } }
+            .exceptionOrNull()?.let { listOf(it.message ?: it.javaClass.simpleName) }.orEmpty()
+        val problems = fresh.ifEmpty { db.checkIntegrity() }
+        problems.firstOrNull()?.let(::markDamaged)
+        return problems
+    }
+
     /** Lo que hizo [backupIfDue]: dónde, cuánto, o por qué no. */
     internal data class Backup(val file: Path, val bytes: Long = 0, val skipped: StoreMaintenance.Skip? = null)
 
@@ -1348,6 +1405,9 @@ class TaskService(
 
     /** Pone una base ya abierta y sana en el servicio. Una sola vez: ver [db]. */
     private fun bind(opened: TaskDb) {
+        // Daño visto por CUALQUIER conexión —una lectura de exportar, la búsqueda, el editor—:
+        // se apunta y se ofrece reparar, igual que cuando lo ve una escritura.
+        opened.corruption.listener = { markDamaged(it.message ?: it.javaClass.simpleName) }
         synchronized(gate) {
             db = opened
             store = TaskStore(opened)
