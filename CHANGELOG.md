@@ -10,6 +10,48 @@ README (§ *Fases y versiones*): hasta la `1.0.0` la versión media era **la fas
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.29.0]
+
+Etiquetas que se ven y que se escriben en el texto, pedida en una lista por el usuario.
+
+### Añadido
+- **Etiquetas rellenas.** Una etiqueta con color es ahora una pastilla rellena de ese color,
+  en la tarjeta y en las fichas del diálogo, con la letra blanca o casi negra según cuál
+  contraste más (WCAG); sin color, gris. Hasta ahora el color iba sólo en la letra y una
+  etiqueta clara casi no se veía. La pastilla se pulsa entera, también por su relleno.
+- **Etiquetar desde el texto de la tarea.** En el diálogo, `#api` seguido de espacio, coma o
+  salto de línea pasa a las fichas y sale del cuerpo; al aceptar, también la que se quedó al
+  final sin separador —salvo que la tarea ya la trajera escrita—. No son etiqueta `#123`
+  (incidencias), `C#`, `pagina#seccion`, `# Título`, ni nada dentro de código; un pegado se
+  queda como llega. El texto de ayuda del cuerpo lo dice. Ver `InlineTag`.
+- **La lista de etiquetas con un clic.** Pulsar el campo de etiquetas abre la lista del
+  repositorio sin escribir nada, y *Tags ▸ Add…* la abre al aparecer. Con el tabulador no se
+  abre: con la lista abierta, Intro elige la primera en vez de aceptar el diálogo.
+- **La fila de estados se desplaza de lado** cuando no caben todos, con la rueda, el
+  trackpad o su barra; la pestaña elegida —también con `⌥←/→` o el tabulador— se trae a la
+  vista. Antes las que no cabían se quedaban cortadas por la derecha. La barra lleva su propio
+  hueco debajo: en macOS se superpone, y `JBScrollPane` la pintaba encima de las pestañas.
+
+Sin cambios de formato.
+
+## [2.28.3]
+
+Cambiar de estado desde la tarjeta, con un clic.
+
+### Añadido
+- **Botón de estado en la tarjeta**, a la izquierda del asa ⋮⋮ —y en su sitio en una pestaña
+  que no va a mano—. Sale con el ratón encima, como el menú `⋮`, y abre directamente la lista
+  de *Move To ▸*: los estados en el orden de las pestañas, el actual apagado. Actúa sobre la
+  selección si la fila es parte de ella, también en el tablero. No le quita ancho al título:
+  ocupa el hueco que ya tenía el asa. Sin cambios de formato.
+
+## [2.28.2]
+
+### Corregido
+- La versión del plugin para el archivo del repositorio sale ahora del
+  `PluginAwareClassLoader` del plugin: `PluginManager.getPluginByClass`, lo que usaba la
+  2.28.1, también es `@ApiStatus.Internal` y el Verifier la marca. Sin cambios de formato.
+
 ## [2.28.1]
 
 ### Corregido

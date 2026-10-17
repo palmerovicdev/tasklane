@@ -23,6 +23,7 @@ import com.tasklane.ui.toolwindow.CardTextSelection
 import com.tasklane.ui.toolwindow.CodeSnippets
 import com.tasklane.ui.toolwindow.GroupNode
 import com.tasklane.ui.toolwindow.TaskNode
+import com.tasklane.ui.toolwindow.TaskRowActions
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
 import com.tasklane.ui.toolwindow.TextPos
 import com.tasklane.ui.toolwindow.TitleWrap
@@ -35,6 +36,7 @@ import org.junit.BeforeClass
 import org.junit.Test
 import java.awt.Point
 import java.awt.Rectangle
+import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 import java.time.Instant
 import javax.swing.JTree
@@ -293,6 +295,69 @@ class TaskTreeRendererTest {
     }
 
     /**
+     * El botón de estado (2.28.3) sale en cualquier pestaña, vaya o no a mano: sin asa se
+     * queda en su sitio, debajo del menú.
+     */
+    @Test
+    fun `el boton de estado se puede pulsar en la fila del raton`() {
+        val tree = treeWith(task("Comprar pan"), MIN_WIDTH)
+        renderer.hoveredRow = 0
+
+        val targets = scanAll(tree, painted(tree, 0)) { point -> renderer.targetAt(tree, point) }
+
+        assertTrue("el boton de estado tiene que tener zona clicable", TaskTreeRenderer.RowTarget.STATE in targets)
+        assertFalse("sin orden manual no hay asa", TaskTreeRenderer.RowTarget.GRIP in targets)
+    }
+
+    /** A la izquierda del asa, a su altura y debajo de los controles de arriba. */
+    @Test
+    fun `el boton de estado va a la izquierda del asa`() {
+        renderer.reorderable = true
+        val tree = treeWith(task("Comprar pan"), MIN_WIDTH)
+        renderer.hoveredRow = 0
+        val bounds = painted(tree, 0)
+
+        val points = (0 until bounds.height).flatMap { y ->
+            (0 until bounds.width).mapNotNull { x ->
+                val point = Point(bounds.x + x, bounds.y + y)
+                renderer.targetAt(tree, point)?.let { it to point }
+            }
+        }
+        fun of(target: TaskTreeRenderer.RowTarget) = points.filter { it.first == target }.map { it.second }
+        val state = of(TaskTreeRenderer.RowTarget.STATE)
+        val grip = of(TaskTreeRenderer.RowTarget.GRIP)
+        val menu = of(TaskTreeRenderer.RowTarget.MENU)
+        assertTrue("hay boton de estado", state.isNotEmpty())
+        assertTrue("hay asa", grip.isNotEmpty())
+
+        assertTrue("el boton acaba donde empieza el asa", state.maxOf { it.x } < grip.minOf { it.x })
+        assertEquals("a la misma altura que el asa", grip.minOf { it.y }, state.minOf { it.y })
+        assertTrue("debajo del menu", state.minOf { it.y } > menu.maxOf { it.y })
+    }
+
+    /**
+     * Dentro de la banda de los controles, que es donde la lista los busca para el tooltip y
+     * el cursor: fuera de ella el botón se pulsaría, pero nunca diría qué hace.
+     */
+    @Test
+    fun `el boton de estado y el asa caen en la banda de los controles`() {
+        renderer.reorderable = true
+        val tree = treeWith(task("Comprar pan"), MIN_WIDTH)
+        renderer.hoveredRow = 0
+        val bounds = painted(tree, 0)
+
+        val lower = setOf(TaskTreeRenderer.RowTarget.STATE, TaskTreeRenderer.RowTarget.GRIP)
+        val points = (0 until bounds.height).flatMap { y ->
+            (0 until bounds.width).map { x -> Point(bounds.x + x, bounds.y + y) }
+        }.filter { renderer.targetAt(tree, it) in lower }
+        assertTrue(points.isNotEmpty())
+        for (point in points) {
+            val move = MouseEvent(tree, MouseEvent.MOUSE_MOVED, 0, 0, point.x, point.y, 0, false)
+            assertTrue("$point fuera de la banda", TaskRowActions.nearActions(tree, move))
+        }
+    }
+
+    /**
      * La banda que el doble clic ignora. No se comprueba dónde acaba —eso depende del
      * tema— sino lo que hace falta para que el gesto no se pise con el de marcar: que
      * el borde izquierdo de la fila sea casilla y el centro no.
@@ -478,6 +543,25 @@ class TaskTreeRendererTest {
         val tags = scanAll(tree, bounds) { renderer.hotspotAt(tree, it) as? TaskTreeRenderer.Hotspot.Tag }
 
         assertEquals(setOf("api", "urgente"), tags.map { it.name }.toSet())
+    }
+
+    /**
+     * Una etiqueta es una pastilla rellena (2.29.0) y responde **entera**, también por el
+     * relleno que rodea a la letra: entre dos seguidas no queda más hueco muerto que el de
+     * la fila.
+     */
+    @Test
+    fun `la pastilla de una etiqueta se pulsa entera`() {
+        val tree = treeWith(task("Revisar el login", tags = listOf("api", "urgente")))
+        painted(tree, 0)
+
+        val pills = renderer.hotspots(tree, 0)
+            .filter { it.hotspot is TaskTreeRenderer.Hotspot.Tag }
+            .sortedBy { it.bounds.x }
+
+        assertEquals(2, pills.size)
+        val (first, second) = pills
+        assertEquals(com.intellij.util.ui.JBUI.scale(com.tasklane.ui.toolwindow.ChipRow.GAP), second.bounds.x - first.bounds.maxX.toInt())
     }
 
     // ------------------------------------------- recorrer con el teclado (P34)

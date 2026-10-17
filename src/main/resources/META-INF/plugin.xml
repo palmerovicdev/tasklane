@@ -131,7 +131,7 @@
             <li><b>Change the priority from the card</b>: click the priority badge for the list
                 of priorities with their colours.</li>
             <li><b>Filter by a tag from the card</b>: click <code>#api</code> to add it to the
-                search, click it again to drop it. Tags with a colour show in it.</li>
+                search, click it again to drop it. Tags with a colour are filled with it.</li>
             <li><b>Jump to the code</b> from the <code>Auth.kt:42</code> badge, with the full
                 path and the code that is there today in its tooltip. On a narrow card the priority and anchor badges shrink to
                 their icon instead of disappearing &mdash; guaranteed down to the narrowest the
@@ -154,7 +154,8 @@
                 Completed</i>, <i>Bookmark</i>, <i>Move To &#9656;</i>, <i>Priority &#9656;</i>,
                 <i>Due &#9656;</i>, <i>Tags &#9656;</i>, <i>Hand Off to Agent</i>, <i>Export</i>
                 and <i>Delete</i> &mdash; the same one as the row's <i>&vellip;</i> menu.</li>
-            <li><b>Move tasks between states</b> with <i>Move To &#9656;</i>, or one tab at a time
+            <li><b>Move tasks between states</b> with <i>Move To &#9656;</i> or the state button
+                that appears on a card under the mouse, or one tab at a time
                 with <code>&#8679;&#8997;&larr;/&rarr;</code>, without opening a dialog.
                 <code>&#8997;&larr;/&rarr;</code> just switches the tab you are looking at.</li>
             <li><b>Set the due date or the tags without a dialog</b>: <i>Due &#9656;</i> has the
@@ -209,8 +210,9 @@
             <li><b>Tags as chips</b>, typed separated by comma or space, removed with their cross
                 or with <code>Backspace</code>. In the search field they are
                 <code>#api</code>. <b>The field suggests the repository's tags</b> as you type,
-                with how many tasks each has, so <code>#api</code> and <code>#apis</code> do not
-                grow side by side.</li>
+                or as soon as you click it, with how many tasks each has, so <code>#api</code>
+                and <code>#apis</code> do not grow side by side. Or tag as you write: type
+                <code>#api</code> and a space in the task text and it becomes a tag.</li>
             <li><b>Code anchors as chips</b>, each one removable: captured from the editor, or
                 typed as <code>path:line</code> with the path completed as you type. A GitHub
                 <code>#L42</code> link or a stack trace's <code>(42)</code> works too.</li>

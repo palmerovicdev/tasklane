@@ -2,12 +2,14 @@ package com.tasklane.ui.toolwindow
 
 import com.intellij.ui.SimpleColoredComponent
 import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
 import com.tasklane.TasklaneBundle
 import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskState
 import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Graphics
 import java.awt.event.FocusAdapter
@@ -16,9 +18,15 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelEvent
 import javax.accessibility.AccessibleContext
 import javax.accessibility.AccessibleRole
+import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JScrollPane
+import javax.swing.ScrollPaneConstants
+import javax.swing.SwingUtilities
+import kotlin.math.roundToInt
 
 /**
  * La fila de estados, justo encima del buscador: `ToDo 5`, `Doing 0`, `Done 2`.
@@ -32,6 +40,11 @@ import javax.swing.JPanel
  *
  * El recuento es un número a secas. Es lo que hay en la pestaña: la palabra sobra
  * porque la fila entera habla de tareas.
+ *
+ * **Se desplaza de lado** (2.29.0): con muchos estados o la ventana estrecha, las pestañas
+ * que no caben se quedaban cortadas por la derecha, sin forma de llegar a ellas con el
+ * ratón. Va dentro de [scrollable], y la rueda, el trackpad y el tabulador la mueven; la
+ * pestaña elegida se trae siempre a la vista.
  */
 internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
     JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(GAP), JBUI.scale(VGAP))) {
@@ -45,9 +58,53 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
      */
     private var built: List<Pair<StateId, String>> = emptyList()
 
+    /** La pestaña que se trajo a la vista la última vez, para no pelearse con quien desplaza. */
+    private var revealed: StateId? = null
+
     init {
         isOpaque = false
         border = JBUI.Borders.empty(2, 2, 0, 2)
+        // La rueda de siempre, la vertical, también la desplaza: una fila que sólo se mueve
+        // con Mayúsculas o con el trackpad de lado no la encuentra nadie. La clave de
+        // `JBScrollPane` que hace esto es `@ApiStatus.Experimental`, así que se hace aquí.
+        addMouseWheelListener(::scrollSideways)
+    }
+
+    /**
+     * La fila dentro de su desplazamiento lateral, sin borde ni fondo propios: es lo que se
+     * coloca en el panel. Sin barra vertical, y la horizontal sólo cuando no caben.
+     *
+     * **Cuando no caben, la barra lleva su propio hueco debajo.** En macOS es de las que se
+     * superponen, y `JBScrollPane` no le aparta sitio ni la cuenta en el alto preferido: se
+     * pintaba encima de las pestañas y les cortaba media letra. Se mide contra el ancho del
+     * contenedor, que es el que ya tiene el ancho nuevo cuando se pregunta por el alto.
+     */
+    fun scrollable(): JComponent = object : JBScrollPane(
+        this,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+    ) {
+        override fun getPreferredSize(): Dimension {
+            val size = super.getPreferredSize()
+            val room = (parent?.let { it.width - it.insets.left - it.insets.right } ?: width) - insets.left - insets.right
+            if (room > 0 && this@StateTabRow.preferredSize.width > room) size.height += horizontalScrollBar.preferredSize.height
+            return size
+        }
+    }.apply {
+        border = JBUI.Borders.empty()
+        viewportBorder = null
+        isOpaque = false
+        viewport.isOpaque = false
+    }
+
+    private fun scrollSideways(e: MouseWheelEvent) {
+        val bar = (SwingUtilities.getAncestorOfClass(JScrollPane::class.java, this) as? JScrollPane)
+            ?.horizontalScrollBar ?: return
+        if (!bar.isVisible) return
+        val step = (e.preciseWheelRotation * JBUI.scale(WHEEL_STEP)).roundToInt()
+        if (step == 0) return
+        bar.value = (bar.value + step).coerceIn(bar.minimum, bar.maximum - bar.visibleAmount)
+        e.consume()
     }
 
     fun update(states: List<TaskState>, counts: Map<StateId, Int>, selected: StateId) {
@@ -67,6 +124,17 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
             tabs[state.id]?.show(state.name, counts[state.id] ?: 0, state.id == selected)
         }
         repaint()
+        // Elegida con `⌥←/→` o desde otro sitio, la pestaña puede estar fuera de la vista.
+        // Después de colocarla, que es cuando tiene sitio; y sólo si cambió, porque los
+        // recuentos se repintan con cada tecla del buscador.
+        if (selected != revealed) {
+            revealed = selected
+            SwingUtilities.invokeLater { tabs[selected]?.let(::reveal) }
+        }
+    }
+
+    private fun reveal(tab: JComponent) {
+        scrollRectToVisible(tab.bounds)
     }
 
     /**
@@ -98,7 +166,12 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
                 }
             })
             addFocusListener(object : FocusAdapter() {
-                override fun focusGained(e: FocusEvent) = repaint()
+                override fun focusGained(e: FocusEvent) {
+                    // Tabulando se llega también a las que no se ven.
+                    reveal(this@Tab)
+                    repaint()
+                }
+
                 override fun focusLost(e: FocusEvent) = repaint()
             })
             addMouseListener(object : MouseAdapter() {
@@ -188,5 +261,8 @@ internal class StateTabRow(private val onSelect: (StateId) -> Unit) :
         const val PADDING_H = 8
         const val PADDING_V = 3
         const val ARC = 10
+
+        /** Cuánto desplaza un paso de rueda: más o menos media pestaña corta. */
+        const val WHEEL_STEP = 24
     }
 }

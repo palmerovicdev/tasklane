@@ -33,6 +33,8 @@ internal class AddTagsDialog(
 
     init {
         title = TasklaneBundle.message("dialog.addTags.title", count)
+        // Se abre para elegir: la lista sale ya, sin escribir (2.29.0).
+        chips.suggestOnFirstFocus()
         init()
     }
 

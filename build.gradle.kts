@@ -125,6 +125,31 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.29.0 &mdash; tags you can see, and tag as you write</h3>
+            <ul>
+              <li><b>Filled tags</b>: a tag with a colour is a pill filled with it, on the card and
+                  in the dialog, with white or dark text, whichever reads better.</li>
+              <li><b>Tag from the task text</b>: type <code>#api</code> and a space, a comma or a
+                  new line in the new-task dialog and it moves to the tags. <code>#123</code>,
+                  <code>C#</code> and anything inside code stay as text.</li>
+              <li><b>Pick tags with a click</b>: clicking the tags field lists the repository's
+                  tags without typing first, and <i>Tags &#9656; Add&hellip;</i> opens with the
+                  list showing.</li>
+              <li><b>The state tabs scroll sideways</b> when they do not fit, and the selected
+                  one is always brought into view. No format changes.</li>
+            </ul>
+            <h3>2.28.3 &mdash; change state from the card</h3>
+            <ul>
+              <li>A <b>state button</b> on each card, left of the drag grip: hover the card and
+                  click it to get the <i>Move To</i> list right there, without the
+                  <i>&#8942;</i> menu. It acts on the selection, in the tool window and on the
+                  board. No format changes.</li>
+            </ul>
+            <h3>2.28.2 &mdash; fixes</h3>
+            <ul>
+              <li>The plugin version for the repository archive no longer comes from an
+                  internal platform API. No format changes.</li>
+            </ul>
             <h3>2.28.1 &mdash; fixes</h3>
             <ul>
               <li>Removed the use of an internal platform API and a deprecated file-dialog

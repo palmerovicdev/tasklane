@@ -7,9 +7,10 @@ import com.intellij.util.ui.JBUI
 
 /**
  * La columna de controles de la tarjeta (2.11.1): el primer hijo —la fila de marcador,
- * menú y desplegar— arriba, y el segundo —el asa de reordenar— en medio del hueco que
- * queda debajo, un poco separado del borde derecho (2.11.2: pegado abajo y al borde se
- * leía como parte de la línea de distintivos, y no como algo de la tarjeta).
+ * menú y desplegar— arriba, y el segundo —el asa de reordenar, y desde la 2.28.3 el botón
+ * de estado a su izquierda— en medio del hueco que queda debajo, un poco separado del
+ * borde derecho (2.11.2: pegado abajo y al borde se leía como parte de la línea de
+ * distintivos, y no como algo de la tarjeta).
  *
  * **Mide lo que mide la fila de arriba**, y es a propósito: el asa vive en el hueco que
  * la columna ya dejaba libre bajo los controles, y si contara para el alto preferido, una

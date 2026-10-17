@@ -3,6 +3,9 @@ package com.tasklane.ui.editor
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonShortcuts
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.project.DumbAwareAction
@@ -23,6 +26,8 @@ import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TaskPriority
 import com.tasklane.domain.model.TaskState
 import com.tasklane.domain.model.TasklaneConfig
+import com.tasklane.domain.text.InlineTag
+import com.tasklane.domain.text.TagParser
 import com.tasklane.domain.text.TriggerParser
 import java.awt.BorderLayout
 import java.awt.GridBagConstraints
@@ -61,7 +66,9 @@ import javax.swing.SwingUtilities
  *
  * La excepción son los **triggers de prioridad** —`!!! Resolver el fallo`—, que
  * antes sólo existían en el popup de Quick Add y desde la `0.6.8` viven aquí, que es
- * el único sitio donde se crea una tarea. Ver [installTriggers].
+ * el único sitio donde se crea una tarea. Ver [installTriggers]. Y desde la 2.29.0 las
+ * **etiquetas escritas en el cuerpo**: `#api` y un espacio pasa a las fichas. Ver
+ * [installInlineTags].
  */
 internal class TaskEditDialog(
     private val project: Project,
@@ -81,6 +88,12 @@ internal class TaskEditDialog(
      */
     private val isNew: Boolean = initialBody.isEmpty(),
 ) : DialogWrapper(project) {
+
+    /**
+     * La etiqueta que el cuerpo ya traía escrita al final, si traía una: ésa es texto de la
+     * tarea y no se toca al aceptar. Ver [pendingTag].
+     */
+    private val initialTrailingTag = InlineTag.trailing(initialBody)?.tag
 
     private val bodyField = MarkdownField(project, repo, initialBody, disposable).apply {
         component.setPlaceholder(TasklaneBundle.message("dialog.task.placeholder"))
@@ -126,6 +139,7 @@ internal class TaskEditDialog(
         setOKButtonText(TasklaneBundle.message(if (isNew) "dialog.task.create" else "dialog.task.save"))
         init()
         installEscape()
+        installInlineTags()
     }
 
     /**
@@ -232,18 +246,23 @@ internal class TaskEditDialog(
      * al aceptar —no llama a `initValidation`—.
      */
     override fun doValidate(): ValidationInfo? =
-        if (stripTrigger(bodyField.text).isBlank()) {
+        if (body.isEmpty()) {
             ValidationInfo(TasklaneBundle.message("dialog.task.empty"), bodyField.component)
         } else {
             anchorsField.commitPending()
         }
 
-    val body: String get() = stripTrigger(bodyField.text).trim()
+    val body: String
+        get() {
+            val text = stripTrigger(bodyField.text)
+            return (pendingTag(text)?.let { InlineTag.remove(text, it) } ?: text).trim()
+        }
     val stateId: StateId get() = (stateCombo.selectedItem as TaskState).id
     val priorityId: PriorityId get() = (priorityCombo.selectedItem as TaskPriority).id
     val dueDate: Instant? get() = (dueCombo.selectedItem as DueOption).instant
 
-    val tags: List<String> get() = tagsField.tags
+    val tags: List<String>
+        get() = pendingTag(stripTrigger(bodyField.text))?.let { TagParser.add(tagsField.tags, it.tag) } ?: tagsField.tags
 
     val anchors: List<CodeAnchor> get() = anchorsField.anchors
 
@@ -348,6 +367,56 @@ internal class TaskEditDialog(
         java.time.format.DateTimeFormatter.ofLocalizedPattern("yMMMd")
             .withZone(zone)
             .format(due)
+
+    // ------------------------------------------------------ etiquetas del cuerpo
+
+    /**
+     * `#api` y un espacio, una coma o un salto de línea, escrito en el cuerpo, pasa a las
+     * fichas de etiquetas y sale del texto (2.29.0): es la forma de etiquetar sin soltar el
+     * teclado mientras se apunta la tarea. Qué cuenta como etiqueta lo decide [InlineTag].
+     *
+     * **Al teclear el separador**, no al aceptar: la ficha aparece en el momento y quien la
+     * escribió ve qué ha pasado con su texto. Por eso vale también al editar —sólo mira lo
+     * que se acaba de escribir—, y el texto que la tarea ya traía no se toca nunca.
+     *
+     * Sólo un carácter tecleado: un pegado trae texto de otro sitio —una lista de
+     * incidencias, un trozo de Markdown— y se queda como llega.
+     */
+    private fun installInlineTags() {
+        bodyField.component.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                val typed = event.newFragment
+                if (event.oldLength != 0 || typed.length != 1 || !TagParser.isSeparator(typed[0])) return
+                val offset = event.offset
+                // El documento no se puede tocar desde dentro de su propio evento.
+                ApplicationManager.getApplication().invokeLater(
+                    { takeTagBefore(offset, typed[0]) },
+                    ModalityState.stateForComponent(bodyField.component),
+                )
+            }
+        })
+    }
+
+    private fun takeTagBefore(offset: Int, separator: Char) {
+        val document = bodyField.component.document
+        val text = document.text
+        // Lo que se tecleó después ya pudo moverlo todo: sólo si el separador sigue ahí.
+        if (text.getOrNull(offset) != separator) return
+        val found = InlineTag.endingAt(text, offset) ?: return
+        val (first, last) = InlineTag.cut(text, found)
+        WriteCommandAction.writeCommandAction(project)
+            .withName(TasklaneBundle.message("dialog.task.tags.inline.command"))
+            .run<RuntimeException> { document.deleteString(first, last) }
+        tagsField.addTag(found.tag)
+    }
+
+    /**
+     * La etiqueta que se quedó al final del cuerpo sin separador: aceptar con `Revisar #api`
+     * escrito no puede dejar `#api` en el texto, como el campo de fichas no pierde lo que
+     * está a medio escribir. Salvo que ya estuviera al abrir: ver [initialTrailingTag].
+     */
+    private fun pendingTag(text: String): InlineTag.Found? =
+        InlineTag.trailing(text)?.takeIf { it.tag != initialTrailingTag }
 
     // ---------------------------------------------------------------- triggers
 

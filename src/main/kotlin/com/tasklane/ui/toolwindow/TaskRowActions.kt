@@ -12,7 +12,8 @@ import java.awt.event.MouseEvent
 import javax.swing.JTree
 
 /**
- * Los controles de la derecha de cada fila: desplegar, el marcador y el menú `⋮`.
+ * Los controles de la derecha de cada fila: desplegar, el marcador, el menú `⋮` y,
+ * debajo, el botón de estado.
  *
  * Sólo aparecen en la fila que tiene el ratón encima, así que esto mantiene además
  * cuál es —`hoveredRow` del renderer— y repinta las dos filas implicadas en cada
@@ -23,7 +24,8 @@ import javax.swing.JTree
  * dentro de un desplegable la convertiría en dos clics. Lo mismo el desplegable de la
  * tarjeta, que además tiene que poder pulsarse una y otra vez sin perder el sitio. El
  * menú reutiliza el grupo `Tasklane.ContextMenu` del `plugin.xml`, el mismo del clic
- * derecho: una sola lista de acciones que mantener.
+ * derecho: una sola lista de acciones que mantener. El botón de estado (2.28.3), lo
+ * mismo con `Tasklane.MoveToState`: es el *Move To ▸* de ese menú, abierto ya.
  */
 internal object TaskRowActions {
 
@@ -57,7 +59,12 @@ internal object TaskRowActions {
 
                     TaskTreeRenderer.RowTarget.MENU -> {
                         e.consume()
-                        showMenu(tree, e.point)
+                        showMenu(tree, e.point, CONTEXT_MENU)
+                    }
+
+                    TaskTreeRenderer.RowTarget.STATE -> {
+                        e.consume()
+                        showMenu(tree, e.point, MOVE_TO)
                     }
 
                     // El asa no se pulsa: se arrastra, y eso lo atiende `CardReorder`.
@@ -80,7 +87,7 @@ internal object TaskRowActions {
     }
 
     /** Si el ratón está en la banda derecha de la fila, que es donde viven los controles. */
-    private fun nearActions(tree: JTree, e: MouseEvent): Boolean {
+    fun nearActions(tree: JTree, e: MouseEvent): Boolean {
         val row = rowAtHeight(tree, e.y)
         if (row < 0) return false
         val bounds = paintedRowBounds(tree, row) ?: return false
@@ -96,14 +103,15 @@ internal object TaskRowActions {
     /**
      * El menú actúa sobre la selección, así que la fila del `⋮` entra en ella antes
      * de abrirlo. Si ya estaba, la selección se respeta tal cual: pulsar el menú de
-     * una de varias filas seleccionadas no debe reducirlas a una.
+     * una de varias filas seleccionadas no debe reducirlas a una. Con el botón de
+     * estado igual: cambia de estado a toda la selección, como *Move To ▸*.
      */
-    private fun showMenu(tree: JTree, point: Point) {
+    private fun showMenu(tree: JTree, point: Point, groupId: String) {
         val row = rowAtHeight(tree, point.y)
         if (row < 0) return
         if (!tree.isRowSelected(row)) tree.selectionRows = intArrayOf(row)
 
-        val group = ActionManager.getInstance().getAction(CONTEXT_MENU) as? ActionGroup ?: return
+        val group = ActionManager.getInstance().getAction(groupId) as? ActionGroup ?: return
         val menu = ActionManager.getInstance().createActionPopupMenu(ActionPlaces.TOOLWINDOW_POPUP, group)
         menu.setTargetComponent(tree)
         menu.component.show(tree, point.x, point.y)
@@ -117,6 +125,7 @@ internal object TaskRowActions {
     }
 
     private const val CONTEXT_MENU = "Tasklane.ContextMenu"
+    private const val MOVE_TO = "Tasklane.MoveToState"
 
     /** Ancho de la banda derecha donde puede haber un control. */
     private const val BAND = 64

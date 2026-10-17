@@ -32,8 +32,10 @@ internal class Chip(
     icon: Icon? = null,
     tooltip: String? = null,
     removeTooltip: String,
-    /** El del texto, si no es el de siempre: el color de una etiqueta (P30). */
+    /** El del texto, si no es el de siempre: el que se lee sobre [fill]. */
     foreground: Color? = null,
+    /** El relleno, si no es el gris de siempre: el color de una etiqueta (2.29.0). */
+    private val fill: Color? = null,
     private val onRemove: () -> Unit,
 ) : JPanel(BorderLayout(JBUI.scale(GAP), 0)) {
 
@@ -78,7 +80,7 @@ internal class Chip(
         val g2 = g.create() as Graphics2D
         try {
             GraphicsUtil.setupAAPainting(g2)
-            g2.color = JBUI.CurrentTheme.ActionButton.pressedBackground()
+            g2.color = fill ?: JBUI.CurrentTheme.ActionButton.pressedBackground()
             val arc = JBUI.scale(ARC)
             g2.fillRoundRect(0, 0, width, height, arc, arc)
         } finally {

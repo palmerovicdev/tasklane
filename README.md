@@ -44,7 +44,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 
 | | |
 |---|---|
-| **Estados como pestañas** | Con su recuento en vivo, que respeta la búsqueda y el filtro. Cada pestaña recuerda su selección y sus grupos plegados, y la última abierta vuelve al reabrir |
+| **Estados como pestañas** | Con su recuento en vivo, que respeta la búsqueda y el filtro. Cada pestaña recuerda su selección y sus grupos plegados, y la última abierta vuelve al reabrir. Si no caben, la fila se desplaza de lado |
 | **Una tarjeta por tarea** | Franja de prioridad, casilla para completar, título en hasta tres líneas, una línea del cuerpo y distintivos: prioridad, anclas de código, vencimiento, etiquetas, enlaces e imágenes, y fecha |
 | **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas, y bloques de código entre vallas con la fuente del editor; las tareas cerradas salen tachadas |
 | **Enlaces de un clic** | En el título y en cualquier línea del cuerpo, también en la gris. Acortados al pintarse, enteros al abrirse; el contador los lista todos |
@@ -52,7 +52,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Ver una captura mientras programas** | La ventana de una captura ampliada se **fija** con la chincheta de su cabecera: se queda encima del editor y deja de cerrarse al pulsar fuera |
 | **Seleccionar y copiar** | El texto de la tarjeta se marca con el ratón y se copia con `⌘C` |
 | **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
-| **Mover de estado sin diálogo** | *Move To ▸* o `⇧⌥←/→`, también sobre una selección |
+| **Mover de estado sin diálogo** | *Move To ▸*, el botón de estado de la tarjeta o `⇧⌥←/→`, también sobre una selección |
 | **Marcar** | Sube la tarea al principio de su grupo, sea cual sea su prioridad |
 | **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad, el vencimiento o las etiquetas, o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
 | **Deshacer y rehacer** | `⌘Z` en la lista deshace lo último que se hizo en el repositorio —completar, mover, prioridad, marcar, reordenar, una casilla, editar, crear o borrar— y `⌘⇧Z` lo rehace |
@@ -63,7 +63,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
 | **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
-| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir y color opcional; un clic en una de la tarjeta filtra por ella. Las dos cosas, también desde el menú y para toda una selección con *Due ▸* y *Tags ▸* |
+| **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir o con un clic en el campo, escritas también como `#api` en el texto de la tarea, y color opcional, que rellena la ficha; un clic en una de la tarjeta filtra por ella. Las dos cosas, también desde el menú y para toda una selección con *Due ▸* y *Tags ▸* |
 | **En la barra de estado** | *ToDo 3 · Doing 1 · 2 overdue* del repositorio activo, con lo vencido en rojo. Qué estados cuenta y si cuenta las vencidas, a elegir; cada cuenta abre su pestaña o sus tareas |
 | **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` —o a un bloque, `Login.kt:42-58`, seleccionando varias líneas— desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic y enseña el código del bloque |
@@ -93,7 +93,7 @@ Desde el IDE: *Settings → Plugins → Marketplace*, buscar **Tasklane**.
 O con el zip, que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.26.2.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.29.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -176,6 +176,10 @@ Los estados estuvieron en la barra de pestañas del IDE hasta la `0.6.1`; se baj
 panel porque en el header competían con el título, el selector de repositorio y el
 filtro. El precio es que `Alt+←/→` ya no cambia de estado.
 
+**La fila de estados se desplaza de lado** (2.29.0) cuando no caben todos —muchos estados o la
+ventana estrecha—: con la rueda, el trackpad o su barra, y la pestaña elegida se trae sola a
+la vista, también llegando con el tabulador. Antes las que no cabían se quedaban cortadas.
+
 El filtro **no** es una consulta: no se escribe, no tiene sintaxis y borrar la búsqueda
 no se lo lleva por delante. Son dos cosas que se acumulan —«vencidas» *y* lo que diga
 el campo—, y por eso el desplegable está en la cabecera y no dentro del campo.
@@ -209,6 +213,7 @@ tarea de una frase sigue midiendo una línea.
 | Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas** —un clic filtra por ella y otro lo quita—, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
 | Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas. Con el teclado, `⌘↵` |
 | Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
+| Botón de estado | Debajo del menú, con el ratón encima, a la izquierda del asa si la pestaña va a mano. Un clic abre la lista de *Move To ▸* ahí mismo (2.28.3) |
 
 **Con la ventana estrecha nada importante se cae.** Si el distintivo de prioridad o el de un
 ancla no caben enteros, se quedan en su icono —el punto de color, el icono de fichero—, que
@@ -238,7 +243,9 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
 - **Todo vale sobre una selección múltiple**: completar, marcar, mover, cambiar la
   prioridad, el vencimiento o las etiquetas, y borrar. Muchas tareas a la vez son **una** operación y un repintado; por
   encima de diez va en segundo plano con barra, y **cancelar la deshace entera**.
-- **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`.
+- **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`. El
+  **botón de estado** de la tarjeta (2.28.3), a la izquierda del asa, abre esa misma lista
+  con un clic: los estados en el orden de las pestañas y el actual apagado.
 - **Cambiar la prioridad** de la selección con *Priority ▸*, cada entrada con su color.
 - **Vencimiento y etiquetas sin diálogo** (2.24.0), para una tarea o para toda la selección:
   - *Due ▸ Today / Tomorrow / End of Week / Next Week* —los preajustes del diálogo—,
@@ -298,8 +305,8 @@ ordenarse por prioridad y fecha y sigue el orden que se le dé:
 
 - **Arrastrando la tarjeta por su asa** (⋮⋮), que sale al pasar el ratón a la derecha,
   a media altura bajo el marcador y el menú —un hueco que la tarjeta siempre
-  dejaba libre, así que no le quita sitio a nada—. El resto de la tarjeta sigue sirviendo
-  para seleccionar texto.
+  dejaba libre, así que no le quita sitio a nada—, con el botón de estado a su izquierda.
+  El resto de la tarjeta sigue sirviendo para seleccionar texto.
 - **Con `⌘⇧↑/↓`**, las teclas de *Move Line Up/Down*, o *Move Up* / *Move Down* del menú
   contextual.
 - Al pasar a mano **la lista no se mueve**: su orden empieza siendo el que se veía.
@@ -381,6 +388,15 @@ vencimiento y las etiquetas, además, desde el menú y para toda una selección:
   su aspa, o con `Retroceso` desde el campo vacío. En el buscador son `#api`.
   - **Mientras se escribe, sugiere las del repositorio**, con cuántas tareas lleva cada una
     y las más usadas arriba: así no nacen `#api` y `#apis`. Elegir una ya es ficha.
+  - **Un clic en el campo abre esa lista** sin escribir nada (2.29.0), y *Tags ▸ Add…* la
+    abre al aparecer. Llegar con el tabulador no la abre: con la lista abierta Intro elige
+    la primera, y quien tabula hasta ahí y pulsa Intro quiere aceptar.
+  - **Desde el texto de la tarea** (2.29.0): `#api` y un espacio, una coma o un salto de
+    línea pasa a las fichas y sale del texto; una que se quede al final sin separador cuenta
+    al aceptar. No son etiqueta `#123` —una incidencia—, `C#` ni una `#` dentro de código, y
+    lo pegado se queda como llega.
+  - **Con color, la ficha va rellena** (2.29.0), en la tarjeta y en el diálogo, con la letra
+    blanca u oscura según lo que mejor se lea; sin color, gris.
   - **Un clic en `#api` en la tarjeta filtra por ella**: la añade al buscador, detrás de lo
     que hubiera, y otro clic la quita.
   - **Renombrar, fusionar y borrar** una etiqueta en todas las tareas del repositorio activo,
@@ -1037,7 +1053,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.26.2.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.29.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)

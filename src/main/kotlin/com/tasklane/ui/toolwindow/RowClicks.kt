@@ -53,10 +53,21 @@ internal object RowClicks {
         val mouse = object : MouseAdapter() {
 
             override fun mouseMoved(e: MouseEvent) {
-                // El asa de una pestaña a mano va primero: es el único sitio donde
-                // arrastrar reordena en vez de seleccionar texto (2.11.0). En el tablero
-                // lleva además la tarjeta a otra columna (2.17.0), y el tooltip lo dice.
-                if (renderer.isOnHandle(tree, e.point)) {
+                // Los dos controles de abajo a la derecha van primero, y se preguntan sólo
+                // en la banda de los controles: resolverlos cuesta preparar la fila.
+                val control = if (TaskRowActions.nearActions(tree, e)) renderer.targetAt(tree, e.point) else null
+                // El botón de estado (2.28.3) dice lo que hace: el icono solo no lo cuenta.
+                if (control == TaskTreeRenderer.RowTarget.STATE) {
+                    tree.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    tree.toolTipText = TasklaneBundle.message("toolwindow.row.state.tooltip")
+                    shots.over(null)
+                    hoveredAnchor = null
+                    return
+                }
+                // El asa de una pestaña a mano: es el único sitio donde arrastrar
+                // reordena en vez de seleccionar texto (2.11.0). En el tablero lleva
+                // además la tarjeta a otra columna (2.17.0), y el tooltip lo dice.
+                if (control == TaskTreeRenderer.RowTarget.GRIP) {
                     tree.cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
                     tree.toolTipText = TasklaneBundle.message(
                         when {

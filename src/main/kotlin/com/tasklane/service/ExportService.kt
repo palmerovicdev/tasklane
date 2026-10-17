@@ -337,8 +337,10 @@ class ExportService(private val project: Project) {
         }
         val target = chooseFile("tasklane-${ref.displayName}", "zip") ?: return
         val attachments = AttachmentService.getInstance(project)
-        val version = com.intellij.ide.plugins.PluginManager
-            .getPluginByClass(ExportService::class.java)?.version.orEmpty()
+        // Del cargador de clases del plugin: PluginManagerCore.getPlugin y
+        // PluginManager.getPluginByClass son @ApiStatus.Internal y el Verifier los marca.
+        val version = (ExportService::class.java.classLoader as? com.intellij.ide.plugins.cl.PluginAwareClassLoader)
+            ?.pluginDescriptor?.version.orEmpty()
 
         ProgressManager.getInstance().run(
             object : ProgressTask.Backgroundable(project, TasklaneBundle.message("export.archive.progress", total, ref.displayName), true) {

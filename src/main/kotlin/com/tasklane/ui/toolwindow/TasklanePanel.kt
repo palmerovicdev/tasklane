@@ -678,7 +678,7 @@ internal class TasklanePanel(
         // estado se está mirando y el campo acota lo que se ve dentro de él.
         val top = header ?: JPanel(BorderLayout()).apply {
             isOpaque = false
-            add(tabs, BorderLayout.NORTH)
+            add(tabs.scrollable(), BorderLayout.NORTH)
             add(searchField, BorderLayout.CENTER)
         }
         add(top, BorderLayout.NORTH)

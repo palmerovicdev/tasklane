@@ -32,6 +32,7 @@ import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.InlineMarkdown
 import com.tasklane.ui.common.GroupLabels
 import com.tasklane.ui.common.PriorityDot
+import com.tasklane.ui.common.TagPill
 import com.tasklane.ui.common.TasklaneIcons
 import java.awt.BorderLayout
 import java.awt.Color
@@ -40,6 +41,7 @@ import java.awt.Dimension
 import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.Insets
 import java.awt.Point
 import java.awt.Rectangle
 import java.awt.geom.RoundRectangle2D
@@ -316,8 +318,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Lo que responde al clic sobre un gemelo de sólo icono. Ver [priorityChip]. */
     private val iconTags = IdentityHashMap<SimpleColoredComponent, Any>()
 
-    /** El estilo de cada color de etiqueta (P30), para no crear uno por ficha y repintado. */
-    private val tagStyles = HashMap<TagColor, SimpleTextAttributes>()
+    /**
+     * Letra y relleno de cada color de etiqueta (P30; pastilla desde la 2.29.0), para no
+     * crearlos por ficha y repintado. La clave `null` es la de las etiquetas sin color.
+     */
+    private val tagLooks = HashMap<TagColor?, TagLook>()
+
+    private class TagLook(val style: SimpleTextAttributes, val fill: Color)
 
     /** La casilla que lleva cada línea como icono, para resolver su clic. Ver [checkRun]. */
     private val lineChecks = IdentityHashMap<SimpleColoredComponent, Any>()
@@ -344,9 +351,17 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private val grip = icon()
     private var gripActive = false
 
+    /**
+     * Cambiar de estado (2.28.3): abre la lista de *Move To ▸* sin pasar por el menú `⋮`,
+     * que lo dejaba a dos clics y un submenú. Va a la izquierda del asa —o en su sitio,
+     * en una pestaña que no va a mano— y, como ella, sólo se ve bajo el ratón.
+     */
+    private val state = icon()
+
     /** Si cada control se puede pulsar ahora mismo. Ver [renderActions]. */
     private var bookmarkActive = false
     private var menuActive = false
+    private var stateActive = false
     private var expandActive = false
 
     /** Si la tarjeta montada se puede desplegar o plegar, esté o no el ratón encima. Ver [isExpandable]. */
@@ -358,6 +373,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * grupo, y de paso le devuelven al título el ancho de dos huecos (2.3.0).
      */
     private val actions = JPanel(ChipRow(gap = 0)).apply { isOpaque = false }
+
+    /** Los controles de abajo: cambiar de estado y el asa, juntos por lo mismo que [actions]. */
+    private val handles = JPanel(ChipRow(gap = 0)).apply { isOpaque = false }
 
     /**
      * La columna de la derecha: los controles arriba y el asa abajo, en la esquina. No
@@ -392,7 +410,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         actions.add(bookmark)
         actions.add(more)
         east.add(actions)
-        east.add(grip)
+        handles.add(state)
+        handles.add(grip)
+        east.add(handles)
         add(east, BorderLayout.EAST)
     }
 
@@ -486,6 +506,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         pendingHovered = false
         bookmarkActive = false
         menuActive = false
+        stateActive = false
         expandActive = false
         expandable = false
         extraLines.forEach { it.isVisible = false }
@@ -497,7 +518,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         chips.forEach { it.isVisible = false }
         meta.isVisible = false
         actions.isVisible = false
-        grip.isVisible = false
+        handles.isVisible = false
     }
 
     /**
@@ -1241,10 +1262,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             attributes: SimpleTextAttributes,
             /** Sólo los distintivos que se pueden pulsar la llevan. Ver [hotspotAt]. */
             tag: Any? = null,
+            /** El de la pastilla, sólo en las etiquetas. Ver [Badge]. */
+            fill: Color? = null,
         ) {
             val chip = chips.getOrNull(next++) ?: return
             chip.clear()
             chip.icon = icon
+            chip.fill = fill
             chip.foreground = foreground
             chip.append(text, attributes, tag)
             chip.isVisible = true
@@ -1302,15 +1326,15 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             chip("$CHECKED$done/$total", null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
 
-        // Se pulsan (P30): filtran la lista por la etiqueta. Con su color si lo tiene, y si
-        // no, grises como siempre: el color es la excepción que se busca con la vista.
+        // Se pulsan (P30): filtran la lista por la etiqueta. Desde la 2.29.0 son pastillas
+        // rellenas con su color —antes el color iba sólo en la letra— y grises si no lo
+        // tienen: el color sigue siendo la excepción que se busca con la vista. Ver [TagPill].
         for (tag in task.tags) {
-            val style = config.tagColor(tag)?.let { color ->
-                tagStyles.getOrPut(color) {
-                    SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, JBColor(color.light, color.dark))
-                }
-            } ?: SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES
-            chip("#$tag", null, style, TagChip(tag))
+            val color = config.tagColor(tag)
+            val look = tagLooks.getOrPut(color) {
+                TagLook(SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, TagPill.text(color)), TagPill.fill(color))
+            }
+            chip("#$tag", null, look.style, TagChip(tag), look.fill)
         }
 
         chip(formatDate(task.completedAt ?: task.updatedAt), null, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
@@ -1361,11 +1385,11 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     /**
-     * El marcador y el menú de la fila.
+     * El marcador y el menú de la fila, y debajo el botón de estado y el asa.
      *
      * El marcador encendido se ve siempre: es el estado de la tarea, no un botón que
-     * aparezca al pasar por encima. Apagado y el menú sólo bajo el ratón, que es
-     * cuando se pueden pulsar.
+     * aparezca al pasar por encima. Apagado, el menú, el botón de estado y el asa sólo
+     * bajo el ratón, que es cuando se pueden pulsar.
      *
      * Lo que **no** se hace es esconderlos: ocupan su sitio siempre, con un icono
      * vacío cuando no toca. Escondiéndolos, el título recuperaría esos píxeles y una
@@ -1381,10 +1405,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             else -> EmptyIcon.ICON_16
         }
         more.icon = if (hovered) AllIcons.Actions.More else EmptyIcon.ICON_16
+        stateActive = hovered
+        state.icon = if (hovered) AllIcons.Actions.MoveTo2 else EmptyIcon.ICON_16
         val grab = reorderable || movable
         gripActive = grab
         grip.icon = if (grab && hovered) AllIcons.General.Drag else EmptyIcon.ICON_16
         grip.isVisible = grab
+        handles.isVisible = true
         // El hueco del desplegable se reserva ya, aunque quién lo enciende sea
         // [showExpandIcon] más tarde: el ancho que le queda al texto se mide con esta
         // fila puesta, y decidirlo después de envolver cambiaría el resultado de la
@@ -1849,6 +1876,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // Un distintivo reducido a su icono es entero el icono, y no lleva fragmento.
         iconTags[target]?.let { return it }
         if (local < 0) return null
+        // Una pastilla responde entera, también por el relleno que rodea a la letra.
+        if (target is Badge && target.fill != null && local < target.width) return target.firstTag()
         // El icono no es un fragmento con etiqueta, pero es la mitad visible de un
         // distintivo pequeño, y muchas veces la mitad a la que se apunta: el punto de
         // color **es** la prioridad, y el indicador de enlaces es icono y contador.
@@ -1869,8 +1898,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
     /**
      * Qué control de la fila hay bajo [point], si hay alguno. Mismo truco que
-     * [hotspotAt]: se prepara el renderer para esa fila y se pregunta al panel de la
-     * derecha, que es donde viven los tres.
+     * [hotspotAt]: se prepara el renderer para esa fila y se pregunta a la columna de la
+     * derecha, que es donde viven todos.
      *
      * Se pregunta por lo que está **pintado**, no por lo que podría estarlo: los
      * controles dependen de [hoveredRow] y preparar la fila los deja visibles o no
@@ -1889,15 +1918,18 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         if (!actions.isVisible) return null
         east.doLayout()
         actions.doLayout()
+        handles.doLayout()
 
         val x = point.x - bounds.x - east.x
         val y = point.y - bounds.y - east.y
-        if (gripActive && grip.isVisible && grip.bounds.contains(x, y)) return RowTarget.GRIP
         val child = childAt(actions, x - actions.x, y - actions.y)
+            ?: childAt(handles, x - handles.x, y - handles.y)
         return when {
             child === expand && expandActive -> RowTarget.EXPAND
             child === bookmark && bookmarkActive -> RowTarget.BOOKMARK
             child === more && menuActive -> RowTarget.MENU
+            child === state && stateActive -> RowTarget.STATE
+            child === grip && gripActive -> RowTarget.GRIP
             else -> null
         }
     }
@@ -2134,7 +2166,43 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     /** Un distintivo de la línea de metadatos. */
-    private fun chip() = SimpleColoredComponent().apply { isOpaque = false }
+    private fun chip() = Badge()
+
+    /**
+     * Un distintivo. Con [fill] es una pastilla rellena —las etiquetas, desde la 2.29.0— y
+     * gana aire a los lados para que la letra no toque el borde; sin él, como siempre: sin
+     * fondo. Los distintivos se reutilizan entre filas, así que poner [fill] a `null`
+     * devuelve también el margen de fábrica.
+     */
+    private class Badge : SimpleColoredComponent() {
+
+        private val plain: Insets = ipad
+
+        var fill: Color? = null
+            set(value) {
+                field = value
+                ipad = if (value == null) plain else Insets(plain.top, JBUI.scale(PILL_PAD), plain.bottom, JBUI.scale(PILL_PAD))
+            }
+
+        init {
+            isOpaque = false
+        }
+
+        override fun paintComponent(g: Graphics) {
+            fill?.let { color ->
+                val g2 = g.create() as Graphics2D
+                try {
+                    GraphicsUtil.setupAAPainting(g2)
+                    g2.color = color
+                    val arc = JBUI.scale(PILL_ARC)
+                    g2.fillRoundRect(0, 0, width, height, arc, arc)
+                } finally {
+                    g2.dispose()
+                }
+            }
+            super.paintComponent(g)
+        }
+    }
 
     /** Un componente que sólo lleva icono: el marcador y el menú de la derecha. */
     private fun icon() = SimpleColoredComponent().apply {
@@ -2143,7 +2211,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     /** Los controles de una fila, para quien resuelve el clic. */
-    enum class RowTarget { EXPAND, BOOKMARK, MENU, GRIP }
+    enum class RowTarget { EXPAND, BOOKMARK, MENU, STATE, GRIP }
 
     private companion object {
         /** Lo que no pinta ninguna línea. */
@@ -2203,6 +2271,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         const val PAD_V = 3
         const val PAD_H = 4
         const val ICON_PAD = 2
+
+        /** El aire a cada lado de la letra de una etiqueta, y lo redondo de su pastilla. */
+        const val PILL_PAD = 5
+        const val PILL_ARC = 10
 
         /** Deja sitio a la franja y separa las tarjetas. El fondo lo pinta el renderer. */
         val cardBorder = JBUI.Borders.empty(CARD_GAP + PAD_V, STRIPE + STRIPE_GAP, CARD_GAP + PAD_V, PAD_H)
