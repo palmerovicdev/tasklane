@@ -7,7 +7,7 @@
          Las capturas se sirven por URL ABSOLUTA desde el repositorio: el Marketplace
          no resuelve rutas relativas. Apuntan a `main`, asi que el repositorio tiene
          que estar publicado ANTES de publicar el plugin o la ficha sale con las
-         imagenes rotas. Ver README, «Publicar». -->
+         imagenes rotas. Ver docs/development.md, «Publicar». -->
     <description><![CDATA[
         <p>
             <b>Tasklane</b> keeps a to-do list inside your project, one per repository, next to

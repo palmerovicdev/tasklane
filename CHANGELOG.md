@@ -1,8 +1,8 @@
 # Changelog
 
 Todas las versiones publicables del plugin. El formato sigue
-[Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado, la regla del
-README (§ *Fases y versiones*): hasta la `1.0.0` la versión media era **la fase cerrada**
+[Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el versionado, la regla de
+[`docs/development.md`](docs/development.md) (§ *Fases y versiones*): hasta la `1.0.0` la versión media era **la fase cerrada**
 (fase N → `0.N.0`); a partir de ahí el primer número sube con una funcionalidad
 **grande**, el segundo con una **pequeña** y el tercero sólo con **correcciones**.
 

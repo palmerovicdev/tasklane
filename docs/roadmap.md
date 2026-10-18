@@ -4,8 +4,8 @@ Lo que se ha propuesto añadir a Tasklane después de la `1.0.0`, con su estado.
 compromiso: es la lista de la que se elige cada iteración, y el registro de lo que ya se
 ofreció para no volver a ofrecerlo como si fuera nuevo.
 
-Cada iteración elegida sale como **versión media** (ver la regla de versiones en el
-README). Las propuestas se numeran con `P` y no se renumeran nunca.
+Cada iteración elegida sale como **versión media** (ver la regla de versiones en
+`docs/development.md`). Las propuestas se numeran con `P` y no se renumeran nunca.
 
 | Estado        | Qué significa                                                                 |
 |---------------|-------------------------------------------------------------------------------|
