@@ -10,6 +10,22 @@ Todas las versiones publicables del plugin. El formato sigue
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.31.0]
+
+Los distintivos de la tarjeta se leen como lo que son, pedida por el usuario a la vista de una
+tarjeta con `1 1 img` y la prioridad en gris.
+
+### Cambiado
+- **La prioridad de la tarjeta es una pastilla de su color**, la misma que deja `!!!` en el
+  diálogo; antes era un punto de color y el nombre en gris. Si no cabe, sigue quedando el punto.
+- **Pastillas más discretas.** La de la prioridad y las de las etiquetas se pintan del alto de
+  la letra, no del de la línea, y con menos aire a los lados.
+- **Los contadores de enlaces e imágenes** son ahora `2 🔗` y `3 🏞`: el número y detrás su
+  icono, cada uno por su lado y pulsable entero. Antes iban juntos como `🔗 2  3 img`, con un
+  solo icono delante —el del enlace, o el de imagen si no había enlaces—.
+
+Sin cambio de formato.
+
 ## [2.30.0]
 
 Triggers de estado, triggers en cualquier sitio del texto y hechos pastilla, pedida por el
@@ -46,11 +62,6 @@ usuario junto con un botón de estado que diga lo que hace.
   tooltip lo nombra. Antes era la flecha genérica de «mover a». El mismo círculo va en
   *Move To ▸*, en cada entrada de esa lista y de la flecha de *New Task*, y en los desplegables
   del diálogo, junto al punto de color de cada prioridad.
-- **La prioridad de la tarjeta es una pastilla de su color**, la misma que deja `!!!` en el
-  diálogo; antes era un punto de color y el nombre en gris. Si no cabe, sigue quedando el punto.
-- **Los contadores de enlaces e imágenes** son ahora `2 🔗` y `3 🏞`: el número y detrás su
-  icono, cada uno por su lado y pulsable entero. Antes iban juntos como `🔗 2  3 img`, con un
-  solo icono delante —el del enlace, o el de imagen si no había enlaces—.
 
 **Formato:** `tasklane.xml` gana un atributo opcional `trigger` en cada `<state>`. Una versión
 anterior lo ignora al leer, y lo pierde si vuelve a escribir el fichero. La base de datos no

@@ -22,7 +22,7 @@ internal object PriorityDot {
 
     /**
      * El de la tarjeta: pequeño, porque va dentro de una línea de texto menuda. Desde la
-     * 2.30.0 la prioridad es allí una pastilla de este mismo color, y el punto es lo que
+     * 2.31.0 la prioridad es allí una pastilla de este mismo color, y el punto es lo que
      * queda de ella cuando no cabe.
      */
     fun chip(priority: TaskPriority): Icon = ColorIcon(JBUI.scale(CHIP), color(priority))

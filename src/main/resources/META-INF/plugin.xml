@@ -112,8 +112,8 @@
         <ul>
             <li><b>A card per task</b>: a priority stripe down its left edge, a checkbox that
                 completes it, the title over up to three lines, one line of the body, and a row
-                of badges &mdash; priority, code anchors, due date, tags, a link and image
-                counter, and the date. Searching across repositories adds the repository
+                of badges &mdash; the priority as a pill in its colour, code anchors, due date,
+                tags, link and image counters, and the date. Searching across repositories adds the repository
                 name.</li>
             <li><b>Markdown in place</b>: <b>bold</b>, <i>italics</i>, <code>code</code> and
                 strikethrough show their style, not their marks. Underscores are left alone,
@@ -128,7 +128,7 @@
                 <code>http</code> and <code>https</code> are clickable, links inside code spans
                 are examples rather than destinations, and trailing punctuation is not part of a
                 link.</li>
-            <li><b>Change the priority from the card</b>: click the priority badge for the list
+            <li><b>Change the priority from the card</b>: click the priority pill for the list
                 of priorities with their colours.</li>
             <li><b>Filter by a tag from the card</b>: click <code>#api</code> to add it to the
                 search, click it again to drop it. Tags with a colour are filled with it.</li>

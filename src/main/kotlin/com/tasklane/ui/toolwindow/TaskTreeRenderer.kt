@@ -291,7 +291,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
     /**
      * Los contadores de enlaces e imágenes, `2 🔗` y `3 🏞`: el número y **detrás** su icono
-     * (2.30.0). Hasta entonces eran un solo distintivo con un solo icono —el del enlace
+     * (2.31.0). Hasta entonces eran un solo distintivo con un solo icono —el del enlace
      * delante, y las capturas como `1 img`—, así que sin un enlace no se sabía de qué era
      * el número. Ver [renderDetail].
      */
@@ -1293,7 +1293,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // La etiqueta es la prioridad misma, igual que la del ancla es su
         // [CodeAnchor]; quien atiende el clic la reconoce en [hotspotAt].
         //
-        // Desde la 2.30.0 es una pastilla rellena con su color, la misma que deja un
+        // Desde la 2.31.0 es una pastilla rellena con su color, la misma que deja un
         // `!!!` en el diálogo: hasta entonces era un punto y el nombre en gris, y la
         // prioridad era lo único de la tarjeta que se leía distinto en cada sitio. Si no
         // cabe, se queda el punto, que es el mismo color.
@@ -2176,10 +2176,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     private fun counter() = Badge().apply { isIconOnTheRight = true }
 
     /**
-     * Un distintivo. Con [fill] es una pastilla rellena —las etiquetas, desde la 2.29.0— y
-     * gana aire a los lados para que la letra no toque el borde; sin él, como siempre: sin
-     * fondo. Los distintivos se reutilizan entre filas, así que poner [fill] a `null`
-     * devuelve también el margen de fábrica.
+     * Un distintivo. Con [fill] es una pastilla rellena —las etiquetas, desde la 2.29.0, y
+     * la prioridad desde la 2.31.0— y gana aire a los lados para que la letra no toque el
+     * borde; sin él, como siempre: sin fondo. Los distintivos se reutilizan entre filas, así
+     * que poner [fill] a `null` devuelve también el margen de fábrica.
+     *
+     * La pastilla se pinta del alto de la letra y no del componente, que mide lo que los
+     * iconos de 16 de la línea: a toda altura se comía la línea y pesaba más que el título.
      */
     private class Badge : SimpleColoredComponent() {
 
@@ -2201,8 +2204,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 try {
                     GraphicsUtil.setupAAPainting(g2)
                     g2.color = color
+                    val metrics = getFontMetrics(font.deriveFont(UIUtil.getFontSize(UIUtil.FontSize.SMALL)))
+                    val pill = minOf(height, metrics.ascent + metrics.descent + 2 * JBUI.scale(PILL_PAD_V))
                     val arc = JBUI.scale(PILL_ARC)
-                    g2.fillRoundRect(0, 0, width, height, arc, arc)
+                    g2.fillRoundRect(0, (height - pill) / 2, width, pill, arc, arc)
                 } finally {
                     g2.dispose()
                 }
@@ -2279,9 +2284,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         const val PAD_H = 4
         const val ICON_PAD = 2
 
-        /** El aire a cada lado de la letra de una etiqueta, y lo redondo de su pastilla. */
-        const val PILL_PAD = 5
-        const val PILL_ARC = 10
+        /** El aire a cada lado de la letra de una pastilla, encima y debajo, y lo redondo. */
+        const val PILL_PAD = 4
+        const val PILL_PAD_V = 1
+        const val PILL_ARC = 8
 
         /** Deja sitio a la franja y separa las tarjetas. El fondo lo pinta el renderer. */
         val cardBorder = JBUI.Borders.empty(CARD_GAP + PAD_V, STRIPE + STRIPE_GAP, CARD_GAP + PAD_V, PAD_H)

@@ -125,6 +125,15 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.31.0 &mdash; clearer card badges</h3>
+            <ul>
+              <li>The card's <b>priority is a pill</b> in its colour, the same one the task
+                  dialog shows; on a narrow card it still shrinks to its colour dot. Priority
+                  and tag pills are also slimmer.</li>
+              <li><b>Link and image counters</b> read <i>2</i> followed by a link icon and
+                  <i>3</i> followed by an image icon, each clickable on its own, instead of
+                  <i>2 3 img</i> behind a single icon. No format changes.</li>
+            </ul>
             <h3>2.30.0 &mdash; state triggers, and triggers become badges</h3>
             <ul>
               <li><b>State triggers</b>: give each state a trigger in Settings, like the
@@ -141,8 +150,6 @@ intellijPlatform {
                   (<code>Ctrl+Alt</code> elsewhere), even while typing.</li>
               <li>The card's state button is now a <b>state icon</b> that shows where the task
                   is, also in <i>Move To</i>.</li>
-              <li>On the card, the <b>priority is a pill</b> in its colour, like the dialog's,
-                  and links and images read <b>2 &#128279;</b> and <b>3 &#127966;</b>.</li>
             </ul>
             <p><b>Compatibility:</b> <code>tasklane.xml</code> gains an optional
                <code>trigger</code> on each state; older versions ignore it. The database does
