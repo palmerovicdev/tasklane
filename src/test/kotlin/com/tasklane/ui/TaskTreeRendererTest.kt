@@ -692,7 +692,7 @@ class TaskTreeRendererTest {
     // -------------------------------------------------------- imagenes de la tarjeta
 
     /**
-     * Desplegar enseña también las capturas, que es lo que el contador «1 img» sólo
+     * Desplegar enseña también las capturas, que es lo que el contador «1 🏞» sólo
      * podía anunciar. Se mide por la altura y no por píxeles concretos: lo que importa
      * es que la imagen **ocupa sitio** en la tarjeta.
      */
@@ -812,8 +812,8 @@ class TaskTreeRendererTest {
     }
 
     /**
-     * Con enlaces **y** capturas, el mismo distintivo lleva a los dos sitios: el icono
-     * de cadena y su número abren los enlaces, y el `1 img` de al lado, las capturas.
+     * Con enlaces **y** capturas, cada contador lleva a lo suyo: el `1 🔗` abre los
+     * enlaces, y el `1 🏞` de al lado, las capturas.
      */
     @Test
     fun `el indicador con enlaces y capturas lleva a los dos`() {

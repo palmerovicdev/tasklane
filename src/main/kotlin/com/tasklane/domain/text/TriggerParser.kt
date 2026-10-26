@@ -1,58 +1,84 @@
 package com.tasklane.domain.text
 
 import com.tasklane.domain.model.PriorityId
+import com.tasklane.domain.model.StateId
 import com.tasklane.domain.model.TasklaneConfig
 
 /**
- * Resuelve el prefijo de prioridad que el usuario escribe al principio de una tarea:
- * `!!! Resolver el fallo` crea la tarea `Resolver el fallo` con prioridad *High*.
+ * Los triggers que el usuario escribe en una tarea: `Resolver el fallo !!! ` la deja en
+ * *High*, y `@doing ` la crea en *Doing*. El trigger elige la prioridad o el estado y sale
+ * del texto: es una forma de escribirlos, no parte de la tarea.
  *
- * Dos reglas, y las dos existen para evitar falsos positivos:
+ * Hasta la 2.29 sólo los había de prioridad y sólo valían **al principio** del texto, como
+ * prefijo. Desde la 2.30.0 los estados tienen los suyos y los dos valen **en cualquier
+ * sitio**, igual que una etiqueta `#api` ([InlineTag]): la UI pregunta al teclear un espacio,
+ * un tabulador o un salto de línea por la palabra que acaba de cerrar, y al aceptar por la
+ * que se quedó al final sin cerrar.
  *
- * - **Coincidencia más larga primero.** Con los triggers `!`, `!!` y `!!!` definidos,
- *   `!!! algo` tiene que resolver a `!!!`. Probando de más largo a más corto el
- *   primero que encaja es siempre el correcto, sin comparar candidatos entre sí.
- * - **Exige un separador detrás.** `!importante revisar` no dispara nada: el trigger
- *   tiene que ser una palabra suelta, no el principio de una. Esto es lo que hace
- *   que un signo de exclamación como parte del texto no cambie la prioridad sin que
- *   el usuario se entere.
+ * Las reglas existen para no comerse texto que no lo es:
  *
- * Kotlin puro: se testea sin arrancar un IDE. La UI decide *cuándo* llamarlo —en el
- * popup, a cada pulsación— y este objeto sólo dice qué sale.
+ * - **La palabra entera es el trigger.** `!importante`, `¡¡ya!!` o `@doing.` no disparan
+ *   nada: entre espacios, y nada más. Como la palabra entera tiene que coincidir, con `!`,
+ *   `!!` y `!!!` definidos `!!!` es siempre `!!!`, sin comparar candidatos.
+ * - **Sin mirar mayúsculas.** `@Doing` es `@doing`: quien lo escribe está pensando en el
+ *   estado, no en cómo se teclea. Por lo mismo, dos triggers que sólo difieren en eso no
+ *   pueden convivir (ver `ConfigValidator`).
+ * - **Nada dentro de código**, ni en línea ni en un bloque con valla: un `!!` en un trozo de
+ *   código citado es código.
+ *
+ * Kotlin puro: se testea sin arrancar un IDE.
  */
 object TriggerParser {
 
-    /** Un trigger reconocido al principio del texto. */
-    data class Match(val priorityId: PriorityId, val trigger: String)
+    /** Lo que elige un trigger. */
+    sealed interface Target {
+        data class Priority(val id: PriorityId) : Target
 
-    /** El trigger con el que empieza [text], o `null` si no empieza por ninguno. */
-    fun match(text: String, config: TasklaneConfig): Match? {
-        if (!config.triggersEnabled) return null
+        data class State(val id: StateId) : Target
+    }
 
-        // De más largo a más corto: así la primera coincidencia ya es la más larga.
-        val candidates = config.priorities
-            .mapNotNull { p -> p.trigger?.takeIf(String::isNotEmpty)?.let { Match(p.id, it) } }
-            .sortedByDescending { it.trigger.length }
+    /** El trigger [trigger], escrito en `[start, end)` del texto, que elige [target]. */
+    data class Match(val target: Target, val trigger: String, val start: Int, val end: Int)
 
-        return candidates.firstOrNull { (_, trigger) ->
-            // getOrNull y no length >= : un texto que es EXACTAMENTE el trigger no
-            // dispara. Mientras se escribe `!!!` la prioridad no debe saltar todavía.
-            text.startsWith(trigger) && text.getOrNull(trigger.length).isSeparator()
-        }
+    /**
+     * El trigger que acaba justo antes de [end] en [text], o `null` si la palabra que acaba
+     * ahí no lo es. [end] es donde se acaba de teclear el separador.
+     */
+    fun endingAt(text: String, end: Int, config: TasklaneConfig): Match? {
+        if (!config.triggersEnabled || end <= 0 || end > text.length) return null
+        var start = end
+        while (start > 0 && !text[start - 1].isWhitespace()) start--
+        if (start == end) return null
+        val word = text.substring(start, end)
+        val target = targetOf(word, config) ?: return null
+        if (TypedWord.inCode(text, start)) return null
+        return Match(target, word, start, end)
     }
 
     /**
-     * [text] sin el trigger ni los espacios que lo separan. Es lo que se guarda: el
-     * trigger es una forma de escribir la prioridad, no parte de la tarea.
-     *
-     * Sólo se comen espacios y tabuladores, nunca saltos de línea: el cuerpo es
-     * Markdown-lite y una línea en blanco después del título es estructura del
-     * usuario, no relleno.
+     * El que se quedó escrito al final, sin separador detrás: aceptar el diálogo con
+     * `Revisar el login !!!` escrito no puede dejar `!!!` en la tarea.
      */
-    fun strip(text: String, config: TasklaneConfig): String {
-        val match = match(text, config) ?: return text
-        return text.substring(match.trigger.length).trimStart(' ', '\t')
+    fun trailing(text: String, config: TasklaneConfig): Match? = endingAt(text, text.length, config)
+
+    /** Lo que se borra del texto al aplicar [match], como `[first, last)`: ver [TypedWord.cut]. */
+    fun cut(text: String, match: Match): Pair<Int, Int> = TypedWord.cut(text, match.start, match.end)
+
+    /** [text] sin [match]: ver [cut]. */
+    fun remove(text: String, match: Match): String {
+        val (first, last) = cut(text, match)
+        return text.removeRange(first, last)
     }
 
-    private fun Char?.isSeparator(): Boolean = this == ' ' || this == '\t'
+    /**
+     * Las prioridades antes que los estados. Que no coincidan nunca lo asegura la validación
+     * de los ajustes; esto es sólo el orden en que se pregunta.
+     */
+    private fun targetOf(word: String, config: TasklaneConfig): Target? {
+        config.priorities.firstOrNull { it.trigger.matches(word) }?.let { return Target.Priority(it.id) }
+        config.states.firstOrNull { it.trigger.matches(word) }?.let { return Target.State(it.id) }
+        return null
+    }
+
+    private fun String?.matches(word: String): Boolean = !isNullOrEmpty() && equals(word, ignoreCase = true)
 }

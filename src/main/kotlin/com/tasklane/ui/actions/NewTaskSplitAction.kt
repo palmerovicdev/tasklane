@@ -9,6 +9,8 @@ import com.intellij.openapi.actionSystem.SplitButtonAction
 import com.intellij.openapi.project.DumbAware
 import com.tasklane.domain.model.StateId
 import com.tasklane.service.TaskService
+import com.tasklane.ui.common.StateIcons
+import javax.swing.Icon
 
 /**
  * El botón *New Task* de la barra, partido en dos.
@@ -53,14 +55,16 @@ private class NewTaskTargets : ActionGroup(), DumbAware {
     override fun getChildren(e: AnActionEvent?): Array<AnAction> {
         val project = e?.project ?: return EMPTY_ARRAY
         val states = TaskService.getInstance(project).snapshot.value.config.states
-        return states.map { NewTaskInStateAction(it.id, it.name) }.toTypedArray()
+        return states.map { NewTaskInStateAction(it.id, it.name, StateIcons.of(it, states)) }.toTypedArray()
     }
 }
 
-private class NewTaskInStateAction(private val target: StateId, name: String) : PanelAction() {
+/** Con el círculo de su estado (2.30.0), como las entradas de *Move To ▸*. */
+private class NewTaskInStateAction(private val target: StateId, name: String, icon: Icon) : PanelAction() {
 
     init {
         templatePresentation.text = name
+        templatePresentation.icon = icon
     }
 
     override fun update(e: AnActionEvent) {

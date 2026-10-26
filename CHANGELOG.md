@@ -10,6 +10,52 @@ Todas las versiones publicables del plugin. El formato sigue
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.30.0]
+
+Triggers de estado, triggers en cualquier sitio del texto y hechos pastilla, pedida por el
+usuario junto con un botón de estado que diga lo que hace.
+
+### Añadido
+- **Triggers de estado.** Cada estado puede tener el suyo, como las prioridades: columna
+  *Trigger* en la tabla de estados de los ajustes. De fábrica, en proyectos nuevos, `@todo`,
+  `@doing` y `@done`; en los que ya existen se ponen ahí. Un mismo interruptor —*Enable
+  triggers for priorities and states*— apaga los dos. La validación no deja repetir un
+  trigger entre estados y prioridades (sin mirar mayúsculas), ni uno con espacios, ni uno que
+  empiece por `#`, que ya es una etiqueta.
+- **Triggers en cualquier sitio del texto**, no sólo al principio: `Revisar el login !!! ` o
+  `… @doing ` en medio del cuerpo, como palabra suelta seguida de espacio, tabulador o salto de
+  línea. Al aceptar cuenta también el que se quedó al final sin separador, salvo que la tarea
+  ya lo trajera. Nada dentro de código, sin mirar mayúsculas, y un pegado se queda como llega.
+  También al editar una tarea: sólo cuenta lo que se teclea, así que el texto que ya tenía no
+  se toca. Ver `TriggerParser`.
+- **El trigger se hace pastilla.** Donde estaba `!!!` queda una pastilla *High* del color de la
+  prioridad —la de las etiquetas—, y donde estaba `@doing`, una *Doing* con el círculo del
+  estado; el desplegable cambia a la vez. Una por tipo: otro trigger de prioridad sustituye a
+  la anterior. `⌫` detrás o `Supr` delante la quitan y el desplegable vuelve a lo elegido a
+  mano; `⌘Z` deshace el gesto entero; elegir en el desplegable la quita. La pastilla no se
+  guarda en el texto. La pista del cuerpo vacío nombra los triggers del proyecto. Ver
+  `TriggerBadges`.
+- **Cambiar el estado desde el teclado en el diálogo**: `⌘⌥→` / `⌘⌥←` (`Ctrl+Alt` fuera de
+  macOS) eligen el siguiente o el anterior desde cualquier sitio del diálogo, también con el
+  cursor en el texto. Salen junto a *Status*, y se reasignan en el Keymap (*Next/Previous State
+  in Task Dialog*). No `⇧⌥←/→` como en la lista: dentro de un editor eso selecciona por palabras.
+
+### Cambiado
+- **El botón de estado de la tarjeta es un círculo de estado** —vacío en el primero, más lleno
+  cuanto más avanzado, con un visto en los terminales— y enseña en cuál está la tarea; su
+  tooltip lo nombra. Antes era la flecha genérica de «mover a». El mismo círculo va en
+  *Move To ▸*, en cada entrada de esa lista y de la flecha de *New Task*, y en los desplegables
+  del diálogo, junto al punto de color de cada prioridad.
+- **La prioridad de la tarjeta es una pastilla de su color**, la misma que deja `!!!` en el
+  diálogo; antes era un punto de color y el nombre en gris. Si no cabe, sigue quedando el punto.
+- **Los contadores de enlaces e imágenes** son ahora `2 🔗` y `3 🏞`: el número y detrás su
+  icono, cada uno por su lado y pulsable entero. Antes iban juntos como `🔗 2  3 img`, con un
+  solo icono delante —el del enlace, o el de imagen si no había enlaces—.
+
+**Formato:** `tasklane.xml` gana un atributo opcional `trigger` en cada `<state>`. Una versión
+anterior lo ignora al leer, y lo pierde si vuelve a escribir el fichero. La base de datos no
+cambia.
+
 ## [2.29.0]
 
 Etiquetas que se ven y que se escriben en el texto, pedida en una lista por el usuario.

@@ -39,7 +39,7 @@ object InlineTag {
         // `a,#api` no: la almohadilla tiene que abrir la palabra, no seguir a una coma pegada.
         if (start > 0 && !text[start - 1].isWhitespace()) return null
         val word = text.substring(start + 1, end)
-        if (!isTag(word) || inCode(text, start)) return null
+        if (!isTag(word) || TypedWord.inCode(text, start)) return null
         return Found(start, end, word)
     }
 
@@ -49,21 +49,8 @@ object InlineTag {
      */
     fun trailing(text: String): Found? = endingAt(text, text.length)
 
-    /**
-     * Lo que se borra del texto al pasar [found] a las etiquetas, como `[first, last)`.
-     *
-     * El espacio, tabulador o coma que la cerró se va con ella: `Revisar #api login` queda
-     * `Revisar login`, sin un hueco doble. Un salto de línea se queda —es estructura del
-     * cuerpo—, y entonces lo que sobra es el espacio que la separaba de lo de delante; igual
-     * al final del texto.
-     */
-    fun cut(text: String, found: Found): Pair<Int, Int> {
-        val next = text.getOrNull(found.end)
-        if (next != null && next != '\n') return found.start to found.end + 1
-        var from = found.start
-        while (from > 0 && (text[from - 1] == ' ' || text[from - 1] == '\t')) from--
-        return from to found.end
-    }
+    /** Lo que se borra del texto al pasar [found] a las etiquetas, como `[first, last)`: ver [TypedWord.cut]. */
+    fun cut(text: String, found: Found): Pair<Int, Int> = TypedWord.cut(text, found.start, found.end)
 
     /** [text] sin [found]: ver [cut]. */
     fun remove(text: String, found: Found): String {
@@ -74,17 +61,6 @@ object InlineTag {
     private fun isTag(word: String): Boolean =
         word.isNotEmpty() && word.any(Char::isLetter) && word.all { it.isLetterOrDigit() || it in EXTRA }
 
-    /** Si [offset] cae dentro de código en línea —tildes impares antes en la línea— o de un bloque. */
-    private fun inCode(text: String, offset: Int): Boolean {
-        val lineStart = text.lastIndexOf('\n', offset - 1) + 1
-        if (text.substring(lineStart, offset).count { it == TICK } % 2 == 1) return true
-        if (lineStart == 0) return false
-        val fence = CodeFence()
-        text.substring(0, lineStart - 1).split('\n').forEach(fence::next)
-        return fence.inBlock
-    }
-
     private const val HASH = '#'
-    private const val TICK = '`'
     private const val EXTRA = "-_/"
 }

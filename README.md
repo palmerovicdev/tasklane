@@ -57,7 +57,9 @@ empty state here", "check this before I push". Too small for Jira or GitHub Issu
 ![The New Task dialog: "!!! Show stock levels on the product page" as the body, priority already set to High, the ux and api tags as chips, and the repository's tags listed with how many tasks use each](docs/marketplace/03-capture-in-seconds.png)
 
 - `⌘⌥R` opens the task dialog from anywhere in the IDE, with or without the tool window.
-- Start with `!!!` and the task is created as *High* (`!!` Normal, `!` Low; configurable).
+- Type `!!!` and a space anywhere in the text and it turns into a *High* badge (`!!` Normal,
+  `!` Low); `@doing` does the same for the state. `⌘⌥←/→` changes the state without leaving
+  the keyboard. All triggers are configurable.
 - Type `#api` and a space and it becomes a tag. Click the tags field to see the
   repository's tags with their counts, so `#api` and `#apis` don't both happen.
 - In the list, `⌘V` turns copied text into one task per line, and a screenshot into a task

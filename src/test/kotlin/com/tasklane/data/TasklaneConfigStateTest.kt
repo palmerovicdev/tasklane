@@ -26,6 +26,24 @@ class TasklaneConfigStateTest {
     }
 
     @Test
+    fun `los triggers de estado viajan, y uno vacio no se escribe`() {
+        val config = TasklaneConfig.DEFAULT.copy(
+            states = TasklaneConfig.DEFAULT.states.mapIndexed { i, s -> s.copy(trigger = if (i == 0) "  " else s.trigger) },
+        ).normalized()
+        val state = config.toState()
+        assertEquals(listOf(null, "@doing", "@done"), state.states.map { it.trigger })
+        val xml = JDOMUtil.write(XmlSerializer.serialize(state))
+        assertTrue(xml, "trigger=\"@doing\"" in xml)
+        assertEquals(listOf(null, "@doing", "@done"), state.toDomain()!!.states.map { it.trigger })
+    }
+
+    @Test
+    fun `un tasklane xml sin triggers de estado se sigue leyendo`() {
+        val state = TasklaneConfig.DEFAULT.toState().apply { states.forEach { it.trigger = null } }
+        assertEquals(listOf<String?>(null, null, null), state.toDomain()!!.states.map { it.trigger })
+    }
+
+    @Test
     fun `el orden sale de la posicion en la lista, no de un atributo`() {
         // `order` deliberadamente mentiroso: el fichero no lo guarda, asi que al
         // volver tiene que reconstruirse desde la posicion.

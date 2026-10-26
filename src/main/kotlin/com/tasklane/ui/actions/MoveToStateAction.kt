@@ -6,7 +6,9 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.DumbAware
 import com.tasklane.domain.model.StateId
+import com.tasklane.ui.common.StateIcons
 import com.tasklane.ui.toolwindow.TasklanePanel
+import javax.swing.Icon
 
 /**
  * *Move to ▸*: mandar la selección a otro estado sin abrir el diálogo de edición.
@@ -37,18 +39,21 @@ internal class MoveToStateActionGroup : ActionGroup(), DumbAware {
 
     /**
      * Se recalculan en cada apertura: los estados son configuración del proyecto y
-     * pueden haber cambiado de nombre, de orden o de número desde la anterior.
+     * pueden haber cambiado de nombre, de orden o de número desde la anterior. Cada uno con
+     * su círculo (2.30.0), el mismo que el botón de la tarjeta enseña para el actual.
      */
     override fun getChildren(e: AnActionEvent?): Array<AnAction> {
         val panel = e?.let { TasklaneDataKeys.PANEL.getData(it.dataContext) } ?: return EMPTY_ARRAY
-        return panel.states.map { MoveToStateAction(it.id, it.name) }.toTypedArray()
+        val states = panel.states
+        return states.map { MoveToStateAction(it.id, it.name, StateIcons.of(it, states)) }.toTypedArray()
     }
 }
 
-private class MoveToStateAction(private val target: StateId, name: String) : PanelAction() {
+private class MoveToStateAction(private val target: StateId, name: String, icon: Icon) : PanelAction() {
 
     init {
         templatePresentation.text = name
+        templatePresentation.icon = icon
     }
 
     override fun update(e: AnActionEvent) {

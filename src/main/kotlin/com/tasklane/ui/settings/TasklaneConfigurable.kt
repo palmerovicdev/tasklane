@@ -31,6 +31,7 @@ import com.tasklane.diagnostics.BlobStats
 import com.tasklane.diagnostics.TasklaneDiagnostics
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.domain.model.AnchorMarkerStyle
+import com.tasklane.domain.model.ConfigList
 import com.tasklane.domain.model.ConfigProblem
 import com.tasklane.domain.model.ConfigValidator
 import com.tasklane.domain.model.PriorityId
@@ -426,10 +427,9 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
 
     private fun updateProblems() {
         val problems = ConfigValidator.validate(currentConfig())
-        statesTable.markProblems(problems.filterIsInstance<ConfigProblem.BlankStateName>().mapNotNull { it.index }.toSet())
-        prioritiesTable.markProblems(
-            problems.filter { it !is ConfigProblem.BlankStateName }.mapNotNull { it.index }.toSet(),
-        )
+        fun rows(list: ConfigList) = problems.filter { it.list == list }.mapNotNull { it.index }.toSet()
+        statesTable.markProblems(rows(ConfigList.STATES))
+        prioritiesTable.markProblems(rows(ConfigList.PRIORITIES))
         val tagRows = tagsTable.rows
         tagsTable.markProblems(tagRows.indices.filterTo(HashSet()) { TagEdits.problemOf(tagRows[it]) != null })
         val message = problems.firstOrNull()?.let(::describe) ?: tagProblem()
@@ -455,6 +455,8 @@ class TasklaneConfigurable(private val project: Project) : BoundSearchableConfig
             TasklaneBundle.message("settings.problem.duplicateTrigger", problem.trigger)
         is ConfigProblem.TriggerWithSpace ->
             TasklaneBundle.message("settings.problem.triggerWithSpace", problem.trigger)
+        is ConfigProblem.TriggerLooksLikeTag ->
+            TasklaneBundle.message("settings.problem.triggerIsTag", problem.trigger)
     }
 
     // -------------------------------------------------------------- borrado

@@ -36,6 +36,7 @@ class StateBean {
     @Attribute var terminal: Boolean = false
     @Attribute var default: Boolean = false
     @Attribute var manualOrder: Boolean = false
+    @Attribute var trigger: String? = null
 }
 
 @Tag("priority")
@@ -112,6 +113,7 @@ private fun StateBean.toDomain(index: Int): TaskState? {
         terminal = terminal,
         isDefault = default,
         manualOrder = manualOrder,
+        trigger = trigger?.trim()?.takeIf(String::isNotEmpty),
     )
 }
 
@@ -138,6 +140,7 @@ fun TasklaneConfig.toState(): TasklaneConfigState = TasklaneConfigState().also {
             terminal = s.terminal
             default = s.isDefault
             manualOrder = s.manualOrder
+            trigger = s.trigger
         }
     }
     state.priorities = priorities.mapTo(mutableListOf()) { p ->

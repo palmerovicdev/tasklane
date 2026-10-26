@@ -79,6 +79,18 @@ internal class MarkdownField(
      */
     private var inserter: ImageInserter? = null
 
+    /** Quienes cuelgan algo de cada editor que se cree. Ver [onEditor]. */
+    private val editorListeners = mutableListOf<(EditorEx) -> Unit>()
+
+    /**
+     * Llama a [listener] con el editor de ahora, si ya lo hay, y con cada uno que se cree
+     * después: `EditorTextField` lo tira y crea otro al salir y volver a la jerarquía.
+     */
+    fun onEditor(listener: (EditorEx) -> Unit) {
+        editorListeners += listener
+        (component.editor as? EditorEx)?.let(listener)
+    }
+
     var text: String
         get() = component.text
         set(value) {
@@ -252,6 +264,7 @@ internal class MarkdownField(
         ActionManager.getInstance().getAction(IdeActions.ACTION_PASTE)?.shortcutSet?.let {
             paste.registerCustomShortcutSet(it, editor.contentComponent, parent)
         }
+        editorListeners.forEach { it(editor) }
     }
 
     /**

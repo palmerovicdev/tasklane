@@ -671,10 +671,11 @@
         <!-- Mover de estado sin pasar por el dialogo. El submenu esta en el menu
              contextual y en el menu de la fila; los dos de vecindad los instala
              TasklanePanel con ⇧⌥←/→ sobre su lista, y se declaran aqui para que sean
-             reasignables desde el Keymap. -->
+             reasignables desde el Keymap. El icono es el circulo de estado (2.30.0), el
+             mismo del boton de la tarjeta; cada entrada lleva el de su estado. -->
         <group id="Tasklane.MoveToState" popup="true"
                class="com.tasklane.ui.actions.MoveToStateActionGroup"
-               icon="AllIcons.Actions.MoveTo2"/>
+               icon="com.tasklane.ui.common.TasklaneIcons.State"/>
         <!-- Prioridad: mismo argumento que Move To. El icono del grupo son dos barras
              de color apiladas -el de "ordenar por severidad" de la plataforma-, que es
              lo mas parecido que hay en AllIcons a "niveles"; sin el, Priority era la
@@ -726,6 +727,13 @@
                 class="com.tasklane.ui.actions.MoveToNextStateAction"/>
         <action id="Tasklane.MoveToPreviousState"
                 class="com.tasklane.ui.actions.MoveToPreviousStateAction"/>
+        <!-- El estado del dialogo de la tarea desde el teclado (2.30.0). Sin atajo global:
+             ⌘⌥←/→ (Ctrl+Alt fuera de macOS) son Back/Forward del IDE, y solo se quitan
+             dentro del dialogo, donde los instala TaskEditDialog leyendo antes el Keymap. -->
+        <action id="Tasklane.NextDialogState"
+                class="com.tasklane.ui.editor.NextDialogStateAction"/>
+        <action id="Tasklane.PreviousDialogState"
+                class="com.tasklane.ui.editor.PreviousDialogStateAction"/>
         <!-- Subir y bajar a mano (2.11.0). ⌘⇧↑/↓ lo instala TasklanePanel sobre su
              lista; solo se ven en una pestana con orden manual. -->
         <action id="Tasklane.MoveUp"

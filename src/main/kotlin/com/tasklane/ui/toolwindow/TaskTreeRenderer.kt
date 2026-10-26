@@ -32,6 +32,7 @@ import com.tasklane.domain.text.ImageRefParser
 import com.tasklane.domain.text.InlineMarkdown
 import com.tasklane.ui.common.GroupLabels
 import com.tasklane.ui.common.PriorityDot
+import com.tasklane.ui.common.StateIcons
 import com.tasklane.ui.common.TagPill
 import com.tasklane.ui.common.TasklaneIcons
 import java.awt.BorderLayout
@@ -288,8 +289,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Lo que se ve de ancho la última vez que se montó una fila. Ver [getPreferredSize]. */
     private var widthLimit = 0
 
-    /** Enlaces e imágenes. Es el único distintivo con contador clicable. */
-    private val detail = line { _, _ -> pendingTask?.let(::renderDetail) }
+    /**
+     * Los contadores de enlaces e imágenes, `2 🔗` y `3 🏞`: el número y **detrás** su icono
+     * (2.30.0). Hasta entonces eran un solo distintivo con un solo icono —el del enlace
+     * delante, y las capturas como `1 img`—, así que sin un enlace no se sabía de qué era
+     * el número. Ver [renderDetail].
+     */
+    private val linkCount = counter()
+    private val imageCount = counter()
 
     private val chips = List(MAX_CHIPS) { chip() }
 
@@ -354,7 +361,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /**
      * Cambiar de estado (2.28.3): abre la lista de *Move To ▸* sin pasar por el menú `⋮`,
      * que lo dejaba a dos clics y un submenú. Va a la izquierda del asa —o en su sitio,
-     * en una pestaña que no va a mano— y, como ella, sólo se ve bajo el ratón.
+     * en una pestaña que no va a mano— y, como ella, sólo se ve bajo el ratón. Desde la
+     * 2.30.0 es el círculo del estado en el que está la tarea: ver [StateIcons].
      */
     private val state = icon()
 
@@ -393,7 +401,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // centro. Se sustituye el centro por la pila de líneas.
         remove(textRenderer)
         lines.add(textRenderer)
-        meta.add(detail)
+        meta.add(linkCount)
+        meta.add(imageCount)
         meta.add(priorityChip)
         meta.add(priorityIcon)
         ChipRow.keep(priorityChip, priorityIcon)
@@ -489,9 +498,10 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 // la que las limpia, y saltarse las ocultas dejaría dentro los
                 // fragmentos de la fila anterior esperando a que a alguna le tocara
                 // volver a verse.
-                for (extra in extraLines + detail) {
+                for (extra in extraLines) {
                     extra.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
                 }
+                renderDetail(tree, value.task, selected)
                 renderChips(tree, value.task, selected)
             }
         }
@@ -512,7 +522,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         extraLines.forEach { it.isVisible = false }
         imageViews.forEach { it.isVisible = false }
         pendingImagesShown = false
-        detail.isVisible = false
+        linkCount.isVisible = false
+        imageCount.isVisible = false
         copyButton.isVisible = false
         iconTags.remove(copyButton)
         chips.forEach { it.isVisible = false }
@@ -1247,11 +1258,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /**
      * Copia, vencimiento, etiquetas, repositorio y estado.
      *
-     * El indicador de enlaces e imágenes va aparte, en [detail], y es el único con
-     * icono de la plataforma **y** contador clicable: el icono es uno solo porque un
-     * [SimpleColoredComponent] sólo tiene uno, y lo gana el enlace por ser el único
-     * de los dos que además se puede pulsar. El resto son distintivos de sólo
-     * lectura, y cada uno es su propio componente justo para poder llevar su icono.
+     * Los contadores de enlaces e imágenes van aparte, en [renderDetail]. Cada
+     * distintivo es su propio componente justo para poder llevar su icono: un
+     * [SimpleColoredComponent] sólo tiene uno.
      */
     private fun renderChips(tree: JTree, task: Task, selected: Boolean) {
         val foreground = RenderingUtil.getForeground(tree, selected)
@@ -1283,8 +1292,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         //
         // La etiqueta es la prioridad misma, igual que la del ancla es su
         // [CodeAnchor]; quien atiende el clic la reconoce en [hotspotAt].
+        //
+        // Desde la 2.30.0 es una pastilla rellena con su color, la misma que deja un
+        // `!!!` en el diálogo: hasta entonces era un punto y el nombre en gris, y la
+        // prioridad era lo único de la tarjeta que se leía distinto en cada sitio. Si no
+        // cabe, se queda el punto, que es el mismo color.
         val priority = config.priorityOrDefault(task.priorityId)
-        keep(priorityChip, priorityIcon, priority.name, PriorityDot.chip(priority), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, priority, foreground)
+        val look = look(TagColor(priority.colorLight, priority.colorDark))
+        keep(priorityChip, priorityIcon, priority.name, PriorityDot.chip(priority), look.style, priority, foreground, look.fill)
 
         // El sitio del código, detrás de la prioridad. Se pinta con el color de enlace
         // porque se pulsa como un enlace: lo que parece pulsable, lo es.
@@ -1330,10 +1345,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // rellenas con su color —antes el color iba sólo en la letra— y grises si no lo
         // tienen: el color sigue siendo la excepción que se busca con la vista. Ver [TagPill].
         for (tag in task.tags) {
-            val color = config.tagColor(tag)
-            val look = tagLooks.getOrPut(color) {
-                TagLook(SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, TagPill.text(color)), TagPill.fill(color))
-            }
+            val look = look(config.tagColor(tag))
             chip("#$tag", null, look.style, TagChip(tag), look.fill)
         }
 
@@ -1357,18 +1369,28 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         meta.isVisible = true
     }
 
-    /** Rellena un distintivo que no se cae y su gemelo de sólo icono. Ver [priorityChip]. */
+    /** La letra y el relleno de la pastilla de [color]. Ver [tagLooks]. */
+    private fun look(color: TagColor?): TagLook = tagLooks.getOrPut(color) {
+        TagLook(SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, TagPill.text(color)), TagPill.fill(color))
+    }
+
+    /**
+     * Rellena un distintivo que no se cae y su gemelo de sólo icono. Ver [priorityChip].
+     * Con [fill] el entero es una pastilla sin icono: el icono queda para el gemelo.
+     */
     private fun keep(
-        full: SimpleColoredComponent,
-        compact: SimpleColoredComponent,
+        full: Badge,
+        compact: Badge,
         text: String,
         icon: javax.swing.Icon,
         attributes: SimpleTextAttributes,
         tag: Any,
         foreground: Color,
+        fill: Color? = null,
     ) {
         full.clear()
-        full.icon = icon
+        full.icon = icon.takeIf { fill == null }
+        full.fill = fill
         full.foreground = foreground
         full.append(text, attributes, tag)
         full.isVisible = true
@@ -1406,7 +1428,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         }
         more.icon = if (hovered) AllIcons.Actions.More else EmptyIcon.ICON_16
         stateActive = hovered
-        state.icon = if (hovered) AllIcons.Actions.MoveTo2 else EmptyIcon.ICON_16
+        state.icon = if (hovered) StateIcons.of(config.stateOrDefault(task.stateId), config.states) else EmptyIcon.ICON_16
         val grab = reorderable || movable
         gripActive = grab
         grip.icon = if (grab && hovered) AllIcons.General.Drag else EmptyIcon.ICON_16
@@ -1440,48 +1462,29 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     /**
-     * Indicador de enlaces e imágenes. El icono de cadena con el número funciona esté
-     * donde esté el enlace dentro del cuerpo, así que nunca hace falta entrar a
-     * editar para abrir uno que viva en el detalle.
+     * Los contadores de enlaces e imágenes. El de enlaces funciona esté donde esté el
+     * enlace dentro del cuerpo, así que nunca hace falta entrar a editar para abrir uno
+     * que viva en el detalle.
      *
-     * El contador de imágenes también se pulsa (2.6.0): amplía las capturas de la
-     * tarea sin desplegar la tarjeta ni abrir el diálogo. Hasta la 2.5 el icono era
-     * decorativo —pulsarlo caía en la etiqueta de los enlaces, y sin enlaces no hacía
-     * nada—, que es lo peor que puede hacer un icono que se ve pulsable.
+     * El de imágenes también se pulsa (2.6.0): amplía las capturas de la tarea sin
+     * desplegar la tarjeta ni abrir el diálogo. Cada contador responde entero, número e
+     * icono: ver [tagIn].
      */
-    private fun renderDetail(task: Task) {
-        val hasLinks = task.links.isNotEmpty()
-        // Desplegada, las capturas están ahí abajo a la vista: repetir «3 img» justo
+    private fun renderDetail(tree: JTree, task: Task, selected: Boolean) {
+        val foreground = RenderingUtil.getForeground(tree, selected)
+        fun count(target: Badge, count: Int, icon: javax.swing.Icon, tag: Any) {
+            target.clear()
+            target.isVisible = count > 0
+            if (count == 0) return
+            target.icon = icon
+            target.foreground = foreground
+            target.append(count.toString(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, tag)
+        }
+        count(linkCount, task.links.size, TasklaneIcons.FormatLink, LINKS)
+        // Desplegada, las capturas están ahí abajo a la vista: repetir «3 🏞» justo
         // encima de ellas no cuenta nada que no se esté viendo ya.
-        val images = if (pendingImagesShown) 0 else task.attachments.size
-        detail.isVisible = hasLinks || images > 0
-        if (!detail.isVisible) return
-
-        // `detail` ya pasó por `getTreeCellRendererComponent`, que lo dejó limpio.
-        if (hasLinks) {
-            detail.icon = AllIcons.Ide.Link
-            detail.append(task.links.size.toString(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, LINKS)
-        } else {
-            detail.icon = AllIcons.FileTypes.Image
-        }
-        if (images > 0) {
-            val text = if (hasLinks) {
-                "  ${TasklaneBundle.message("toolwindow.row.images", images)}"
-            } else {
-                images.toString()
-            }
-            detail.append(text, SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES, IMAGES)
-        }
+        count(imageCount, if (pendingImagesShown) 0 else task.attachments.size, TasklaneIcons.FormatImage, IMAGES)
     }
-
-    /**
-     * Qué responde el **icono** del indicador, que no lleva fragmento con etiqueta.
-     *
-     * Es el mismo reparto que hace [renderDetail] al elegirlo: con enlaces es la
-     * cadena y son todos los enlaces; sin ellos es el icono de imagen y son las
-     * capturas.
-     */
-    private fun detailIconTag(): Any = if (pendingTask?.links.orEmpty().isNotEmpty()) LINKS else IMAGES
 
     // ------------------------------------------------------------------ medida de la fila
 
@@ -1876,15 +1879,16 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         // Un distintivo reducido a su icono es entero el icono, y no lleva fragmento.
         iconTags[target]?.let { return it }
         if (local < 0) return null
-        // Una pastilla responde entera, también por el relleno que rodea a la letra.
-        if (target is Badge && target.fill != null && local < target.width) return target.firstTag()
+        // Una pastilla responde entera, también por el relleno que rodea a la letra, y un
+        // contador también: su icono va detrás del número y no es un fragmento.
+        if (target is Badge && (target.fill != null || target.isIconOnTheRight) && local < target.width) return target.firstTag()
         // El icono no es un fragmento con etiqueta, pero es la mitad visible de un
         // distintivo pequeño, y muchas veces la mitad a la que se apunta: el punto de
         // color **es** la prioridad, y el indicador de enlaces es icono y contador.
         // Dejarlo fuera dejaba medio control sin responder.
         if (target.findFragmentAt(local) == SimpleColoredComponent.FRAGMENT_ICON) {
             lineChecks[target]?.let { return it }
-            return if (target === detail) detailIconTag() else target.firstTag()
+            return target.firstTag()
         }
         return target.getFragmentTagAt(local)
     }
@@ -2168,6 +2172,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     /** Un distintivo de la línea de metadatos. */
     private fun chip() = Badge()
 
+    /** Un contador de la línea de metadatos: el número y, detrás, de qué. Ver [linkCount]. */
+    private fun counter() = Badge().apply { isIconOnTheRight = true }
+
     /**
      * Un distintivo. Con [fill] es una pastilla rellena —las etiquetas, desde la 2.29.0— y
      * gana aire a los lados para que la letra no toque el borde; sin él, como siempre: sin
@@ -2238,7 +2245,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         /** Cuántas líneas de resumen se recuerdan buscando. Una búsqueda trae 200 como mucho. */
         const val MAX_FOCUSES = 256
 
-        /** Etiqueta del contador del indicador: representa *todos* los enlaces de la fila. */
+        /** Etiqueta del contador de enlaces: representa *todos* los enlaces de la fila. */
         val LINKS = Any()
 
         /** Y ésta, *todas* sus capturas. Ver [renderDetail]. */

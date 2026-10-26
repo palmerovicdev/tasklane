@@ -125,6 +125,28 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.30.0 &mdash; state triggers, and triggers become badges</h3>
+            <ul>
+              <li><b>State triggers</b>: give each state a trigger in Settings, like the
+                  priorities'. New projects come with <code>@todo</code>, <code>@doing</code>
+                  and <code>@done</code>.</li>
+              <li><b>Triggers anywhere</b>: type <code>!!!</code> or <code>@doing</code> and a
+                  space anywhere in the task text, not just at the start, when creating or
+                  editing a task. Nothing inside code counts.</li>
+              <li><b>Badges</b>: the trigger turns into a badge &mdash; <i>High</i> in the
+                  priority's colour, <i>Doing</i> with its state icon &mdash; and the field
+                  below follows. Backspace removes it, and Undo brings the text back.</li>
+              <li><b>Change the state from the keyboard</b> in the task dialog:
+                  <code>&#8984;&#8997;&rarr;</code>/<code>&#8984;&#8997;&larr;</code>
+                  (<code>Ctrl+Alt</code> elsewhere), even while typing.</li>
+              <li>The card's state button is now a <b>state icon</b> that shows where the task
+                  is, also in <i>Move To</i>.</li>
+              <li>On the card, the <b>priority is a pill</b> in its colour, like the dialog's,
+                  and links and images read <b>2 &#128279;</b> and <b>3 &#127966;</b>.</li>
+            </ul>
+            <p><b>Compatibility:</b> <code>tasklane.xml</code> gains an optional
+               <code>trigger</code> on each state; older versions ignore it. The database does
+               not change.</p>
             <h3>2.29.0 &mdash; tags you can see, and tag as you write</h3>
             <ul>
               <li><b>Filled tags</b>: a tag with a colour is a pill filled with it, on the card and

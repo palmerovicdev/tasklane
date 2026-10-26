@@ -12,8 +12,8 @@ import javax.swing.JComponent
 import javax.swing.JTable
 
 /**
- * Tabla de estados: nombre, cuál es el destino por defecto, cuál cierra la tarea y
- * cómo agrupa. Y desde la 2.17.1, las casillas de cada estado que son **de la persona** y
+ * Tabla de estados: nombre, trigger (2.30.0), cuál es el destino por defecto, cuál cierra la
+ * tarea y cómo agrupa. Y desde la 2.17.1, las casillas de cada estado que son **de la persona** y
  * no del proyecto —si sale en el tablero, si la cuenta la barra de estado—: ver
  * [PersonalColumn].
  *
@@ -33,7 +33,9 @@ internal class StatesTable(
 
     private val model = ListTableModel<StateRow>(
         *(
-            listOf<ColumnInfo<StateRow, *>>(HandleColumn<StateRow>(), NameColumn(), DefaultColumn(), TerminalColumn()) +
+            listOf<ColumnInfo<StateRow, *>>(
+                HandleColumn<StateRow>(), NameColumn(), TriggerColumn(), DefaultColumn(), TerminalColumn(),
+            ) +
                 personal.map { PersonalColumnInfo(it) } +
                 listOf(GroupingColumn(), AnchorColumn())
             ).toTypedArray(),
@@ -119,6 +121,25 @@ internal class StatesTable(
     }
 
     /**
+     * Junto al nombre y no detrás de *Default* como en las prioridades: aquí detrás vienen
+     * cinco casillas seguidas, y meterlo en medio las partiría.
+     */
+    private inner class TriggerColumn : ColumnInfo<StateRow, String>(
+        TasklaneBundle.message("settings.column.trigger"),
+    ) {
+        override fun valueOf(item: StateRow): String = item.trigger.orEmpty()
+        override fun isCellEditable(item: StateRow): Boolean = true
+        override fun getWidth(table: JTable): Int = JBUI.scale(TRIGGER_WIDTH)
+        override fun getTooltipText(): String = TasklaneBundle.message("settings.column.trigger.state.tooltip")
+        override fun getRenderer(item: StateRow) = problemRenderer
+        override fun setValue(item: StateRow, value: String) {
+            // Vacío es «sin trigger», como en las prioridades.
+            item.trigger = value.trim().takeIf(String::isNotEmpty)
+            onChanged()
+        }
+    }
+
+    /**
      * Exactamente un estado por defecto: marcar uno desmarca el resto. Desmarcar el
      * activo no hace nada — dejar el proyecto sin destino para las tareas nuevas no
      * es un estado válido, así que no se ofrece como opción.
@@ -193,6 +214,7 @@ internal class StatesTable(
         /** La columna del nombre, detrás del asa. */
         const val NAME = 1
         const val CHECK_WIDTH = 70
+        const val TRIGGER_WIDTH = 70
         const val PREFERRED_WIDTH = 480
         const val PREFERRED_HEIGHT = 160
     }

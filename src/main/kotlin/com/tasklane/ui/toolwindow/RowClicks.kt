@@ -56,10 +56,15 @@ internal object RowClicks {
                 // Los dos controles de abajo a la derecha van primero, y se preguntan sólo
                 // en la banda de los controles: resolverlos cuesta preparar la fila.
                 val control = if (TaskRowActions.nearActions(tree, e)) renderer.targetAt(tree, e.point) else null
-                // El botón de estado (2.28.3) dice lo que hace: el icono solo no lo cuenta.
+                // El botón de estado (2.28.3) dice lo que hace, y desde la 2.30.0 en qué
+                // estado está la tarea: el círculo lo enseña, pero no lo nombra.
                 if (control == TaskTreeRenderer.RowTarget.STATE) {
                     tree.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                    tree.toolTipText = TasklaneBundle.message("toolwindow.row.state.tooltip")
+                    val task = (tree.getPathForRow(rowAtHeight(tree, e.y))?.lastPathComponent as? TaskNode)?.task
+                    tree.toolTipText = TasklaneBundle.message(
+                        "toolwindow.row.state.tooltip",
+                        task?.let { renderer.config.stateOrDefault(it.stateId).name }.orEmpty(),
+                    )
                     shots.over(null)
                     hoveredAnchor = null
                     return

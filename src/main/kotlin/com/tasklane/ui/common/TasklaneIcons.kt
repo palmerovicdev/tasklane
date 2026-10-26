@@ -81,6 +81,13 @@ internal object TasklaneIcons {
     @JvmField
     val Board: Icon = IconLoader.getIcon("/icons/board.svg", TasklaneIcons::class.java)
 
+    /**
+     * *Move To ▸* (2.30.0): el círculo de estado, medio lleno. Cada entrada de dentro lleva
+     * el de su estado: ver [StateIcons].
+     */
+    @JvmField
+    val State: Icon = StateIcons.generic
+
     private fun format(name: String): Icon =
         IconLoader.getIcon("/icons/format_$name.svg", TasklaneIcons::class.java)
 }

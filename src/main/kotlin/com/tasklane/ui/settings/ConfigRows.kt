@@ -33,12 +33,18 @@ internal class StateRow(
      * Viaja aquí para que aplicar los ajustes no lo devuelva al orden automático.
      */
     val manualOrder: Boolean = false,
+    var trigger: String? = null,
 ) {
-    fun toDomain(order: Int) = TaskState(id, name.trim(), order, grouping, anchor, terminal, isDefault, manualOrder)
+    fun toDomain(order: Int) = TaskState(
+        id, name.trim(), order, grouping, anchor, terminal, isDefault, manualOrder,
+        trigger = trigger?.trim()?.takeIf(String::isNotEmpty),
+    )
 
     companion object {
-        fun of(state: TaskState) =
-            StateRow(state.id, state.name, state.grouping, state.anchor, state.terminal, state.isDefault, state.manualOrder)
+        fun of(state: TaskState) = StateRow(
+            state.id, state.name, state.grouping, state.anchor, state.terminal, state.isDefault, state.manualOrder,
+            state.trigger,
+        )
 
         fun fresh(name: String) =
             StateRow(StateId("s-${UUID.randomUUID()}"), name, Grouping.NONE, DateAnchor.UPDATED, false, false)

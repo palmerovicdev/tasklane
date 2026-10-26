@@ -1,5 +1,6 @@
 package com.tasklane.domain
 
+import com.tasklane.domain.model.ConfigList
 import com.tasklane.domain.model.ConfigProblem
 import com.tasklane.domain.model.ConfigValidator
 import com.tasklane.domain.model.PriorityId
@@ -75,6 +76,45 @@ class ConfigValidatorTest {
             listOf(ConfigProblem.TriggerWithSpace(0, "muy urgente")),
             ConfigValidator.validate(config(priorities = priorities)),
         )
+    }
+
+    @Test
+    fun `un estado no puede repetir el trigger de una prioridad, y se marca el estado`() {
+        val states = TasklaneConfig.DEFAULT.states.mapIndexed { i, s -> if (i == 1) s.copy(trigger = "!!") else s }
+        assertEquals(
+            listOf(ConfigProblem.DuplicateTrigger(1, "!!", ConfigList.STATES)),
+            ConfigValidator.validate(config(states = states)),
+        )
+    }
+
+    @Test
+    fun `dos triggers que solo difieren en mayusculas son el mismo`() {
+        val states = TasklaneConfig.DEFAULT.states.mapIndexed { i, s -> if (i == 2) s.copy(trigger = "@Doing") else s }
+        assertEquals(
+            listOf(ConfigProblem.DuplicateTrigger(2, "@Doing", ConfigList.STATES)),
+            ConfigValidator.validate(config(states = states)),
+        )
+    }
+
+    @Test
+    fun `un trigger no puede empezar por almohadilla, que es una etiqueta`() {
+        val states = TasklaneConfig.DEFAULT.states.mapIndexed { i, s -> if (i == 0) s.copy(trigger = "#todo") else s }
+        assertEquals(
+            listOf(ConfigProblem.TriggerLooksLikeTag(0, "#todo", ConfigList.STATES)),
+            ConfigValidator.validate(config(states = states)),
+        )
+        assertEquals(
+            listOf(ConfigProblem.TriggerLooksLikeTag(0, "#")),
+            ConfigValidator.validate(config(priorities = listOf(priority("a", trigger = "#")))),
+        )
+    }
+
+    @Test
+    fun `un trigger de estado con espacio se marca en la tabla de estados`() {
+        val states = TasklaneConfig.DEFAULT.states.mapIndexed { i, s -> if (i == 1) s.copy(trigger = "en curso") else s }
+        val problems = ConfigValidator.validate(config(states = states))
+        assertEquals(listOf(ConfigProblem.TriggerWithSpace(1, "en curso", ConfigList.STATES)), problems)
+        assertEquals(ConfigList.STATES, problems.single().list)
     }
 
     @Test

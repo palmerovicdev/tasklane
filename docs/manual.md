@@ -25,7 +25,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Ver una captura mientras programas** | La ventana de una captura ampliada se **fija** con la chincheta de su cabecera: se queda encima del editor y deja de cerrarse al pulsar fuera |
 | **Seleccionar y copiar** | El texto de la tarjeta se marca con el ratón y se copia con `⌘C` |
 | **Cambiar la prioridad de un clic** | Desde su distintivo en la tarjeta, o para toda la selección con *Priority ▸* |
-| **Mover de estado sin diálogo** | *Move To ▸*, el botón de estado de la tarjeta o `⇧⌥←/→`, también sobre una selección |
+| **Mover de estado sin diálogo** | *Move To ▸*, el botón de estado de la tarjeta —un círculo que enseña en cuál está— o `⇧⌥←/→`, también sobre una selección |
 | **Marcar** | Sube la tarea al principio de su grupo, sea cual sea su prioridad |
 | **Operaciones sobre muchas** | Completar, marcar, mover, cambiar la prioridad, el vencimiento o las etiquetas, o borrar una selección es una sola operación; por encima de diez tareas va en segundo plano y cancelar lo deshace |
 | **Deshacer y rehacer** | `⌘Z` en la lista deshace lo último que se hizo en el repositorio —completar, mover, prioridad, marcar, reordenar, una casilla, editar, crear o borrar— y `⌘⇧Z` lo rehace |
@@ -38,7 +38,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
 | **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir o con un clic en el campo, escritas también como `#api` en el texto de la tarea, y color opcional, que rellena la ficha; un clic en una de la tarjeta filtra por ella. Las dos cosas, también desde el menú y para toda una selección con *Due ▸* y *Tags ▸* |
 | **En la barra de estado** | *ToDo 3 · Doing 1 · 2 overdue* del repositorio activo, con lo vencido en rojo. Qué estados cuenta y si cuenta las vencidas, a elegir; cada cuenta abre su pestaña o sus tareas |
-| **Triggers de prioridad** | `!!! Arreglar el login` crea la tarea con prioridad *High* |
+| **Triggers de prioridad y de estado** | `Arreglar el login !!! @doing`, en cualquier sitio del texto, la crea con prioridad *High* y en *Doing*; cada trigger se queda en el texto como una pastilla de lo que significa |
 | **Apuntar al código** | Una tarea se ancla a `fichero:línea:columna` —o a un bloque, `Login.kt:42-58`, seleccionando varias líneas— desde el menú contextual del editor, o escribiendo `plans/deploy.md:28` en el diálogo —con autocompletado de rutas—, y la tarjeta lleva de vuelta con un clic y enseña el código del bloque |
 | **Los TODO del código, a Tasklane** | `Alt+Enter` sobre un `// TODO` lo pasa a una tarea anclada y quita el comentario; *Import TODO Comments…* importa todos los del proyecto sin tocar el código |
 | **El código enseña sus tareas** | Una marca en el margen o una pastilla en la línea, con el color de la prioridad, un tooltip con la tarea y un clic que la abre |
@@ -184,10 +184,10 @@ tarea de una frase sigue midiendo una línea.
 | Casilla | Siempre. Marcarla lleva la tarea al estado terminal; desmarcarla, al de por defecto |
 | Título | Hasta **tres** líneas; lo que no cabe se recorta. Una tarea cerrada sale tachada. Doble clic o `Enter` abre la tarea entera |
 | Descripción | Si hay cuerpo bajo el título. Una línea, recortada; buscando, [la que casa](#búsqueda) |
-| Distintivos | La **prioridad** siempre —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas** —un clic filtra por ella y otro lo quita—, el contador de **enlaces** —un clic los lista— y el de **imágenes** —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
+| Distintivos | La **prioridad** siempre, como pastilla de su color —un clic abre la lista de prioridades—, las **anclas** de código —un clic lleva al código—, el **vencimiento** —en rojo si ya pasó—, las **etiquetas** —un clic filtra por ella y otro lo quita—, el contador de **enlaces** (`2 🔗`) —un clic los lista— y el de **imágenes** (`3 🏞`) —un clic las amplía, y pararse encima las enseña— y la **fecha**. Buscando en todos los repositorios, además, el del que viene la fila |
 | Desplegar | Un chevrón a la derecha, sólo si la tarjeta esconde algo: título largo, más cuerpo o capturas. Con el teclado, `⌘↵` |
 | Marcador y menú `⋮` | A la derecha, con el ratón encima; el marcador se queda visible en las tareas marcadas |
-| Botón de estado | Debajo del menú, con el ratón encima, a la izquierda del asa si la pestaña va a mano. Un clic abre la lista de *Move To ▸* ahí mismo (2.28.3) |
+| Botón de estado | Debajo del menú, con el ratón encima, a la izquierda del asa si la pestaña va a mano. Un clic abre la lista de *Move To ▸* ahí mismo (2.28.3). Desde la 2.30.0 es el **círculo del estado** en el que está la tarea: vacío en el primero, más lleno cuanto más avanzado y con un visto en los terminales; el tooltip lo nombra |
 
 **Con la ventana estrecha nada importante se cae.** Si el distintivo de prioridad o el de un
 ancla no caben enteros, se quedan en su icono —el punto de color, el icono de fichero—, que
@@ -219,7 +219,8 @@ El **menú contextual** —el mismo que el `⋮` de la fila— tiene *New Task*,
   encima de diez va en segundo plano con barra, y **cancelar la deshace entera**.
 - **Mover de estado sin diálogo** con *Move To ▸*, o de pestaña en pestaña con `⇧⌥←/→`. El
   **botón de estado** de la tarjeta (2.28.3), a la izquierda del asa, abre esa misma lista
-  con un clic: los estados en el orden de las pestañas y el actual apagado.
+  con un clic: los estados en el orden de las pestañas, cada uno con su círculo, y el actual
+  apagado.
 - **Cambiar la prioridad** de la selección con *Priority ▸*, cada entrada con su color.
 - **Vencimiento y etiquetas sin diálogo** (2.24.0), para una tarea o para toda la selección:
   - *Due ▸ Today / Tomorrow / End of Week / Next Week* —los preajustes del diálogo—,
@@ -524,14 +525,30 @@ barra de formato ni vista previa de las imágenes—, así que una tarea apuntad
 nacía distinta de una escrita con calma. La tarea se crea en el **repositorio activo**,
 el mismo que usa *New Task*.
 
-**Triggers.** Escribir `!!! Resolver el fallo` crea la tarea *Resolver el fallo* con
-prioridad *High*: el prefijo mueve el desplegable de prioridad mientras se escribe y
-**no se guarda**. Gana la coincidencia más larga y hace falta un espacio detrás, así
-que `!importante revisar` no dispara nada; borrarlo devuelve la prioridad anterior y
-elegirla a mano gana sobre el prefijo. Funcionan **sólo al crear**: sobre una tarea que
-ya existe el desplegable está a un clic, y un cuerpo que empiece por `!!! ` no tiene
-por qué perderlo sólo por haberlo abierto. Los prefijos se configuran por prioridad y
-se apagan enteros desde *Settings → Tools → Tasklane*.
+**Triggers.** Escribir `Resolver el fallo !!! ` crea la tarea *Resolver el fallo* con
+prioridad *High*, y `@doing ` la crea en *Doing*: el trigger mueve el desplegable y **no se
+guarda**. Desde la 2.30.0 hay triggers de **estado** además de los de prioridad, y los dos
+valen **en cualquier sitio del texto**, no sólo al principio:
+
+- Cuenta la **palabra entera** seguida de un espacio, un tabulador o un salto de línea:
+  `!importante` o `ya!!!` no disparan nada. Sin mirar mayúsculas (`@Doing` vale), nada dentro
+  de código, y un pegado se queda como llega. Al aceptar cuenta también el que se quedó al
+  final sin separador, salvo que la tarea ya lo trajera.
+- El trigger se convierte en una **pastilla**: *High* del color de la prioridad, *Doing* con
+  el círculo del estado. Una por tipo —otro trigger de prioridad sustituye a la anterior—.
+  `⌫` justo detrás o `Supr` justo delante la quitan y el desplegable vuelve a lo elegido a
+  mano; `⌘Z` devuelve el texto escrito; elegir en el desplegable, o con `⌘⌥←/→`, la quita.
+- Funcionan **también al editar**: sólo cuenta lo que se teclea, así que el texto que la
+  tarea ya tenía —un `!!! ` escrito antes de configurar ese trigger— no se toca.
+
+Los triggers se configuran por prioridad y por estado —de fábrica `!`, `!!`, `!!!` y, en
+proyectos nuevos, `@todo`, `@doing`, `@done`— y se apagan enteros desde *Settings → Tools →
+Tasklane*. La pista del cuerpo vacío dice cuáles hay.
+
+**Estado con el teclado.** `⌘⌥→` / `⌘⌥←` (`Ctrl+Alt+→/←` fuera de macOS) eligen el estado
+siguiente o el anterior desde cualquier sitio del diálogo, también con el cursor en el texto:
+crear en *Doing* sin soltar el teclado. Salen junto a *Status* y se reasignan en el Keymap
+(*Next State in Task Dialog*, *Previous State in Task Dialog*). No dan la vuelta.
 
 ## Búsqueda
 
@@ -932,8 +949,8 @@ actúan al pulsarlos.
 
 | Grupo | Qué se configura |
 |---|---|
-| **States** | Una tabla: nombre, cuál es el de por defecto para las tareas nuevas, cuáles son terminales (cerrar una tarea), cómo agrupa cada uno y por qué fecha. **El orden es el de las pestañas**: se arrastra la fila por su asa o se usan las flechas. Tres casillas más por estado son **tuyas**, en `workspace.xml` y no en `tasklane.xml` (2.17.1): si tiene pestaña en la **Tool window**, columna en el **Board** y cuenta en la **Status bar**. De fábrica, todos salen en la ventana y en el tablero |
-| **Priorities** | Otra tabla, **de la más alta a la más baja** como en la ventana: nombre, por defecto, trigger y color para tema claro y oscuro, que se cambia pulsando la muestra. Arrastrar las filas es cambiar el orden de prioridad. Debajo, el interruptor de los triggers |
+| **States** | Una tabla: nombre, trigger (2.30.0), cuál es el de por defecto para las tareas nuevas, cuáles son terminales (cerrar una tarea), cómo agrupa cada uno y por qué fecha. **El orden es el de las pestañas**: se arrastra la fila por su asa o se usan las flechas. Tres casillas más por estado son **tuyas**, en `workspace.xml` y no en `tasklane.xml` (2.17.1): si tiene pestaña en la **Tool window**, columna en el **Board** y cuenta en la **Status bar**. De fábrica, todos salen en la ventana y en el tablero |
+| **Priorities** | Otra tabla, **de la más alta a la más baja** como en la ventana: nombre, por defecto, trigger y color para tema claro y oscuro, que se cambia pulsando la muestra. Arrastrar las filas es cambiar el orden de prioridad. Debajo, el interruptor de los triggers, de prioridad y de estado |
 | **Tags in *repositorio*** | Las etiquetas del **repositorio activo**, las más usadas primero, con cuántas tareas lleva cada una (2.23.0). **Renombrar** en la celda —a un nombre que ya existe, **fusiona** las dos—, **borrar** con `-` y un **color** opcional para tema claro y oscuro, que se quita con *Remove Colour*. Renombrar y borrar tocan sólo las tareas de ese repositorio; el color es del proyecto, en `tasklane.xml`, y vale para la etiqueta en todos |
 | **Repositories** | Hasta qué profundidad se detectan repositorios bajo la raíz. Un filtro de vista, nunca un borrado |
 | **Code anchors** | Marca en el margen, pastilla en la línea o ninguna. Es **tuyo**: va a `workspace.xml` |
@@ -951,9 +968,10 @@ actúan al pulsarlos.
   de la página. No entra en la pila de `⌘Z`, como reasignar un estado.
 - **Convertir un estado en terminal** ofrece rellenar la fecha de cierre de las tareas
   que ya tiene con su última modificación: sin eso caerían todas en «sin fecha».
-- **Los errores se marcan antes de aplicar**, con la fila en rojo: un nombre vacío, dos
-  prioridades con el mismo trigger o un trigger con un espacio, que nunca casaría, y una
-  etiqueta con un espacio o una coma, que la partirían en dos.
+- **Los errores se marcan antes de aplicar**, con la fila en rojo: un nombre vacío, un
+  trigger repetido —entre prioridades y estados, sin mirar mayúsculas—, uno con un espacio,
+  que nunca casaría, o que empiece por `#`, que es una etiqueta, y una etiqueta con un espacio
+  o una coma, que la partirían en dos.
 
 ## Datos y seguridad
 
@@ -1014,6 +1032,8 @@ actúan al pulsarlos.
 | `Espacio` / `Enter` | Abrir la pestaña de estado con el foco | En la fila de estados |
 | `Retroceso` | Quitar la última etiqueta | En el campo de etiquetas vacío |
 | `Escape` | Cerrar el diálogo | También con el cursor dentro del cuerpo |
+| `⌘⌥→` / `⌘⌥←` | Estado siguiente / anterior | En el diálogo de la tarea, también con el cursor en el cuerpo. Sin dar la vuelta |
+| `⌫` / `Supr` | Quitar la pastilla de un trigger | En el cuerpo del diálogo, con el cursor justo detrás / delante de ella |
 | `⌥←/→` | Pestaña de estado anterior / siguiente | Dentro del árbol. Es el `Alt+←/→` que ponía el IDE cuando los estados eran pestañas suyas. En el tablero, la columna de al lado |
 | `⇧⌥←/→` | Mover la selección a esa pestaña | Mismo eje, y `Shift` significa «llévate esto contigo». No da la vuelta al llegar al extremo. En el tablero, la selección se va con las tareas a su columna |
 

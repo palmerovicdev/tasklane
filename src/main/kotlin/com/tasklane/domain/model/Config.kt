@@ -30,6 +30,11 @@ data class TaskState(
      * agrupación: *ToDo* puede ir a mano y *Done* por fecha.
      */
     val manualOrder: Boolean = false,
+    /**
+     * La palabra que, escrita en el cuerpo de una tarea, la pone en este estado (2.30.0):
+     * `@doing` como [TaskPriority.trigger] es `!!!`. Ver `TriggerParser`.
+     */
+    val trigger: String? = null,
 )
 
 data class TaskPriority(
@@ -39,7 +44,10 @@ data class TaskPriority(
     /** RGB. Se combinan en un JBColor para que el tema los resuelva solo. */
     val colorLight: Int,
     val colorDark: Int,
-    /** Prefijo que selecciona esta prioridad al escribir. Fase 4. */
+    /**
+     * La palabra que, escrita en el cuerpo de una tarea, selecciona esta prioridad. Fase 4;
+     * desde la 2.30.0 vale en cualquier sitio del texto, no sólo al principio.
+     */
     val trigger: String? = null,
     val isDefault: Boolean = false,
 )
@@ -56,7 +64,7 @@ data class TaskPriority(
 data class TasklaneConfig(
     val states: List<TaskState>,
     val priorities: List<TaskPriority>,
-    /** Interruptor general de los triggers de prioridad. Fase 4. */
+    /** Interruptor general de los triggers: los de prioridad (Fase 4) y los de estado (2.30.0). */
     val triggersEnabled: Boolean = true,
     /**
      * Hasta qué profundidad se buscan repositorios bajo la raíz del proyecto. 1 =
@@ -109,7 +117,9 @@ data class TasklaneConfig(
             // al mínimo convertiría «no me avises» en «avísame a partir de un giga».
             imageQuotaMegabytes = if (imageQuotaMegabytes <= NO_IMAGE_QUOTA) NO_IMAGE_QUOTA
             else imageQuotaMegabytes.coerceIn(MIN_IMAGE_QUOTA_MB, MAX_IMAGE_QUOTA_MB),
-            states = states.mapIndexed { i, s -> s.copy(order = i, isDefault = i == defaultStateIndex) },
+            states = states.mapIndexed { i, s ->
+                s.copy(order = i, isDefault = i == defaultStateIndex, trigger = s.trigger?.trim()?.takeIf(String::isNotEmpty))
+            },
             priorities = priorities.mapIndexed { i, p ->
                 p.copy(
                     order = i,
@@ -158,9 +168,9 @@ data class TasklaneConfig(
 
         val DEFAULT = TasklaneConfig(
             states = listOf(
-                TaskState(TODO, "ToDo", 0, isDefault = true),
-                TaskState(DOING, "Doing", 1),
-                TaskState(DONE, "Done", 2, Grouping.BY_DATE, DateAnchor.COMPLETED, terminal = true),
+                TaskState(TODO, "ToDo", 0, isDefault = true, trigger = "@todo"),
+                TaskState(DOING, "Doing", 1, trigger = "@doing"),
+                TaskState(DONE, "Done", 2, Grouping.BY_DATE, DateAnchor.COMPLETED, terminal = true, trigger = "@done"),
             ),
             priorities = listOf(
                 TaskPriority(LOW, "Low", 0, 0x6C8EBF, 0x7FA8CC, trigger = "!"),

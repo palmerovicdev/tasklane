@@ -3,11 +3,13 @@ package com.tasklane.ui.editor
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonShortcuts
+import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
@@ -29,10 +31,17 @@ import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.InlineTag
 import com.tasklane.domain.text.TagParser
 import com.tasklane.domain.text.TriggerParser
+import com.tasklane.domain.text.TriggerParser.Target
+import com.tasklane.ui.common.PriorityDot
+import com.tasklane.ui.common.StateIcons
+import com.tasklane.ui.toolwindow.KeymapShortcut
 import java.awt.BorderLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.Toolkit
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,10 +49,12 @@ import java.time.temporal.WeekFields
 import java.util.Locale
 import javax.swing.ComboBoxModel
 import javax.swing.DefaultComboBoxModel
+import javax.swing.Icon
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 
 /**
@@ -64,11 +75,11 @@ import javax.swing.SwingUtilities
  * etiquetas son campos del modelo, no texto del cuerpo, así que no se pueden escribir
  * dentro del editor; este diálogo es su única entrada.
  *
- * La excepción son los **triggers de prioridad** —`!!! Resolver el fallo`—, que
- * antes sólo existían en el popup de Quick Add y desde la `0.6.8` viven aquí, que es
- * el único sitio donde se crea una tarea. Ver [installTriggers]. Y desde la 2.29.0 las
- * **etiquetas escritas en el cuerpo**: `#api` y un espacio pasa a las fichas. Ver
- * [installInlineTags].
+ * La excepción son los **triggers** —`Resolver el fallo !!!`, `@doing`—, que antes sólo
+ * existían en el popup de Quick Add y desde la `0.6.8` viven aquí, que es el único sitio
+ * donde se crea una tarea; desde la 2.30.0 también los de estado, en cualquier sitio del
+ * texto y hechos pastilla. Ver [TriggerBadges]. Y desde la 2.29.0 las **etiquetas escritas
+ * en el cuerpo**: `#api` y un espacio pasa a las fichas. Ver [installInlineTags].
  */
 internal class TaskEditDialog(
     private val project: Project,
@@ -81,10 +92,9 @@ internal class TaskEditDialog(
     initialDueDate: Instant? = null,
     initialAnchors: List<CodeAnchor> = emptyList(),
     /**
-     * Si se está **creando**. Es lo que decide el título, el botón y si los triggers de
-     * prioridad están vivos. Por defecto se deduce del cuerpo —crear empieza en
-     * blanco—, y hay que decirlo a mano en el único caso en que esa deducción falla:
-     * crear desde el editor, que nace con la selección ya escrita.
+     * Si se está **creando**. Es lo que decide el título y el botón. Por defecto se deduce
+     * del cuerpo —crear empieza en blanco—, y hay que decirlo a mano en el único caso en
+     * que esa deducción falla: crear desde el editor, que nace con la selección ya escrita.
      */
     private val isNew: Boolean = initialBody.isEmpty(),
 ) : DialogWrapper(project) {
@@ -95,8 +105,11 @@ internal class TaskEditDialog(
      */
     private val initialTrailingTag = InlineTag.trailing(initialBody)?.tag
 
+    /** Lo mismo con un trigger: el que el cuerpo ya traía al final es texto. Ver [pendingTrigger]. */
+    private val initialTrailingTrigger = TriggerParser.trailing(initialBody, config)?.trigger
+
     private val bodyField = MarkdownField(project, repo, initialBody, disposable).apply {
-        component.setPlaceholder(TasklaneBundle.message("dialog.task.placeholder"))
+        component.setPlaceholder(placeholder(config))
     }
 
     /**
@@ -108,9 +121,17 @@ internal class TaskEditDialog(
         onClick = bodyField::chooseImage,
     )
 
-    private val stateCombo = comboOf(config.states, initialState?.let(config::state) ?: config.defaultState) { it.name }
-    private val priorityCombo =
-        comboOf(config.priorities, initialPriority?.let(config::priority) ?: config.defaultPriority) { it.name }
+    /** Con el círculo de cada estado y el punto de cada prioridad: los de las pastillas del cuerpo. */
+    private val stateCombo = comboOf(
+        config.states,
+        initialState?.let(config::state) ?: config.defaultState,
+        icon = { StateIcons.of(it, config.states) },
+    ) { it.name }
+    private val priorityCombo = comboOf(
+        config.priorities,
+        initialPriority?.let(config::priority) ?: config.defaultPriority,
+        icon = PriorityDot::menu,
+    ) { it.name }
 
     /**
      * Se construye **una vez** y se guarda. Generarla dos veces —una para el modelo y
@@ -140,6 +161,7 @@ internal class TaskEditDialog(
         init()
         installEscape()
         installInlineTags()
+        installStateKeys()
     }
 
     /**
@@ -208,7 +230,7 @@ internal class TaskEditDialog(
             insets = Insets(if (y == 0) 0 else gap / 2, if (x == 0) 0 else gap, 0, 0)
         }
 
-        add(label("dialog.task.status", stateCombo), at(0, 0, 1.0))
+        add(statusLabel(), at(0, 0, 1.0))
         add(label("dialog.task.priority", priorityCombo), at(1, 0, 1.0))
         add(label("dialog.task.due", dueCombo), at(2, 0, 1.0))
         add(stateCombo, at(0, 1, 1.0))
@@ -234,6 +256,28 @@ internal class TaskEditDialog(
         labelFor = forComponent
     }
 
+    /**
+     * *Status* con el atajo que lo cambia a la derecha: un atajo que no se ve no se descubre,
+     * y éste no está en ningún menú. El que diga el Keymap al abrir el diálogo.
+     */
+    private fun statusLabel(): JComponent {
+        val previous = KeymapUtil.getFirstKeyboardShortcutText(stateShortcut(PREVIOUS_STATE, KeyEvent.VK_LEFT))
+        val next = KeymapUtil.getFirstKeyboardShortcutText(stateShortcut(NEXT_STATE, KeyEvent.VK_RIGHT))
+        stateCombo.toolTipText = TasklaneBundle.message("dialog.task.status.shortcut", previous, next)
+        return JPanel(BorderLayout(JBUI.scale(GAP), 0)).apply {
+            isOpaque = false
+            add(label("dialog.task.status", stateCombo), BorderLayout.WEST)
+            add(
+                JBLabel("$previous $next").apply {
+                    font = UIUtil.getFont(UIUtil.FontSize.SMALL, font)
+                    foreground = UIUtil.getContextHelpForeground()
+                    toolTipText = stateCombo.toolTipText
+                },
+                BorderLayout.EAST,
+            )
+        }
+    }
+
     override fun getPreferredFocusedComponent(): JComponent = bodyField.component
 
     /**
@@ -254,15 +298,19 @@ internal class TaskEditDialog(
 
     val body: String
         get() {
-            val text = stripTrigger(bodyField.text)
+            val text = withoutPendingTrigger(bodyField.text)
             return (pendingTag(text)?.let { InlineTag.remove(text, it) } ?: text).trim()
         }
-    val stateId: StateId get() = (stateCombo.selectedItem as TaskState).id
-    val priorityId: PriorityId get() = (priorityCombo.selectedItem as TaskPriority).id
+    val stateId: StateId
+        get() = (pendingTrigger(bodyField.text)?.target as? Target.State)?.id ?: (stateCombo.selectedItem as TaskState).id
+    val priorityId: PriorityId
+        get() = (pendingTrigger(bodyField.text)?.target as? Target.Priority)?.id
+            ?: (priorityCombo.selectedItem as TaskPriority).id
     val dueDate: Instant? get() = (dueCombo.selectedItem as DueOption).instant
 
     val tags: List<String>
-        get() = pendingTag(stripTrigger(bodyField.text))?.let { TagParser.add(tagsField.tags, it.tag) } ?: tagsField.tags
+        get() = pendingTag(withoutPendingTrigger(bodyField.text))?.let { TagParser.add(tagsField.tags, it.tag) }
+            ?: tagsField.tags
 
     val anchors: List<CodeAnchor> get() = anchorsField.anchors
 
@@ -421,72 +469,108 @@ internal class TaskEditDialog(
     // ---------------------------------------------------------------- triggers
 
     /**
-     * La prioridad elegida **a mano**, que es a la que se vuelve al borrar el
-     * trigger. No basta con leer el desplegable: ahí puede estar la que dictó el
-     * prefijo.
+     * La prioridad y el estado elegidos **a mano**, que es a lo que se vuelve al quitar una
+     * pastilla. No basta con leer el desplegable: ahí puede estar lo que dictó el trigger.
      */
     private var chosenPriority: TaskPriority = priorityCombo.selectedItem as TaskPriority
-
-    /**
-     * El último trigger reconocido. Se compara con el nuevo para actuar sólo cuando
-     * **cambia**: así elegir una prioridad a mano no se pierde en la siguiente tecla,
-     * y borrar el trigger devuelve la que había antes.
-     */
-    private var lastTrigger: String? = null
+    private var chosenState: TaskState = stateCombo.selectedItem as TaskState
 
     /** Para no confundir un cambio nuestro del desplegable con una elección del usuario. */
     private var applyingTrigger = false
 
     /**
-     * Tercer bloque de inicialización, y por lo mismo que el segundo: [installTriggers]
-     * escribe en las tres propiedades de arriba, y en Kotlin un `init` no puede tocar
-     * una propiedad que todavía no se ha declarado.
+     * `!!! ` o `@doing ` escritos en cualquier sitio del cuerpo, hechos pastilla y llevados al
+     * desplegable (2.30.0). **También al editar**: hasta la 2.29 sólo valían al crear, para que
+     * abrir una tarea cuyo cuerpo ya empezaba por `!!! ` no le cambiara la prioridad; ahora sólo
+     * cuenta lo que se teclea, como con las etiquetas, y el texto que traía no se toca.
      */
-    init {
-        if (isNew) installTriggers()
-    }
+    private val badges = TriggerBadges(project, config, bodyField, disposable, ::onTrigger)
 
     /**
-     * `!!! Resolver el fallo` crea la tarea *Resolver el fallo* con prioridad *High*:
-     * el prefijo elige la prioridad y no se guarda. Vivía en el popup de Quick Add,
-     * que era donde se escribía una tarea de un tirón; al pasar Quick Add a este
-     * diálogo tenía que venirse con él o el gesto se perdía.
-     *
-     * **Sólo al crear.** El prefijo es una forma de teclear la prioridad mientras se
-     * apunta algo, y sobre una tarea que ya existe el desplegable está a un clic. Es
-     * además lo que evita que abrir una tarea cuyo cuerpo empieza por `!!! ` —texto
-     * legítimo, escrito antes de configurar el prefijo— le cambie la prioridad y le
-     * recorte el cuerpo sólo por haberla abierto y aceptado.
+     * Tercer bloque de inicialización, y por lo mismo que el segundo: escribe en las
+     * propiedades de arriba, y en Kotlin un `init` no puede tocar una propiedad que todavía
+     * no se ha declarado.
      */
-    private fun installTriggers() {
+    init {
         priorityCombo.addActionListener {
             if (applyingTrigger) return@addActionListener
             chosenPriority = priorityCombo.selectedItem as TaskPriority
+            badges.drop(TriggerBadges.Kind.PRIORITY)
         }
-        bodyField.component.addDocumentListener(object : DocumentListener {
-            override fun documentChanged(event: DocumentEvent) = onBodyChanged()
-        })
+        stateCombo.addActionListener {
+            if (applyingTrigger) return@addActionListener
+            chosenState = stateCombo.selectedItem as TaskState
+            badges.drop(TriggerBadges.Kind.STATE)
+        }
     }
 
-    private fun onBodyChanged() {
-        val match = TriggerParser.match(bodyField.text, config)
-        if (match?.trigger == lastTrigger) return
-        lastTrigger = match?.trigger
-
-        val priority = match?.let { config.priority(it.priorityId) } ?: chosenPriority
+    private fun onTrigger(kind: TriggerBadges.Kind, target: Target?) {
         applyingTrigger = true
         try {
-            priorityCombo.selectedItem = priority
+            when (kind) {
+                TriggerBadges.Kind.PRIORITY ->
+                    priorityCombo.selectedItem = (target as? Target.Priority)?.let { config.priority(it.id) } ?: chosenPriority
+
+                TriggerBadges.Kind.STATE ->
+                    stateCombo.selectedItem = (target as? Target.State)?.let { config.state(it.id) } ?: chosenState
+            }
         } finally {
             applyingTrigger = false
         }
     }
 
-    /** El cuerpo sin el trigger: es una forma de escribir la prioridad, no parte de la tarea. */
-    private fun stripTrigger(text: String): String =
-        if (isNew) TriggerParser.strip(text, config) else text
+    /**
+     * El trigger que se quedó al final sin separador: aceptar con `Revisar el login !!!`
+     * escrito no puede dejar `!!!` en la tarea. Salvo que ya estuviera al abrir: ver
+     * [initialTrailingTrigger].
+     */
+    private fun pendingTrigger(text: String): TriggerParser.Match? =
+        TriggerParser.trailing(text, config)?.takeIf { it.trigger != initialTrailingTrigger }
 
-    private fun <T : Any> comboOf(items: List<T>, selected: T, label: (T) -> String): JComboBox<T> {
+    private fun withoutPendingTrigger(text: String): String =
+        pendingTrigger(text)?.let { TriggerParser.remove(text, it) } ?: text
+
+    // ------------------------------------------------------- estado con el teclado
+
+    /**
+     * `⌘⌥→`/`⌘⌥←` (`Ctrl+Alt` fuera de macOS) eligen el estado siguiente o el anterior desde
+     * cualquier sitio del diálogo, también con el cursor en el cuerpo (2.30.0): crear en otro
+     * estado sin soltar el teclado. No el `⇧⌥←/→` de la lista, que dentro de un editor es
+     * seleccionar por palabras.
+     *
+     * Se declaran en `plugin.xml` para que se puedan reasignar en el Keymap, y se instalan aquí
+     * sobre el diálogo con lo que diga el Keymap al pulsar. Como en la lista, sin dar la vuelta:
+     * en el último estado, `→` no hace nada.
+     */
+    private fun installStateKeys() {
+        NextDialogStateAction().registerCustomShortcutSet(stateShortcut(NEXT_STATE, KeyEvent.VK_RIGHT), rootPane, disposable)
+        PreviousDialogStateAction().registerCustomShortcutSet(
+            stateShortcut(PREVIOUS_STATE, KeyEvent.VK_LEFT),
+            rootPane,
+            disposable,
+        )
+    }
+
+    private fun stateShortcut(actionId: String, key: Int) = KeymapShortcut(
+        actionId,
+        CustomShortcutSet(
+            KeyStroke.getKeyStroke(key, Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx or InputEvent.ALT_DOWN_MASK),
+        ),
+    )
+
+    fun canStepState(delta: Int): Boolean = stateCombo.selectedIndex + delta in 0 until stateCombo.itemCount
+
+    /** Como elegirlo en el desplegable: manda sobre la pastilla, si la había. */
+    fun stepState(delta: Int) {
+        if (canStepState(delta)) stateCombo.selectedIndex += delta
+    }
+
+    private fun <T : Any> comboOf(
+        items: List<T>,
+        selected: T,
+        icon: (T) -> Icon? = { null },
+        label: (T) -> String,
+    ): JComboBox<T> {
         // Nada de items.toTypedArray(): exigiria un parametro de tipo reificado.
         val model: ComboBoxModel<T> = DefaultComboBoxModel<T>().apply { items.forEach(::addElement) }
         return JComboBox(model).apply {
@@ -502,6 +586,7 @@ internal class TaskEditDialog(
                     hasFocus: Boolean,
                 ) {
                     text = value?.let(label).orEmpty()
+                    this.icon = value?.let(icon)
                 }
             }
         }
@@ -509,5 +594,25 @@ internal class TaskEditDialog(
 
     private companion object {
         const val GAP = 8
+        const val NEXT_STATE = "Tasklane.NextDialogState"
+        const val PREVIOUS_STATE = "Tasklane.PreviousDialogState"
+
+        /**
+         * La pista del cuerpo vacío, con los triggers que haya de verdad: los de fábrica
+         * pueden no ser los del proyecto. El de la prioridad más alta —la última— y el del
+         * primer estado que no es el de por defecto, que son los que se quieren al apuntar
+         * algo con prisa.
+         */
+        fun placeholder(config: TasklaneConfig): String {
+            if (!config.triggersEnabled) return TasklaneBundle.message("dialog.task.placeholder")
+            val priority = config.priorities.lastOrNull { it.trigger != null }?.trigger
+            val state = config.states.firstOrNull { it.trigger != null && !it.isDefault }?.trigger
+            return when {
+                priority != null && state != null -> TasklaneBundle.message("dialog.task.placeholder.both", priority, state)
+                priority != null -> TasklaneBundle.message("dialog.task.placeholder.priority", priority)
+                state != null -> TasklaneBundle.message("dialog.task.placeholder.state", state)
+                else -> TasklaneBundle.message("dialog.task.placeholder")
+            }
+        }
     }
 }

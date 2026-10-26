@@ -425,7 +425,7 @@ data class RepositoryRef(
   <div class="tw"><table>
     <thead><tr><th>Componente</th><th>Responsabilidad</th></tr></thead>
     <tbody>
-      <tr><td><code>TriggerParser</code></td><td>Resolver el prefijo de prioridad por coincidencia más larga y devolver el texto ya limpio</td></tr>
+      <tr><td><code>TriggerParser</code></td><td>Decir si la palabra que acaba de cerrarse en el texto es un trigger de prioridad o de estado (2.30.0; antes, el prefijo de prioridad por coincidencia más larga) y qué se corta del texto</td></tr>
       <tr><td><code>DateGrouper</code></td><td><code>Instant</code> + <code>ZoneId</code> → <code>Today</code> / un día: <code>Sep 10</code>, <code>Sep 10, 2025</code> (2.3.0; antes también <code>Yesterday</code>, <code>This week</code> y meses)</td></tr>
       <tr><td><code>LinkExtractor</code></td><td>URLs sueltas y <code>[texto](url)</code>, ignorando bloques de código; acortado con dominio primero</td></tr>
       <tr><td><code>InlineMarkdown</code></td><td>Énfasis en línea (<code>**</code>, <code>*</code>, <code>`</code>, <code>~~</code>) como rangos del original, para que la fila lo pinte sin las marcas</td></tr>
@@ -749,11 +749,12 @@ data class RepositoryRef(
   </div>
 
   <h3>Triggers de prioridad en vivo</h3>
+  <p class="cap"><strong>Desde la 2.30.0 esto es historia:</strong> hay triggers de estado además de los de prioridad, valen en cualquier sitio del texto —la palabra entera, cerrada por un espacio, un tabulador o un salto de línea, como una etiqueta <code>#api</code>— y se hacen <strong>pastilla</strong>: un inlay del editor que sustituye al texto y que <code>⌫</code> quita y <code>⌘Z</code> devuelve (<code>TriggerBadges</code>). Como sólo cuenta lo que se teclea, valen también al editar: el ADR de abajo deja de aplicarse. Lo que sigue es cómo funcionaba hasta la 2.29.</p>
   <p>Un <code>DocumentListener</code> sobre el documento del editor pasa el texto por <code>TriggerParser</code> en cada pulsación. Si el prefijo coincide, el desplegable de prioridad cambia al instante y el trigger <strong>se consume</strong>: lo que se guarda es <code>"Resolver fallo de autenticación en Android"</code>, no <code>"!!! Resolver…"</code>. Se actúa sólo cuando el trigger <em>cambia</em>, que es lo que permite las otras dos reglas: elegir la prioridad a mano gana sobre el prefijo hasta que se escriba otro, y borrarlo devuelve la que hubiera antes.</p>
   <p>La resolución es por <strong>coincidencia más larga primero</strong> sobre el primer token, y exige un espacio detrás. Así <code>!!!</code> gana a <code>!</code>, y un texto como <code>!importante revisar</code> no dispara nada.</p>
 
   <div class="adr">
-    <span class="tag">Los triggers sólo actúan al crear</span>
+    <span class="tag">Los triggers sólo actúan al crear (hasta la 2.29)</span>
     <p>En una tarea que ya existe el desplegable está a un clic, así que el prefijo no aporta; y sí quita. Un cuerpo que empiece por <code>!!! </code> puede ser texto legítimo —escrito antes de configurar ese prefijo, o importado—, y con los triggers vivos al editar bastaría abrir la tarea y aceptar para cambiarle la prioridad y recortarle el cuerpo sin que nadie lo pidiera. El diálogo instala el listener sólo cuando nace vacío, y <code>strip</code> se aplica bajo la misma condición.</p>
   </div>
 

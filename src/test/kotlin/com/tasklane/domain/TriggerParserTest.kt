@@ -2,6 +2,7 @@ package com.tasklane.domain
 
 import com.tasklane.domain.model.TasklaneConfig
 import com.tasklane.domain.text.TriggerParser
+import com.tasklane.domain.text.TriggerParser.Target
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -9,61 +10,93 @@ import org.junit.Test
 class TriggerParserTest {
 
     private val config = TasklaneConfig.DEFAULT
-    private val low = TasklaneConfig.LOW
-    private val normal = TasklaneConfig.NORMAL
-    private val high = TasklaneConfig.HIGH
+    private val low = Target.Priority(TasklaneConfig.LOW)
+    private val normal = Target.Priority(TasklaneConfig.NORMAL)
+    private val high = Target.Priority(TasklaneConfig.HIGH)
+    private val doing = Target.State(TasklaneConfig.DOING)
+
+    /** La palabra que cierra el separador tecleado al final de [typed]. */
+    private fun typed(typed: String) = TriggerParser.endingAt(typed, typed.length - 1, config)
 
     @Test
-    fun `el trigger selecciona su prioridad y se consume`() {
-        val text = "!!! Resolver el fallo"
-        assertEquals(high, TriggerParser.match(text, config)?.priorityId)
-        assertEquals("Resolver el fallo", TriggerParser.strip(text, config))
+    fun `al principio, como antes`() {
+        val match = typed("!!! ")!!
+        assertEquals(high, match.target)
+        assertEquals(0 to 4, TriggerParser.cut("!!! ", match))
     }
 
     @Test
-    fun `gana la coincidencia mas larga`() {
-        assertEquals(high, TriggerParser.match("!!! algo", config)?.priorityId)
-        assertEquals(normal, TriggerParser.match("!! algo", config)?.priorityId)
-        assertEquals(low, TriggerParser.match("! algo", config)?.priorityId)
+    fun `en cualquier sitio del texto`() {
+        assertEquals(high, typed("Resolver el fallo !!! ")?.target)
+        assertEquals(doing, typed("Revisar @doing ")?.target)
+        // Y la tarea queda sin el trigger ni un hueco doble.
+        val text = "Revisar !!! el login"
+        val match = TriggerParser.endingAt(text, 11, config)!!
+        assertEquals("Revisar el login", TriggerParser.remove(text, match))
     }
 
     @Test
-    fun `sin separador detras no dispara`() {
+    fun `la palabra entera es el trigger`() {
+        assertEquals(high, typed("!!! ")?.target)
+        assertEquals(normal, typed("!! ")?.target)
+        assertEquals(low, typed("! ")?.target)
         // El caso que justifica la regla: `!importante` es una palabra, no un trigger.
-        assertNull(TriggerParser.match("!importante revisar", config))
-        assertEquals("!importante revisar", TriggerParser.strip("!importante revisar", config))
+        assertNull(typed("!importante "))
+        assertNull(typed("Ya!!! "))
+        assertNull(typed("@doing. "))
+        assertNull(typed("![captura](a.png) "))
     }
 
     @Test
-    fun `un texto que es solo el trigger no dispara todavia`() {
-        // Mientras se teclea `!!!` la prioridad no debe saltar: aun no hay tarea.
-        assertNull(TriggerParser.match("!!!", config))
+    fun `sin mirar mayusculas`() {
+        assertEquals(doing, typed("@Doing ")?.target)
+        assertEquals("@Doing", typed("@Doing ")?.trigger)
     }
 
     @Test
-    fun `un salto de linea no cuenta como separador`() {
-        assertNull(TriggerParser.match("!!!\nResolver", config))
+    fun `un salto de linea tambien cierra la palabra y se queda`() {
+        val text = "Revisar !!!\nDetalle"
+        val match = TriggerParser.endingAt(text, 11, config)!!
+        assertEquals(high, match.target)
+        assertEquals("Revisar\nDetalle", TriggerParser.remove(text, match))
+    }
+
+    @Test
+    fun `el que se quedo al final sin separador`() {
+        val match = TriggerParser.trailing("Revisar el login @doing", config)!!
+        assertEquals(doing, match.target)
+        assertEquals("Revisar el login", TriggerParser.remove("Revisar el login @doing", match))
+        assertNull(TriggerParser.trailing("Revisar el login", config))
+    }
+
+    @Test
+    fun `nada dentro de codigo`() {
+        assertNull(typed("Mirar `a !! ")?.target)
+        assertNull(typed("```\nif (!!x) !! ")?.target)
+        assertEquals(high, typed("Mirar `a` !!! ")?.target)
     }
 
     @Test
     fun `el interruptor general apaga los triggers`() {
-        assertNull(TriggerParser.match("!!! algo", config.copy(triggersEnabled = false)))
-        assertEquals("!!! algo", TriggerParser.strip("!!! algo", config.copy(triggersEnabled = false)))
+        val off = config.copy(triggersEnabled = false)
+        assertNull(TriggerParser.endingAt("!!! ", 3, off))
+        assertNull(TriggerParser.endingAt("@doing ", 6, off))
     }
 
     @Test
     fun `sin triggers configurados no hay nada que reconocer`() {
-        val plain = config.copy(priorities = config.priorities.map { it.copy(trigger = null) })
-        assertNull(TriggerParser.match("!!! algo", plain))
+        val plain = config.copy(
+            priorities = config.priorities.map { it.copy(trigger = null) },
+            states = config.states.map { it.copy(trigger = null) },
+        )
+        assertNull(TriggerParser.endingAt("!!! ", 3, plain))
+        assertNull(TriggerParser.endingAt("@doing ", 6, plain))
     }
 
     @Test
-    fun `solo se comen los espacios que separan, no la estructura del cuerpo`() {
-        assertEquals("Titulo\n\nDetalle", TriggerParser.strip("!!   Titulo\n\nDetalle", config))
-    }
-
-    @Test
-    fun `un texto sin trigger sale intacto`() {
-        assertEquals("Revisar el PR", TriggerParser.strip("Revisar el PR", config))
+    fun `fuera de rango no revienta`() {
+        assertNull(TriggerParser.endingAt("", 0, config))
+        assertNull(TriggerParser.endingAt("!!!", 9, config))
+        assertNull(TriggerParser.endingAt("a  ", 2, config))
     }
 }

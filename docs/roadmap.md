@@ -43,6 +43,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P34 · El teclado, entero de verdad                      | `2.25.0` |
 | ✅ | P35 · Primeros pasos en una lista vacía                 | `2.26.0` |
 | ✅ | P5 · Compartir tareas (importar un archivo)             | `2.28.0` |
+| ✅ | Triggers de estado, en cualquier sitio y hechos pastilla | `2.30.0` |
 
 ---
 
