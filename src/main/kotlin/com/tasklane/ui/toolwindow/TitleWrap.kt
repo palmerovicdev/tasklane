@@ -22,8 +22,25 @@ internal class Run(
     val code: Boolean = false,
     /** Lo que se pulsa en este tramo si no es un enlace: una casilla (2.11.0). */
     val tag: Any? = null,
+    /**
+     * Una línea sin texto, sólo con el fondo del recuadro de un bloque: su relleno de arriba o
+     * de abajo (2.32.0). Mide menos que una línea y no se copia.
+     */
+    val filler: Boolean = false,
+    /** Lo que copia el botón del bloque cuya esquina cae en esta línea (2.32.0). */
+    val copy: String? = null,
 ) {
-    fun withText(text: String): Run = Run(text, style, link, matched, code, tag)
+    fun withText(text: String): Run = Run(text, style, link, matched, code, tag, filler, copy)
+
+    companion object {
+        /**
+         * El relleno horizontal del código (2.32.0), que es **un carácter** porque el fondo de
+         * un tramo se pinta por caracteres: así el recuadro crece con él sin geometría que se
+         * pueda desalinear. Espacio duro para que envolver no lo separe de la palabra que lleva
+         * al lado. Sale en lo que se pinta y no en lo que se copia.
+         */
+        const val PAD = '\u00A0'
+    }
 }
 
 /**
@@ -84,7 +101,7 @@ internal object TitleWrap {
             for (token in tokenize(run.text)) {
                 // El espacio final de una palabra no cuenta para decidir si cabe: si
                 // la palabra acaba la línea, ese espacio no se ve.
-                val solid = width(token.trimEnd(), run.style)
+                val solid = width(token.solid(), run.style)
                 val full = width(token, run.style)
                 val current = lines.last()
 
@@ -130,7 +147,7 @@ internal object TitleWrap {
     }
 
     private fun measureLine(line: List<Piece>, width: (String, SimpleTextAttributes) -> Int): Int =
-        line.sumOf { width(it.text.trimEnd(), it.run.style) }
+        line.sumOf { width(it.text.solid(), it.run.style) }
 
     /**
      * Mete los puntos suspensivos al final de la línea, quitando palabras hasta que
@@ -183,6 +200,9 @@ internal object TitleWrap {
     /** Palabras con los espacios que las siguen pegados, para no perderlos al unir. */
     private fun tokenize(text: String): List<String> =
         TOKEN.findAll(text).map { it.value }.toList()
+
+    /** Sin los espacios finales, que no se ven. El relleno de [Run.PAD] sí se ve: es parte del recuadro. */
+    private fun String.solid(): String = trimEnd { it.isWhitespace() && it != Run.PAD }
 
     private class Piece(val text: String, val run: Run)
 

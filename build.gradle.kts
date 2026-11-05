@@ -11,10 +11,10 @@ plugins {
 group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
-// El toolchain apunta al JBR que ya trae la IDEA instalada (ver
-// org.gradle.java.installations.paths en gradle.properties), asi no hay que
-// descargar ningun JDK. El bytecode se emite para 21, que es lo que ejecuta
-// la plataforma 2026.1 -> el minimo que soportamos.
+// El toolchain (JDK 25) lo auto-provisiona Gradle con el resolver de foojay;
+// el JBR de la IDEA no vale porque es un runtime sin jmods. El bytecode se
+// emite para 21, que es lo que ejecuta la plataforma 2026.1 -> el minimo que
+// soportamos.
 kotlin {
     jvmToolchain(25)
     compilerOptions {
@@ -60,6 +60,12 @@ dependencies {
     // lleva @ApiStatus.Internal. Mismo fichero y mismo esquema; ver el KDoc de Sql.kt.
     implementation("org.xerial:sqlite-jdbc:3.53.4.0")
     testImplementation("junit:junit:4.13.2")
+
+    // JNA is supplied by the IDE; do not package a competing native runtime.
+    compileOnly("net.java.dev.jna:jna:5.17.0")
+    testImplementation("net.java.dev.jna:jna:5.17.0")
+    implementation("com.github.hypfvieh:dbus-java-core:5.2.0")
+    implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.2.0")
 
     intellijPlatform {
         // Dependencia OPCIONAL en plugin.xml pero obligatoria para compilar: el
@@ -125,6 +131,18 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.32.0 &mdash; lists that continue, and code you can copy</h3>
+            <ul>
+              <li>In the task dialog, <b>Enter continues a list</b>: the next number,
+                  another <code>- </code> or another unchecked <code>- [ ] </code>. Later numbers
+                  move up to make room, and Enter on an empty item ends the list.</li>
+              <li><b>Typing a mark around a selection wraps it</b>: <code>`</code> for inline
+                  code, three of them for a code block, and one to three <code>*</code> for
+                  italic, bold or both.</li>
+              <li>On the card, code has <b>room to breathe</b>, and every code block has a
+                  <b>copy button</b> in its top right corner. A notification confirms the copy,
+                  from that button and from the task's own. No format changes.</li>
+            </ul>
             <h3>2.31.0 &mdash; clearer card badges</h3>
             <ul>
               <li>The card's <b>priority is a pill</b> in its colour, the same one the task

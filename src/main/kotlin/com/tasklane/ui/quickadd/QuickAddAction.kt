@@ -3,6 +3,7 @@ package com.tasklane.ui.quickadd
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.Project
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.service.TaskService
 import com.tasklane.ui.editor.TaskEditDialog
@@ -27,41 +28,42 @@ import com.tasklane.ui.editor.TaskEditDialog
  * quizá ni se está mirando.
  */
 internal class QuickAddAction : DumbAwareAction() {
-
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val project = e.project
-        // Un repositorio abierto en solo lectura no acepta tareas nuevas: el servicio
-        // no escribiría el fichero, así que crearla daría una fila que desaparece al
-        // recargar.
         e.presentation.isEnabled = project != null &&
             TaskService.getInstance(project).let { !it.isReadOnly(it.snapshot.value.activeRepo) }
     }
 
     override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val service = TaskService.getInstance(project)
-        // El repositorio se captura **antes** de abrir el diálogo y se usa el mismo al
-        // confirmar: el snapshot se reasigna mientras el diálogo está abierto, y volver
-        // a leerlo después puede dar otro. La captura pegada se habría escrito en un
-        // repositorio y la tarea nacería en el otro, con la imagen rota desde el primer
-        // segundo. Mismo motivo que en `TasklanePanel.createTask`.
-        val snapshot = service.snapshot.value
-        val repo = snapshot.activeRepo
+        createTask(e.project ?: return)
+    }
 
-        val dialog = TaskEditDialog(project, snapshot.config, repo)
-        if (!dialog.showAndGet()) return
-        service.apply(
-            TaskCommand.Create(
-                repo,
-                dialog.body,
-                dialog.stateId,
-                dialog.priorityId,
-                dialog.tags,
-                dialog.dueDate,
-                anchors = dialog.anchors,
-            ),
-        )
+    companion object {
+        // Both entry points run on the EDT. Keep a held system key from nesting modal editors.
+        private val editing = mutableSetOf<Project>()
+
+        fun createTask(project: Project) {
+            if (project.isDisposed || project in editing) return
+            val service = TaskService.getInstance(project)
+            val snapshot = service.snapshot.value
+            // Capture before showing the dialog: attachments and the new task must share a repository.
+            val repo = snapshot.activeRepo
+            if (service.isReadOnly(repo)) return
+            editing.add(project)
+            try {
+                val dialog = TaskEditDialog(project, snapshot.config, repo)
+                if (!dialog.showAndGet() || project.isDisposed || service.isReadOnly(repo)) return
+                service.apply(
+                    TaskCommand.Create(
+                        repo, dialog.body, dialog.stateId, dialog.priorityId, dialog.tags, dialog.dueDate,
+                        anchors = dialog.anchors,
+                    ),
+                )
+            } finally {
+                editing.remove(project)
+            }
+        }
     }
 }

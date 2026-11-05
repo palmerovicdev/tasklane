@@ -140,12 +140,15 @@ data class Task(
             buildList {
                 val fence = CodeFence()
                 var code: MutableList<String>? = null
+                // Las líneas tal cual, también la del título: es lo que se copia del bloque.
+                val source = mutableListOf<String>()
                 var language = ""
                 fun closeCode() {
                     val lines = code ?: return
                     code = null
                     val dedented = CodeFence.dedent(lines).dropWhile(String::isEmpty).dropLastWhile(String::isEmpty)
-                    if (dedented.isNotEmpty()) add(DetailBlock.Code(dedented, language))
+                    if (dedented.isNotEmpty()) add(DetailBlock.Code(dedented, language, CodeFence.copyText(source)))
+                    source.clear()
                 }
                 var index = 0
                 while (index < body.length) {
@@ -166,6 +169,7 @@ data class Task(
                         CodeFence.Role.CODE -> {
                             // La línea del título ya se pinta arriba: sólo pasa cuando
                             // el cuerpo es un bloque y nada más. Ver [titleRange].
+                            source += raw
                             if (!isTitleLine) (code ?: mutableListOf<String>().also { code = it }) += raw
                             index = eol + 1
                             continue
@@ -309,9 +313,14 @@ sealed interface DetailBlock {
     /**
      * Un bloque de código entre vallas, con sus líneas **literales**: sin la sangría
      * común y con los tabuladores hechos espacios, pero sin tocar nada más. [language]
-     * es lo que seguía a la valla de apertura, o vacío.
+     * es lo que seguía a la valla de apertura, o vacío. [source] es lo que copia el botón del
+     * bloque: ver [CodeFence.copyText].
      */
-    class Code(val lines: List<String>, val language: String = "") : DetailBlock
+    class Code(
+        val lines: List<String>,
+        val language: String = "",
+        val source: String = lines.joinToString("\n"),
+    ) : DetailBlock
 }
 
 /**

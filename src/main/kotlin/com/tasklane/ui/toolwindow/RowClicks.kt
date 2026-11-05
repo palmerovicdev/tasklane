@@ -1,6 +1,9 @@
 package com.tasklane.ui.toolwindow
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.notification.Notification
+import com.intellij.notification.NotificationType
+import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.text.StringUtil
@@ -14,6 +17,7 @@ import com.tasklane.domain.query.TagToggle
 import com.tasklane.domain.text.TaskCopyText
 import com.tasklane.domain.command.TaskCommand
 import com.tasklane.service.AttachmentService
+import com.tasklane.service.ExportService
 import com.tasklane.service.SearchService
 import com.tasklane.service.TaskService
 import com.tasklane.ui.common.ImagePreviewPopup
@@ -138,6 +142,9 @@ internal object RowClicks {
                     is TaskTreeRenderer.Hotspot.Copy ->
                         TasklaneBundle.message("toolwindow.row.copy.tooltip")
 
+                    is TaskTreeRenderer.Hotspot.CopyCode ->
+                        TasklaneBundle.message("toolwindow.row.copy.code.tooltip")
+
                     is TaskTreeRenderer.Hotspot.Check -> null
 
                     // Dice qué pasará: la misma ficha filtra o deja de filtrar.
@@ -184,7 +191,12 @@ internal object RowClicks {
             is TaskTreeRenderer.Hotspot.Priority -> PriorityPopup.show(project, renderer.config, hotspot.task, where)
             is TaskTreeRenderer.Hotspot.Image -> ImagePreviewPopup.show(project, hotspot.repo, hotspot.id, where, tree)
             is TaskTreeRenderer.Hotspot.Images -> ImagePreviewPopup.show(project, hotspot.repo, hotspot.ids, where, tree)
-            is TaskTreeRenderer.Hotspot.Copy -> CardTextSelection.copy(TaskCopyText.plain(hotspot.task))
+            is TaskTreeRenderer.Hotspot.Copy ->
+                copyAndSay(project, TaskCopyText.plain(hotspot.task), "toolwindow.row.copy.done")
+
+            is TaskTreeRenderer.Hotspot.CopyCode ->
+                copyAndSay(project, hotspot.text, "toolwindow.row.copy.code.done")
+
 
             // La casilla escribe su `x` en el cuerpo (2.11.0). En un repositorio en solo
             // lectura el servicio no aplica el comando y la casilla se queda como estaba,
@@ -198,6 +210,22 @@ internal object RowClicks {
             is TaskTreeRenderer.Hotspot.Tag -> SearchService.getInstance(project).let { search ->
                 search.setQuery(TagToggle.toggle(search.rawQuery.value, hotspot.name))
             }
+        }
+    }
+
+    /**
+     * Copiar desde un botón de la tarjeta, y decirlo (2.32.0): un botón así no cambia nada a la
+     * vista. Por el camino que relee lo escrito, porque el portapapeles del IDE se traga los
+     * fallos, y sólo se anuncia lo que de verdad ha llegado.
+     */
+    private fun copyAndSay(project: Project, text: String, doneKey: String) {
+        ExportService.getInstance(project).copyText(text) { copied ->
+            val notification = if (copied) {
+                Notification("Tasklane", TasklaneBundle.message(doneKey), NotificationType.INFORMATION)
+            } else {
+                Notification("Tasklane", TasklaneBundle.message("agent.copy.failed"), NotificationType.ERROR)
+            }
+            Notifications.Bus.notify(notification, project)
         }
     }
 

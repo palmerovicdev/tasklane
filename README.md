@@ -70,7 +70,9 @@ empty state here", "check this before I push". Too small for Jira or GitHub Issu
 ![Two expanded cards: one with a description, a half-ticked checklist and the anchored TypeScript block as it is in the file today; another with a pasted screenshot of an empty orders page](docs/marketplace/04-cards-hold-the-whole-story.png)
 
 - A Markdown body with a formatting toolbar: bold, italics, `code`, strikethrough and
-  fenced code blocks, rendered on the card.
+  fenced code blocks, rendered on the card, each block with its own copy button.
+- **Writing helps.** `Enter` continues numbered lists, bullets and checklists, and typing
+  `` ` `` or `*` over a selection wraps it.
 - **Checklists.** `- [ ] item` is a real checkbox you tick from the list, and the card
   counts `☑ 2/5`.
 - **Screenshots** pasted, dropped or picked, stored at full size and deduplicated, with
@@ -202,6 +204,10 @@ On Windows and Linux, `⌘` is `Ctrl` and `⌥` is `Alt`. Every action is listed
 | `Delete` | Delete, with *Undo* | Task list |
 
 The full list is in the [manual](docs/manual.md#atajos-por-defecto).
+
+For an optional shortcut that works while another application is focused, see
+[Global Quick Add](docs/global-quick-add.md). Configure it separately under
+**Settings → Tools → Tasklane Global Quick Add**; desktop support and permissions apply.
 
 ## Where your data lives
 

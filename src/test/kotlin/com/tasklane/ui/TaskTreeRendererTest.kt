@@ -22,6 +22,7 @@ import com.tasklane.ui.toolwindow.CardSelection
 import com.tasklane.ui.toolwindow.CardTextSelection
 import com.tasklane.ui.toolwindow.CodeSnippets
 import com.tasklane.ui.toolwindow.GroupNode
+import com.tasklane.ui.toolwindow.Run
 import com.tasklane.ui.toolwindow.TaskNode
 import com.tasklane.ui.toolwindow.TaskRowActions
 import com.tasklane.ui.toolwindow.TaskTreeRenderer
@@ -282,7 +283,7 @@ class TaskTreeRendererTest {
         val tree = treeWith(task("**Bold text** y `codigo`"))
         renderer.getTreeCellRendererComponent(tree, tree.getPathForRow(0).lastPathComponent, false, false, true, 0, false)
 
-        assertEquals("Bold text y codigo", renderer.textRenderer.getCharSequence(false).toString())
+        assertEquals("Bold text y ${Run.PAD}codigo${Run.PAD}", renderer.textRenderer.getCharSequence(false).toString())
     }
 
     @Test
@@ -1387,5 +1388,190 @@ class TaskTreeRendererTest {
         fun headless() {
             System.setProperty("java.awt.headless", "true")
         }
+    }
+
+    // ------------------------------------------------- aire del código y botón de copiar
+
+    private val pad = Run.PAD
+
+    /** El código en línea lleva aire a los lados, pero lo que se lee y se copia no lo trae. */
+    @Test
+    fun `el codigo en linea lleva relleno que no se copia`() {
+        val task = task("revisar casos de `behavior` hoy")
+        val tree = treeWith(task)
+
+        assertEquals("revisar casos de ${pad}behavior$pad hoy", renderer.paintedLines(tree, 0).single())
+        assertEquals("revisar casos de behavior hoy", renderer.cardText(tree, 0).single())
+
+        renderer.selection = CardSelection(task.id, TextPos(0, 0), TextPos(0, 100))
+        assertEquals("revisar casos de behavior hoy", CardTextSelection.selectedText(tree, renderer))
+    }
+
+    /** Un bloque desplegado: relleno arriba y abajo, y a la izquierda de cada línea. */
+    @Test
+    fun `un bloque desplegado lleva relleno alrededor del codigo`() {
+        val task = task("Titulo\nnota\n```\nval a = 1\nval b = 2\n```\nfin")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val lines = renderer.paintedLines(tree, 0).map { it?.trimEnd() }
+        assertEquals(listOf("Titulo", "nota", null, "${pad}val a = 1", "${pad}val b = 2", null, "fin"), lines)
+        assertEquals(listOf("Titulo", "nota", "val a = 1", "val b = 2", "fin"), renderer.cardText(tree, 0))
+    }
+
+    /** Seleccionar a través del bloque no mete las líneas de relleno en lo que se pega. */
+    @Test
+    fun `seleccionar un bloque copia sus lineas sin el relleno`() {
+        val task = task("Titulo\n```\nval a = 1\n    val b = 2\n```\nfin")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        renderer.selection = CardSelection(task.id, TextPos(0, 0), TextPos(5, 3))
+        assertEquals("Titulo\nval a = 1\n    val b = 2\nfin", CardTextSelection.selectedText(tree, renderer))
+    }
+
+    /** El botón está en la esquina de arriba a la derecha del recuadro, y se pulsa. */
+    @Test
+    fun `el boton de un bloque copia el bloque entero`() {
+        val task = task("Titulo\n```\nval a = 1\n    val b = 2\n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val placed = renderer.hotspots(tree, 0).single { it.hotspot is TaskTreeRenderer.Hotspot.CopyCode }
+        assertEquals("val a = 1\n    val b = 2", (placed.hotspot as TaskTreeRenderer.Hotspot.CopyCode).text)
+
+        // Y el clic llega por donde llegan todos: lo que se recorre con el teclado se pulsa.
+        val hit = renderer.hotspotAt(tree, Point(placed.bounds.centerX.toInt(), placed.bounds.centerY.toInt()))
+        assertTrue(hit is TaskTreeRenderer.Hotspot.CopyCode)
+
+        // A la izquierda del botón ya no es el botón.
+        val left = Point(placed.bounds.x - 8, placed.bounds.centerY.toInt())
+        assertFalse(renderer.hotspotAt(tree, left) is TaskTreeRenderer.Hotspot.CopyCode)
+    }
+
+    /** Cada bloque lleva el suyo, y el orden es el de lectura. */
+    @Test
+    fun `cada bloque copia lo suyo`() {
+        val task = task("Titulo\n```\nuno\n```\nentre\n```\ndos\n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val texts = renderer.hotspots(tree, 0).mapNotNull { (it.hotspot as? TaskTreeRenderer.Hotspot.CopyCode)?.text }
+        assertEquals(listOf("uno", "dos"), texts)
+    }
+
+    /**
+     * Plegada se ve una sola línea del bloque, sin relleno vertical, y el botón sigue ahí: una
+     * tarjeta con una sola línea de código no se puede desplegar, y se quedaría sin él.
+     */
+    @Test
+    fun `plegada la linea del bloque tambien lleva el boton`() {
+        val task = task("Titulo\n```\nval a = 1\nval b = 2\n```")
+        val tree = treeWith(task)
+
+        assertEquals(listOf("Titulo", "val a = 1"), renderer.cardText(tree, 0))
+        val placed = renderer.hotspots(tree, 0).single { it.hotspot is TaskTreeRenderer.Hotspot.CopyCode }
+        assertEquals("val a = 1\nval b = 2", (placed.hotspot as TaskTreeRenderer.Hotspot.CopyCode).text)
+    }
+
+    /** El bloque de un ancla es un bloque como los demás. */
+    @Test
+    fun `el bloque anclado tambien se copia`() {
+        renderer.snippets = snippetsOf(block to loginCode)
+        val task = task("Revisar el login", anchors = listOf(block))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val placed = renderer.hotspots(tree, 0).single { it.hotspot is TaskTreeRenderer.Hotspot.CopyCode }
+        assertEquals(loginCode.lines.joinToString("\n"), (placed.hotspot as TaskTreeRenderer.Hotspot.CopyCode).text)
+    }
+
+    /** El carácter de la primera línea de código que queda justo a la izquierda del botón. */
+    private fun codeUnderButton(tree: JTree): TextPos {
+        val button = renderer.hotspots(tree, 0).single { it.hotspot is TaskTreeRenderer.Hotspot.CopyCode }.bounds
+        return renderer.caretAt(tree, Point(button.x - 1, button.y + button.height - 1))!!.pos
+    }
+
+    /** El botón no tapa código: con una línea larga, la primera se recorta antes que las demás. */
+    @Test
+    fun `el boton no tapa la primera linea`() {
+        val long = "x".repeat(400)
+        val task = task("Titulo\n```\n$long\n$long\n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val lines = renderer.paintedLines(tree, 0)
+        val first = lines[2]!!
+        val second = lines[3]!!
+        assertTrue("con puntos suspensivos: $first", first.endsWith(TitleWrap.ELLIPSIS))
+        assertTrue("$first frente a $second", first.length < second.length)
+
+        val under = codeUnderButton(tree)
+        assertEquals("es la primera de codigo", 2, under.line)
+        assertTrue("el texto acaba antes del boton: ${under.offset} >= ${first.length}", under.offset >= first.length)
+    }
+
+    /** Un recuadro corto se ensancha lo justo para que el botón no pise el texto. */
+    @Test
+    fun `un bloque corto deja sitio al boton`() {
+        val task = task("Titulo\n```\nls\n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val text = renderer.paintedLines(tree, 0)[2]!!
+        assertEquals("${pad}ls", text)
+        val under = codeUnderButton(tree)
+        assertEquals(2, under.line)
+        assertTrue("el texto acaba antes del boton: ${under.offset}", under.offset >= text.length)
+    }
+
+    private fun copyTextOf(tree: JTree): String =
+        (renderer.hotspots(tree, 0).single { it.hotspot is TaskTreeRenderer.Hotspot.CopyCode }.hotspot as TaskTreeRenderer.Hotspot.CopyCode).text
+
+    /** Sin prosa, la primera línea del bloque es el título; el botón copia el bloque, no lo que queda. */
+    @Test
+    fun `con un cuerpo que es solo un bloque el boton copia tambien la linea del titulo`() {
+        val task = task("```\nnpm install\nnpm test\n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        assertEquals("npm install\nnpm test", copyTextOf(tree))
+    }
+
+    /** Lo que se pinta se adapta a la tarjeta; lo que se copia es el código: un Makefile sin tabuladores no compila. */
+    @Test
+    fun `el boton copia el codigo tal cual y no como se pinta`() {
+        val task = task("Titulo\n```make\nall:\n\tgo build  \n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        assertEquals("all:\n\tgo build  ", copyTextOf(tree))
+    }
+
+    /** La sangría de todas las líneas es la del sitio donde se pegó, no la del código. */
+    @Test
+    fun `el boton quita la sangria comun y deja la relativa`() {
+        val task = task("Titulo\n```\n\tuno\n\t\tdos\n\n```")
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        assertEquals("uno\n\tdos", copyTextOf(tree))
+    }
+
+    /** Un ancla más larga de lo que se pinta se copia entera, y como está en el fichero. */
+    @Test
+    fun `el boton de un ancla copia el rango entero`() {
+        val file = listOf("  uno", "\tdos") + (1..50).map { "  linea $it" }
+        val anchor = CodeAnchor.of("src/auth/Long.kt", 0, text = "  uno", span = file.size - 1)
+        val snippet = AnchorSnippet.of(anchor, file)!!
+        assertTrue(snippet.lines.size < file.size)
+        renderer.snippets = snippetsOf(anchor to snippet)
+        val task = task("Revisar el login", anchors = listOf(anchor))
+        val tree = treeWith(task)
+        expand(tree, task)
+
+        val copied = copyTextOf(tree).split("\n")
+        assertEquals(file.size, copied.size)
+        assertEquals("\tdos", copied[1])
     }
 }

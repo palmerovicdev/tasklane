@@ -19,7 +19,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 |---|---|
 | **Estados como pestañas** | Con su recuento en vivo, que respeta la búsqueda y el filtro. Cada pestaña recuerda su selección y sus grupos plegados, y la última abierta vuelve al reabrir. Si no caben, la fila se desplaza de lado |
 | **Una tarjeta por tarea** | Franja de prioridad, casilla para completar, título en hasta tres líneas, una línea del cuerpo y distintivos: prioridad, anclas de código, vencimiento, etiquetas, enlaces e imágenes, y fecha |
-| **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas, y bloques de código entre vallas con la fuente del editor; las tareas cerradas salen tachadas |
+| **Markdown en la tarjeta** | Negrita, cursiva, `código` y tachado con su estilo y sin las marcas, y bloques de código entre vallas con la fuente del editor y botón de copiar; las tareas cerradas salen tachadas |
 | **Enlaces de un clic** | En el título y en cualquier línea del cuerpo, también en la gris. Acortados al pintarse, enteros al abrirse; el contador los lista todos |
 | **Desplegar la tarjeta** | Para leer el cuerpo entero y ver sus capturas sin salir de la lista; un clic en una captura la amplía |
 | **Ver una captura mientras programas** | La ventana de una captura ampliada se **fija** con la chincheta de su cabecera: se queda encima del editor y deja de cerrarse al pulsar fuera |
@@ -33,7 +33,7 @@ queda ahí — en `.idea/tasklane/`, junto al código al que se refiere.
 | **Filtrar la vista** | Todas, abiertas, vencidas o marcadas, sumado a la búsqueda |
 | **Buscar con operadores** | En el cuerpo entero, sin distinguir mayúsculas ni acentos, ordenado por relevancia: `state:` `p:` `repo:` `is:` `has:` `file:` `#tag`, fechas (`due:week`, `closed:<7d`, `created:>2026-09-01`) y negación con `-`. Con autocompletado de operadores y valores. También desde `⇧⇧` |
 | **Archivar lo terminado** | Esconder lo cerrado hace más de N días, con el pie de la lista diciendo cuántas y un enlace para verlas |
-| **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas, enlaces e imágenes que se pegan, se sueltan o se eligen |
+| **Escribir en Markdown** | Un mismo diálogo para crear y editar, con barra de formato, listas que siguen solas con `Enter`, marcas que rodean lo seleccionado, enlaces e imágenes que se pegan, se sueltan o se eligen |
 | **Listas de comprobación** | `- [ ] algo` se pinta como casilla y se marca con un clic desde la tarjeta |
 | **Orden manual** | Por estado: arrastrar por el asa de la tarjeta o `⌘⇧↑/↓` |
 | **Vencimiento y etiquetas** | Preajustes o calendario; lo vencido se pinta en rojo y **un aviso dice** qué vence hoy o ya venció. Etiquetas como fichas, con las del repositorio sugeridas al escribir o con un clic en el campo, escritas también como `#api` en el texto de la tarea, y color opcional, que rellena la ficha; un clic en una de la tarjeta filtra por ella. Las dos cosas, también desde el menú y para toda una selección con *Due ▸* y *Tags ▸* |
@@ -204,6 +204,11 @@ El título y la descripción se pintan **en Markdown**: `**negrita**`, `*cursiva
 no son cursiva a propósito —`un_nombre_asi` es identificador mucho más a menudo—, y
 `2 * 3 * 4` sigue siendo una multiplicación.
 
+Los bloques de código entre vallas llevan en la **esquina de arriba a la derecha un botón de
+copiar**, que copia el bloque entero sin pasar por la selección; también el código de un ancla, y
+también en la tarjeta plegada, que enseña una sola línea del bloque. Una notificación confirma
+que se ha copiado, igual que al pulsar el botón de copiar el texto de la tarea.
+
 Los enlaces se abren con **un clic** desde la tarjeta, sin entrar a editar, estén en el
 título o en cualquier línea del cuerpo; el doble clic sigue siendo «abrir la tarea» en todo
 lo demás. Toda la tarjeta responde al ratón, no sólo la parte con letras.
@@ -337,6 +342,8 @@ del editor: una tarea apuntada de prisa no nace distinta de una escrita con calm
 |---|---|
 | Cuerpo | Markdown. La primera línea con texto es el título |
 | Barra de formato | Negrita, cursiva, código, enlace, imagen, lista con viñetas, lista numerada y lista de comprobación |
+| `Enter` en una lista | Sigue la lista: el número siguiente —los de detrás suben si chocan—, otra viñeta u otra casilla sin marcar. Sobre una marca vacía la acaba, o sube un nivel si está anidada |
+| Teclear una marca sobre lo seleccionado | `` ` `` lo pone como código, y a la tercera comilla es un bloque en sus propias líneas; `*`, `**` y `***` lo ponen en cursiva, negrita o las dos |
 | Imágenes | Se pegan, se sueltan en la zona de abajo o se eligen del disco. Ver [Imágenes](#imágenes) |
 | Estado y prioridad | Desplegables; el estado sale de la pestaña desde la que se abrió |
 | Vencimiento | Preajustes o calendario propio |

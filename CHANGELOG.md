@@ -10,6 +10,35 @@ Todas las versiones publicables del plugin. El formato sigue
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.32.0]
+Escribir Markdown y leer código, pedida por el usuario a la vista de un `behavior` pegado a su
+recuadro y de un bloque de log que no se podía copiar de una vez.
+### Añadido
+- **`Enter` sigue las listas en el diálogo.** Tras `1. algo` pone `2. `, tras `- algo` otro `- ` y
+  tras una casilla, marcada o no, otra `- [ ] ` sin marcar. Se respetan la sangría, el marcador
+  (`-`, `*`, `+`), el delimitador (`1.`, `1)`) y los ceros de delante (`007.` → `008.`).
+  - Con el cursor en medio del texto, lo de la derecha baja a la línea nueva.
+  - Los números de detrás que ya no valdrían suben uno, hasta el primero que no choque; los
+    hijos más sangrados y los bloques de código no se tocan.
+  - Sobre una marca vacía la lista se acaba: se borra la marca o, si está anidada, sube un nivel.
+  - Dentro de un bloque de código, en una línea horizontal (`- - -`) o con el cursor en la marca
+    o delante de ella, `Enter` es un salto de línea normal.
+  - Un `#tag` o un trigger al final del elemento se capturan al pulsar `Enter`, como en cualquier
+    otra línea.
+- **Las marcas rodean lo seleccionado.** Con texto seleccionado, `` ` `` lo pone entre comillas y
+  la selección se queda dentro, así que pulsar otra vez sigue: la tercera comilla lo convierte en
+  un bloque, con cada valla en su línea. `*` va de cursiva a negrita y a las dos. Varias líneas son
+  un bloque desde la primera comilla.
+- **Botón de copiar en los bloques de código** de la tarjeta, en la esquina de arriba a la
+  derecha: copia el bloque entero y tal como está escrito —con sus tabuladores, sólo sin la
+  sangría que llevan todas sus líneas—, también el de un ancla, aunque la tarjeta sólo enseñe sus
+  primeras líneas, y también desde la tarjeta plegada. Se llega con el tabulador como a lo demás.
+- **Una notificación dice que se ha copiado**, al pulsar el botón del bloque y el de copiar el
+  texto de la tarea. Sólo se anuncia lo que ha llegado al portapapeles; si no, dice que falló.
+### Cambiado
+- **El código respira.** El código en línea lleva aire a los lados y los bloques, por los cuatro
+  lados. Ese aire no se copia al seleccionar.
+Sin cambio de formato.
 ## [2.31.0]
 
 Los distintivos de la tarjeta se leen como lo que son, pedida por el usuario a la vista de una
