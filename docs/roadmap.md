@@ -45,6 +45,7 @@ Propuestas de revisiones anteriores que se eligieron:
 | ✅ | P5 · Compartir tareas (importar un archivo)             | `2.28.0` |
 | ✅ | Triggers de estado, en cualquier sitio y hechos pastilla | `2.30.0` |
 | ✅ | Prioridad en pastilla y contadores con icono en la tarjeta | `2.31.0` |
+| ✅ | `Enter` sigue las listas, las marcas rodean la selección y botón de copiar en los bloques | `2.32.0` |
 
 ---
 

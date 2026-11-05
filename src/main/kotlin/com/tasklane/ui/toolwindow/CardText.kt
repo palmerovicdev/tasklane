@@ -108,19 +108,20 @@ internal object CardTextSelection {
     fun selectedText(tree: JTree, renderer: TaskTreeRenderer): String? {
         val selection = renderer.selection?.takeIf { !it.isEmpty } ?: return null
         val row = rowOf(tree, selection.id) ?: return null
-        val lines = renderer.cardText(tree, row)
+        val lines = renderer.paintedLines(tree, row)
         if (lines.isEmpty()) return null
 
         val from = selection.from
         val to = selection.to
         val first = from.line.coerceIn(0, lines.size - 1)
         val last = to.line.coerceIn(first, lines.size - 1)
-        return (first..last).joinToString("\n") { index ->
-            val text = lines[index]
+        // Las posiciones cuentan lo pintado, relleno del código incluido; lo que se pega, no.
+        return (first..last).mapNotNull { index ->
+            val text = lines[index] ?: return@mapNotNull null
             val start = if (index == from.line) from.offset.coerceIn(0, text.length) else 0
             val end = if (index == to.line) to.offset.coerceIn(start, text.length) else text.length
-            text.substring(start, end)
-        }.takeIf { it.isNotEmpty() }
+            text.substring(start, end).replace(Run.PAD.toString(), "")
+        }.joinToString("\n").takeIf { it.isNotEmpty() }
     }
 
     fun copy(text: String) {

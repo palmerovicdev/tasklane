@@ -84,6 +84,21 @@ class CodeFence {
             return expanded.map { if (it.length >= common) it.substring(common) else "" }
         }
 
+        /**
+         * El texto que se copia de un bloque (2.32.0), que **no** es lo que pinta [dedent]: aquello
+         * se adapta a la tarjeta, y un Makefile con los tabuladores hechos espacios ya no compila.
+         * Sólo se quitan las líneas en blanco de los bordes y los blancos que llevan delante todas
+         * las líneas, que son del sitio donde se pegó; el resto, byte a byte.
+         */
+        fun copyText(lines: List<String>): String {
+            val kept = lines.dropWhile(String::isBlank).dropLastWhile(String::isBlank)
+            val common = kept.filter(String::isNotBlank)
+                .map { line -> line.takeWhile { it == ' ' || it == '\t' } }
+                .reduceOrNull(String::commonPrefixWith)
+                .orEmpty()
+            return kept.joinToString("\n") { it.removePrefix(common) }
+        }
+
         private const val TAB = "    "
     }
 }

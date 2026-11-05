@@ -49,6 +49,7 @@ import java.awt.geom.RoundRectangle2D
 import java.text.NumberFormat
 import java.time.Instant
 import java.util.IdentityHashMap
+import javax.swing.Icon
 import javax.swing.JPanel
 import javax.swing.JTree
 import javax.swing.JViewport
@@ -394,7 +395,17 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
     private val meta = JPanel(ChipRow()).apply { isOpaque = false }
 
-    private val lines = JPanel(RowStack()).apply { isOpaque = false }
+    /**
+     * Las líneas de la tarjeta y, encima de ellas, los botones de copiar de los bloques de
+     * código. El botón se pinta aquí y no dentro de una línea porque es más alto que el relleno
+     * del recuadro: ocupa ese relleno y parte de la primera línea de código. Ver [codeButtons].
+     */
+    private val lines = object : JPanel(RowStack()) {
+        override fun paintChildren(g: Graphics) {
+            super.paintChildren(g)
+            for (button in codeButtons()) CODE_COPY_ICON.paintIcon(this, g, button.bounds.x, button.bounds.y)
+        }
+    }.apply { isOpaque = false }
 
     init {
         // El panel base es un BorderLayout con el checkbox al oeste y el texto al
@@ -438,6 +449,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
             val extra = line { tree, _ ->
                 val runs = pendingCard.getOrNull(index + 1).orEmpty()
                 useCodeFont(this, runs.any { it.code })
+                (this as CardLine).filler = runs.any { it.filler }
                 appendRuns(tree, this, runs)
             }
             // Detrás de la primera línea y de las que ya hay, delante de las
@@ -845,6 +857,12 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * delante. Sólo plegada, que enseña una; desplegada, mover una línea la sacaría de la
      * columna de las demás. [matched] distingue el código del cuerpo, que se resalta, del
      * de un bloque anclado, que no es lo que se buscó.
+     *
+     * **El recuadro lleva aire y un botón de copiar** (2.32.0): una columna de [Run.PAD] a cada
+     * lado, una línea baja de relleno arriba y abajo —si caben, que plegada no— y sitio en
+     * la primera línea para el botón de la esquina, que no puede tapar código: si esa línea es
+     * larga se recorta antes que las demás, y si el bloque es corto se ensancha. Las líneas
+     * siguen midiendo todas lo mismo, que es lo que las junta en un recuadro.
      */
     private fun codeLines(
         block: DetailBlock.Code,
@@ -860,20 +878,28 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         } else {
             SimpleTextAttributes(background, null, null, SimpleTextAttributes.STYLE_PLAIN or SimpleTextAttributes.STYLE_OPAQUE)
         }
-        val columns = if (available > 0) (available / measureCode("m").coerceAtLeast(1)).coerceAtLeast(MIN_CODE_COLUMNS) else Int.MAX_VALUE
-        // Una columna de aire a la derecha de la línea más larga: sin ella el recuadro
-        // acaba pegado a la última letra.
-        val width = minOf(block.lines.maxOf { it.length } + 1, columns)
-        val shown = block.lines.drop(from).take(budget)
-        val lines = shown.map { line ->
+        val column = measureCode("m").coerceAtLeast(1)
+        // La primera y la última columna son del relleno, no del código.
+        val columns = if (available > 0) (available / column).coerceAtLeast(MIN_CODE_COLUMNS) - 2 else Int.MAX_VALUE
+        val framed = budget >= FRAMED_BUDGET
+        val shown = block.lines.drop(from).take(if (framed) budget - 2 else budget)
+        // Lo que ocupa el botón, en columnas: el recuadro se mide en caracteres.
+        val button = (CODE_COPY_ICON.iconWidth + 2 * JBUI.scale(CODE_COPY_PAD)) / column + 1
+        val width = minOf(maxOf(block.lines.maxOf { it.length }, shown.firstOrNull().orEmpty().length + button), columns)
+        val copy = block.source
+        val code = shown.mapIndexed { index, line ->
+            val room = if (index == 0) (width - button).coerceAtLeast(1) else width
             val text = when {
-                line.length < width -> line.padEnd(width)
-                window -> shifted(line, width)
-                else -> line.take(width - 1) + TitleWrap.ELLIPSIS
+                line.length <= room -> line
+                window -> shifted(line, room)
+                else -> line.take(room - 1) + TitleWrap.ELLIPSIS
             }
-            listOf(Run(text, style, matched = matched, code = true))
+            val corner = copy.takeIf { index == 0 && !framed }
+            listOf(Run(Run.PAD + text.padEnd(width) + Run.PAD, style, matched = matched, code = true, copy = corner))
         }
-        return TitleWrap.Fit(lines, block.lines.size > shown.size || shown.any { it.length >= width })
+        fun filler(corner: String?) = listOf(Run(" ".repeat(width + 2), style, code = true, filler = true, copy = corner))
+        val lines = if (framed) listOf(filler(copy)) + code + listOf(filler(null)) else code
+        return TitleWrap.Fit(lines, block.lines.size > shown.size || shown.any { it.length > width })
     }
 
     /**
@@ -913,7 +939,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 break
             }
             out += ellipsize(listOf(Run(anchor.label, ANCHOR_STYLE, tag = BlockCaption(anchor))), available).lines
-            val code = codeLines(DetailBlock.Code(snippet.lines), available, room - out.size)
+            val code = codeLines(DetailBlock.Code(snippet.lines, source = snippet.source), available, room - out.size)
             out += code.lines
             clipped = clipped || code.clipped
             if (snippet.hidden > 0 && room - out.size > 0) {
@@ -1037,7 +1063,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         fun flush() {
             if (pending.isEmpty()) return
-            runs += Run(pending.toString(), emphasize(base, current), matched = matched)
+            // El fondo del código en línea no puede acabar justo en la letra (2.32.0).
+            val text = if (current?.code == true) "${Run.PAD}$pending${Run.PAD}" else pending.toString()
+            runs += Run(text, emphasize(base, current), matched = matched)
             pending.setLength(0)
         }
 
@@ -1227,7 +1255,15 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                 continue
             }
             if (from > 0) out += run.withText(text.substring(0, from))
-            out += Run(text.substring(from, to), selectedStyle(run.style, background), run.link, code = run.code, tag = run.tag)
+            out += Run(
+                text.substring(from, to),
+                selectedStyle(run.style, background),
+                run.link,
+                code = run.code,
+                tag = run.tag,
+                filler = run.filler,
+                copy = run.copy,
+            )
             if (to < text.length) out += run.withText(text.substring(to))
         }
         return out
@@ -1740,6 +1776,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
             is AttachmentId -> Hotspot.Image(task.repo, tag)
             is CopyTask -> Hotspot.Copy(tag.task)
+            is CodeCopy -> Hotspot.CopyCode(tag.text)
             is CheckTag -> Hotspot.Check(tag.task, tag.offset)
             is TagChip -> Hotspot.Tag(tag.name)
             else -> null
@@ -1764,6 +1801,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         val bounds = paintedRowBounds(tree, row) ?: return emptyList()
         prepare(tree, node, row, bounds)
         meta.doLayout()
+        val buttons = codeButtons()
 
         val out = mutableListOf<Placed>()
         fun add(tag: Any?, x: Int, y: Int, width: Int, height: Int) {
@@ -1779,8 +1817,13 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
                     if (!chip.isVisible || chip.width <= 0 || chip !is SimpleColoredComponent) continue
                     sweep(chip) { tag, from, to -> add(tag, meta.x + chip.x + from, meta.y + chip.y, to - from, chip.height) }
                 }
-                line is SimpleColoredComponent ->
+                line is SimpleColoredComponent -> {
                     sweep(line) { tag, from, to -> add(tag, line.x + from, line.y, to - from, line.height) }
+                    for (button in buttons) {
+                        if (button.line !== line) continue
+                        add(CodeCopy(button.text), button.bounds.x, button.bounds.y, button.bounds.width, button.bounds.height)
+                    }
+                }
             }
         }
         return out
@@ -1818,6 +1861,9 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         class Images(val repo: RepoKey, val ids: List<AttachmentId>) : Hotspot
         class Copy(val task: Task) : Hotspot
 
+        /** El botón de un bloque de código (2.32.0): [text] son sus líneas, sin el relleno. */
+        class CopyCode(val text: String) : Hotspot
+
         /** Una casilla de lista de comprobación: [offset] es dónde está su `x` en el cuerpo. */
         class Check(val task: Task, val offset: Int) : Hotspot
 
@@ -1826,6 +1872,35 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
     }
 
     private class CopyTask(val task: Task)
+
+    private class CodeCopy(val text: String)
+
+    /** Un botón de copiar pintado: la línea en cuya esquina cae y dónde, en coordenadas de [lines]. */
+    private class CodeButton(val line: SimpleColoredComponent, val text: String, val bounds: Rectangle)
+
+    /**
+     * Los botones de la tarjeta montada: uno por cada línea que lleve su [Run.copy], a la derecha
+     * del recuadro y dentro de él. Lo usan quien pinta y quien resuelve el clic, así que el botón
+     * responde exactamente donde se ve.
+     */
+    private fun codeButtons(): List<CodeButton> {
+        if (pendingCard.none { runs -> runs.any { it.copy != null } }) return emptyList()
+        val components = textComponents()
+        val out = mutableListOf<CodeButton>()
+        for ((index, runs) in pendingCard.withIndex()) {
+            val text = runs.firstNotNullOfOrNull { it.copy } ?: continue
+            val line = components.getOrNull(index)?.takeIf { it.isVisible && it.width > 0 } ?: continue
+            val box = runs.sumOf { widthOf(it, it.text) }
+            val x = line.x + textInset(line) + box - JBUI.scale(CODE_COPY_PAD) - CODE_COPY_ICON.iconWidth
+            val y = if (runs.any { it.filler }) {
+                line.y + JBUI.scale(CODE_COPY_TOP)
+            } else {
+                line.y + (line.height - CODE_COPY_ICON.iconHeight) / 2
+            }
+            out += CodeButton(line, text, Rectangle(x, y, CODE_COPY_ICON.iconWidth, CODE_COPY_ICON.iconHeight))
+        }
+        return out
+    }
 
     private class TagChip(val name: String)
 
@@ -1858,6 +1933,8 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
         var x = point.x - bounds.x - lines.x
         var y = point.y - bounds.y - lines.y
+        // Antes que las líneas: el botón está pintado encima de ellas.
+        codeButtons().firstOrNull { it.bounds.contains(x, y) }?.let { return CodeCopy(it.text) }
         var line = childAt(lines, x, y) ?: return null
         // Una vista previa no lleva fragmentos: su «etiqueta» es la imagen misma, y
         // sólo cuando de verdad se está viendo — un marcador de carga no amplía nada.
@@ -2022,14 +2099,25 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * lo que se copia: las líneas son las de la pantalla, así que lo que se pega es
      * exactamente lo que se marcó.
      */
-    fun cardText(tree: JTree, row: Int): List<String> {
+    fun cardText(tree: JTree, row: Int): List<String> =
+        paintedLines(tree, row).filterNotNull().map { it.replace(Run.PAD.toString(), "") }
+
+    /**
+     * Las líneas de la tarjeta [row] tal y como las cuentan las posiciones de una selección: con
+     * el relleno [Run.PAD] y `null` en las líneas de relleno de un bloque, que no tienen texto.
+     */
+    fun paintedLines(tree: JTree, row: Int): List<String?> {
         val node = tree.getPathForRow(row)?.lastPathComponent as? TaskNode ?: return emptyList()
         val bounds = paintedRowBounds(tree, row) ?: return emptyList()
         prepare(tree, node, row, bounds)
         // El relleno de las líneas de código es para el recuadro, no parte del código.
         return pendingCard.map { runs ->
             val text = runs.joinToString("") { it.text }
-            if (runs.any { it.code }) text.trimEnd() else text
+            when {
+                runs.any { it.filler } -> null
+                runs.any { it.code } -> text.trimEnd()
+                else -> text
+            }
         }
     }
 
@@ -2155,7 +2243,7 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
      * por un `SimpleColoredComponent` a secas porque es lo que le da los colores de
      * selección y de foco del tema.
      */
-    private fun line(fill: SimpleColoredComponent.(JTree, Boolean) -> Unit) = object : ColoredTreeCellRenderer() {
+    private fun line(fill: SimpleColoredComponent.(JTree, Boolean) -> Unit) = object : CardLine() {
         override fun customizeCellRenderer(
             tree: JTree,
             value: Any?,
@@ -2167,6 +2255,14 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
         ) {
             fill(tree, selected)
         }
+    }
+
+    /** Una línea del pozo. Con [filler] es el relleno de un bloque de código: mide lo que el relleno. */
+    private abstract class CardLine : ColoredTreeCellRenderer() {
+        var filler = false
+
+        override fun getPreferredSize(): Dimension =
+            super.getPreferredSize().also { if (filler) it.height = JBUI.scale(CODE_PAD_V) }
     }
 
     /** Un distintivo de la línea de metadatos. */
@@ -2235,6 +2331,19 @@ internal class TaskTreeRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
          */
         const val UNCHECKED = "\u2610 "
         const val CHECKED = "\u2611 "
+
+        /** El botón de copiar de un bloque de código, el mismo icono que el de copiar la tarea. */
+        val CODE_COPY_ICON: Icon get() = AllIcons.Actions.Copy
+
+        /** El alto del relleno de arriba y de abajo de un bloque de código. */
+        const val CODE_PAD_V = 6
+
+        /** Lo que deja el botón de copiar a la derecha y por encima, dentro del recuadro. */
+        const val CODE_COPY_PAD = 4
+        const val CODE_COPY_TOP = 3
+
+        /** Cuántas líneas hacen falta para pintar el relleno: arriba, una de código y abajo. */
+        const val FRAMED_BUDGET = 3
 
         /** El estilo que identifica el tramo de la casilla. Se compara por identidad. */
         val CHECK_STYLE = SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, null)

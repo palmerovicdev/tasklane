@@ -119,7 +119,8 @@
                 strikethrough show their style, not their marks. Underscores are left alone,
                 because <code>a_name_like_this</code> is an identifier far more often than it is
                 italics. Fenced code blocks are drawn as code, in the editor font, with nothing
-                inside them interpreted. Completed tasks are struck through.</li>
+                inside them interpreted, and a <b>copy button</b> in their top right corner copies
+                the whole block. Completed tasks are struck through.</li>
             <li><b>Links open with a single click</b>, in the title or anywhere in the body
                 &mdash; even in its greyed-out lines. Plain URLs, <code>www.</code> addresses
                 and Markdown links are recognised, shown shortened
@@ -191,6 +192,10 @@
                 different from one written calmly.</li>
             <li><b>Write in Markdown</b> with a formatting toolbar: bold, italics, code, link,
                 image, bulleted list, numbered list and checklist.</li>
+            <li><b>Lists that continue</b>: <code>Enter</code> adds the next number, bullet or
+                unchecked box, moves later numbers up to make room, and ends the list on an empty
+                item. Typing <code>`</code> or <code>*</code> over a selection wraps it: inline
+                code, a code block on the third backtick, then italics, bold or both.</li>
             <li><b>Images you can paste, drop or pick</b>: a screenshot from the clipboard, an
                 image file copied or dragged in, or one chosen from disk. It lands under the line
                 your caret was on and shows right there as a preview; the text only shows
@@ -534,6 +539,15 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Tasklane" displayType="BALLOON"/>
+        <postStartupActivity implementation="com.tasklane.globalquickadd.GlobalQuickAddActivity"/>
+        <applicationConfigurable id="com.tasklane.globalQuickAdd" parentId="tools"
+                                 displayName="Tasklane Global Quick Add"
+                                 instance="com.tasklane.globalquickadd.GlobalQuickAddConfigurable"/>
+
+        <!-- Enter en una lista, en el cuerpo de la tarea. Es de todos los editores porque al
+             cuerpo no le llega ningun otro: no tiene PSI. Sin la marca del cuerpo pasa de largo. -->
+        <editorActionHandler action="EditorEnter" order="first"
+                             implementationClass="com.tasklane.ui.editor.ListEnterHandler"/>
 
         <toolWindow
             id="Tasklane"

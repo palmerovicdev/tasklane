@@ -32,6 +32,14 @@ class TitleWrapTest {
     }
 
     @Test
+    fun `el relleno del codigo no se separa de su palabra y si cuenta para decidir si cabe`() {
+        val code = "${Run.PAD}abc${Run.PAD}"
+        // "uno " y los 5 de la palabra rellena: sin contar el relleno de detrás cabrían en 8.
+        assertEquals(listOf("uno ", code), wrap("uno $code", 8))
+        assertEquals(listOf("uno $code"), wrap("uno $code", 9))
+    }
+
+    @Test
     fun `corta por palabras y no por caracteres`() {
         // 10 px de ancho: "uno dos" mide 7 y "uno dos tres" mide 12.
         assertEquals(listOf("uno dos ", "tres"), wrap("uno dos tres", 10))

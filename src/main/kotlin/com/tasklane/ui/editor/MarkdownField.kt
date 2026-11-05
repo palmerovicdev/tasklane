@@ -71,6 +71,10 @@ internal class MarkdownField(
         preferredSize = JBUI.size(WIDTH, HEIGHT)
     }
 
+    init {
+        SurroundTypedHandler.install(parent)
+    }
+
     /**
      * Quien adjunta imágenes. Es nulo hasta que la plataforma crea el editor —lo hace
      * al entrar el campo en la jerarquía de componentes—, así que los tres gestos que
@@ -233,6 +237,8 @@ internal class MarkdownField(
     }
 
     private fun configure(editor: EditorEx) {
+        // Lo que hace que `Enter` y las marcas tecleadas ayuden aquí y en ningún otro editor.
+        editor.putUserData(BodyEditorHandlers.BODY_EDITOR, true)
         // `EditorTextField` no longer reliably inherits the surrounding Swing
         // component colors on the newer IDE themes: the text can fall back to black
         // over a dark, transparent editor. Bind both values to the IDE scheme/theme

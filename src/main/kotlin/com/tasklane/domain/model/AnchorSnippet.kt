@@ -13,12 +13,13 @@ import com.tasklane.domain.text.CodeFence
  * [lines] son las primeras del bloque, sin la sangría común —en una tarjeta estrecha
  * cada columna cuenta, y la sangría es la del sitio del fichero, no la del código— y
  * como mucho [MAX_LINES]; [total] es cuántas tiene el bloque entero, para poder decir
- * cuántas se quedan fuera.
+ * cuántas se quedan fuera. [source] es lo que copia el botón del bloque: el rango entero y tal
+ * como está en el fichero, ver [CodeFence.copyText].
  *
  * Kotlin puro sobre un accesor de líneas, como [AnchorResolver]: la plataforma sólo
  * pone el `Document`.
  */
-data class AnchorSnippet(val lines: List<String>, val total: Int) {
+data class AnchorSnippet(val lines: List<String>, val total: Int, val source: String = lines.joinToString("\n")) {
 
     /** Las líneas del bloque que no están en [lines]. */
     val hidden: Int get() = total - lines.size
@@ -40,7 +41,7 @@ data class AnchorSnippet(val lines: List<String>, val total: Int) {
             val range = AnchorResolver.range(anchor, lineCount, lineAt)
             val last = minOf(range.last, range.first + max.coerceAtLeast(1) - 1)
             val lines = CodeFence.dedent((range.first..last).map(lineAt))
-            return AnchorSnippet(lines, range.last - range.first + 1)
+            return AnchorSnippet(lines, range.last - range.first + 1, CodeFence.copyText(range.map(lineAt)))
         }
 
         fun of(anchor: CodeAnchor, lines: List<String>, max: Int = MAX_LINES): AnchorSnippet? =
