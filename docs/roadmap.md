@@ -16,6 +16,12 @@ Cada iteración elegida sale como **versión media** (ver la regla de versiones 
 
 ---
 
+## Preparada para publicación
+
+- **2.33.0 · Atajo global configurable de Quick Add.** Implementado para Windows, macOS,
+  X11 y escritorios Wayland con portal compatible. La publicación y la validación real por
+  escritorio se registran por separado en [el informe de release](release-2.33.0.md).
+
 ## Hechas
 
 Propuestas de revisiones anteriores que se eligieron:

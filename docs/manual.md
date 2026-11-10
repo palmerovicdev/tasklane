@@ -67,7 +67,7 @@ O con el zip de una [release de GitHub](https://github.com/palmerovicdev/tasklan
 que es lo que produce este repositorio:
 
 ```bash
-./gradlew buildPlugin          # -> build/distributions/tasklane-2.29.0.zip
+./gradlew buildPlugin          # -> build/distributions/tasklane-2.33.0.zip
 ```
 
 *Settings → Plugins → ⚙ → Install Plugin from Disk…*
@@ -524,6 +524,28 @@ si el fichero es el del editor activo y la línea se ve —desde *from Here* o `
 siempre—; si no, espera a la próxima. Con las marcas apagadas no sale.
 
 ## Quick Add
+
+### Atajo del sistema (2.33.0)
+
+Además del atajo interno, *Settings → Tools → Tasklane Global Quick Add* permite activar
+un atajo que funciona con otra aplicación enfocada. El IDE debe seguir abierto.
+Está desactivado por defecto y no modifica el Keymap.
+
+Se pueden elegir los modificadores y la tecla, usar el último proyecto activo o fijar la
+ruta absoluta de un proyecto abierto. La tarea se crea en su repositorio activo; si el destino
+fijo está cerrado o el repositorio es de solo lectura, se avisa en lugar de escribir en otro.
+**Apply** guarda los cambios y registra el atajo; **Retry registration** reintenta la
+configuración guardada. El estado muestra el registro, los conflictos o la falta de soporte.
+
+Windows y macOS usan atajos registrados; X11, capturas pasivas; Wayland, el portal del
+escritorio, que puede pedir permiso, cambiar la combinación o rechazarla. El escritorio
+controla también si permite traer el IDE al frente. No hay captura general del teclado ni
+sustitución por XWayland. Windows reserva F12 y macOS no admite F21–F24 en este adaptador.
+Los ajustes se guardan localmente, sin Settings Sync.
+
+La [guía de Global Quick Add](global-quick-add.md) detalla límites y comprobaciones.
+
+### Atajo dentro del IDE
 
 `⌘⌥R` abre **el mismo diálogo** que *New Task*, desde cualquier sitio del IDE y sin
 pasar por la Tool Window. Hasta la `0.6.7` abría un popup compacto propio: se escribía

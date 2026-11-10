@@ -8,11 +8,15 @@ Branch: codex/global-quick-add. Delivery: ask-on-risk (no publishing). Runner: .
 - S3: "que funcione en todos los sistemas" Target Windows, macOS, Linux X11 and supported Wayland portals. The user accepted the explicit Wayland exception: "si, dale metele" in response to desktop-dependent support and visible unavailable status when support is absent. No keyboard surveillance or permission bypass.
 - S4: Verification must distinguish deterministic policy/lifecycle tests from real desktop integration. Real foreground behavior requires installed IDE testing on each target desktop; unsupported desktops remain explicitly unavailable.
 
+- S5: "papa, sube version y haz todo para poder subir a marketplace" Prepare version 2.33.0, release notes/changelog/docs, full release ZIP and compatibility validation. No publishing authorized.
+
 ## Tasks
 - T1 [S1,S2]: inline — implementation and deterministic tests passed; native UI validation pending; no commit.
 - T2 [S3,S4]: delegated — Windows/macOS implementations and 9 mock/ABI tests passed; desktop checks pending; no commit.
 - T3 [S3,S4]: delegated — XCB and real D-Bus portal implementations and 15 tests passed; desktop checks pending; no commit.
 - T4 [S1–S4]: inline coordination / delegated long checks and independent verification — docs, integration tests, build and review; pending; Risk items 4 (async lifecycle), 5 (native dependencies), 6 (foreground behavior requires real desktops).
+
+- T5 [S5]: inline metadata/docs; delegated long release checks; pending.
 
 ## Log
 - L1: "hay alguna forma de hacer que desde cualquier lugar no solo dentro del ide e incluso si el ide no esta enfocado que se pueda abrir el dialog de agregar todo?"
@@ -30,3 +34,6 @@ Branch: codex/global-quick-add. Delivery: ask-on-risk (no publishing). Runner: .
 - L12: Controller coalescing RED reproduced 5 dialogs queued instead of 1; generation-tagged pending delivery fixed it. Canonical focused GREEN: 34 tests, zero failures/errors/skips. Full suite XML: 1,108 tests, zero failures/errors, 21 skipped (1,087 passed). Build worker completed but quota interrupted its final report; parent reran exact cached SDK test/buildPlugin command, exit 0, BUILD SUCCESSFUL (up-to-date). Cached SDK 2026.1.5 path override plus --no-configuration-cache avoids initial Gradle stall. Local SDK mode skips searchable-options generation by existing build policy.
 - L13: Package build/distributions/tasklane-2.32.0.zip exists (version unchanged from pre-existing edits). New runtime libraries dbus core/native-unixsocket 5.2.0 and slf4j-api2.0.17; JNA not packaged, provided by IDE. Native installed-IDE validation remains pending on macOS/Windows/X11/Wayland; don't claim end-to-end proof.
 - L14: Independent verifier still required for Risk 4/5/6. gpt-6.1-sol quota reached in build worker, so request user authorization for gpt-6-astra verifier rather than skip it. Native assess returned high/unassessable because untracked inventory must be declared; no review START or approval. Need isolate our candidate from pre-existing dirty changes and choose chain strategy before commits. No commits/push/PR. Native/Linux standalone scratch directories cleaned; logs /tmp/tasklane-global-final-check.log and /tmp/tasklane-global-baseline.log retained.
+
+- L15: "papa, sube version y haz todo para poder subir a marketplace". Found clean worktree at externally created commit 7bdf516 (message feat: version 2.33.0, actual pluginVersion still2.32.0). Preserve that commit; prepare metadata2.33.0 on top. All earlier dirty work is now part of HEAD. No history rewriting.
+- L16: Independent verification found two release blockers: controller generation check/CAS race dropping the first new activation (JDI reproduced), and X11 active-grab diversion of unrelated keys while trigger held (source/protocol). One correction batch added synchronized claimDelivery and XCB synchronous keyboard grab with immediate checked active ungrab and configured-key repeat sampling. Linux fake regression observed RED→GREEN,15 tests pass. Independent targeted recheck cleared both at their original evidence levels; native desktop proof remains pending. Release2.33.0 full build/Verifier running; no publication.

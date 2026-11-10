@@ -30,7 +30,7 @@ internal class GlobalQuickAddController(
                 if (shortcut == null || disposed) return@execute
                 shortcut.validate()
                 val handle = backend().register(shortcut) { token ->
-                    if (!disposed && version == generation.get() && pendingDelivery.compareAndSet(0, version)) {
+                    if (claimDelivery(version)) {
                         delivery.execute {
                             try {
                                 if (!disposed && version == generation.get()) activated(token)
@@ -52,6 +52,11 @@ internal class GlobalQuickAddController(
             }
         }
     }
+
+    // Configuration and acquisition share the same monitor. A stale callback must not
+    // claim the newly reset pending slot between its generation check and its CAS.
+    @Synchronized private fun claimDelivery(version: Long): Boolean =
+        !disposed && version == generation.get() && pendingDelivery.compareAndSet(0, version)
 
     @Synchronized override fun close() {
         if (disposed) return
