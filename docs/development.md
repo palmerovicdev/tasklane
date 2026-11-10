@@ -43,7 +43,7 @@ Community que descargar—, y ahí sí se detecta cualquier uso accidental de un
 
 ```bash
 ./gradlew test                             # tests de dominio, búsqueda, almacén y renderer, sin IDE
-./gradlew buildPlugin                      # -> build/distributions/tasklane-2.33.0.zip
+./gradlew buildPlugin                      # -> build/distributions/tasklane-2.34.0.zip
 ./gradlew runIde                           # lanza un IDE sandbox con el plugin
 ./gradlew verifyPluginProjectConfiguration # chequea targets y sinceBuild
 ./gradlew verifyPlugin -PlocalIdePath=     # Plugin Verifier (descarga IDEs completos)
@@ -59,20 +59,20 @@ por escenario en los tres sistemas. Los techos son los presupuestos de cada fase
 EDT, 50 ms para editar, 150 MB de heap— y no cifras de un portátil, así que un runner más
 lento no los rompe sin que algo haya empeorado. Deja las cifras de cada noche en un CSV.
 
-## Preparar la 2.33.0 para Marketplace
+## Preparar la 2.34.0 para Marketplace
 
-El paquete publicable es `build/distributions/tasklane-2.33.0.zip`. Generarlo con la
+El paquete publicable es `build/distributions/tasklane-2.34.0.zip`. Generarlo con la
 plataforma mínima, no con la ruta de un IDE local, para incluir las opciones de búsqueda:
 
 ```bash
 ./gradlew test verifyPluginProjectConfiguration buildPlugin verifyPlugin -PlocalIdePath= --no-configuration-cache
 ```
 
-Comprobar que el descriptor del ZIP y las notas indican `2.33.0`, que se incluye el índice
+Comprobar que el descriptor del ZIP y las notas indican `2.34.0`, que se incluye el índice
 de opciones y que el verificador no informa incompatibilidades con los IDEs seleccionados.
-Las pruebas unitarias no sustituyen la [comprobación real del atajo global](global-quick-add.md#verification-status)
-en Windows, macOS, X11 y Wayland. El informe de esta preparación está en
-[`release-2.33.0.md`](release-2.33.0.md); distingue resultados observados de pendientes.
+Las pruebas unitarias no sustituyen la comprobación real del autocompletado en el diálogo del IDE.
+El informe de esta preparación está en [`release-2.34.0.md`](release-2.34.0.md) y distingue
+los resultados observados de los pendientes.
 
 La firma utiliza la configuración existente, si se proporcionan las credenciales de firma.
 Preparar el ZIP no publica nada: la subida a Marketplace es una acción separada.

@@ -217,7 +217,8 @@
                 <code>#api</code>. <b>The field suggests the repository's tags</b> as you type,
                 or as soon as you click it, with how many tasks each has, so <code>#api</code>
                 and <code>#apis</code> do not grow side by side. Or tag as you write: type
-                <code>#api</code> and a space in the task text and it becomes a tag.</li>
+                <code>#</code> in the task text to suggest existing tags and choose one without
+                leaving the editor; <code>#api</code> followed by a space still becomes a tag.</li>
             <li><b>Code anchors as chips</b>, each one removable: captured from the editor, or
                 typed as <code>path:line</code> with the path completed as you type. A GitHub
                 <code>#L42</code> link or a stack trace's <code>(42)</code> works too.</li>

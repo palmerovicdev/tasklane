@@ -60,8 +60,9 @@ empty state here", "check this before I push". Too small for Jira or GitHub Issu
 - Type `!!!` and a space anywhere in the text and it turns into a *High* badge (`!!` Normal,
   `!` Low); `@doing` does the same for the state. `⌘⌥←/→` changes the state without leaving
   the keyboard. All triggers are configurable.
-- Type `#api` and a space and it becomes a tag. Click the tags field to see the
-  repository's tags with their counts, so `#api` and `#apis` don't both happen.
+- Type `#` in the task text to suggest existing repository tags; choose one to add it as a
+  chip without leaving the editor. `#api` followed by a space still becomes a tag. Click the
+  tags field to see the repository's tags and their counts.
 - In the list, `⌘V` turns copied text into one task per line, and a screenshot into a task
   with that image. Drop files from Finder or the project view. One `⌘Z` removes it all.
 

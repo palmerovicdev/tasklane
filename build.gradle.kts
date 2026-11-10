@@ -131,6 +131,14 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.34.0 &mdash; tag suggestions while you write</h3>
+            <ul>
+              <li>Type <code>#</code> in the task text to see the active repository's existing
+                  tags, with their colours and usage counts. Choose one to add it as a tag
+                  without leaving the editor.</li>
+              <li>Existing inline-tag and Markdown behaviour is unchanged. No task data format
+                  changes.</li>
+            </ul>
             <h3>2.33.0 &mdash; optional system-wide Quick Add</h3>
             <ul>
               <li>Open the existing <b>New Task</b> dialog while another application is focused,

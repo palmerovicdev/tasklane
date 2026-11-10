@@ -373,6 +373,9 @@ vencimiento y las etiquetas, además, desde el menú y para toda una selección:
   - **Un clic en el campo abre esa lista** sin escribir nada (2.29.0), y *Tags ▸ Add…* la
     abre al aparecer. Llegar con el tabulador no la abre: con la lista abierta Intro elige
     la primera, y quien tabula hasta ahí y pulsa Intro quiere aceptar.
+  - **Autocompletar desde el texto** (2.34.0): escribir `#` sugiere las etiquetas existentes
+    del repositorio activo, con sus colores y recuentos; elegir una la añade como ficha sin
+    salir del editor.
   - **Desde el texto de la tarea** (2.29.0): `#api` y un espacio, una coma o un salto de
     línea pasa a las fichas y sale del texto; una que se quede al final sin separador cuenta
     al aceptar. No son etiqueta `#123` —una incidencia—, `C#` ni una `#` dentro de código, y

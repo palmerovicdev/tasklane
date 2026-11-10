@@ -161,6 +161,7 @@ internal class TaskEditDialog(
         init()
         installEscape()
         installInlineTags()
+        InlineTagLookup(project, repo, config, bodyField, tagsField, disposable)
         installStateKeys()
     }
 

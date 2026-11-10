@@ -10,6 +10,15 @@ Todas las versiones publicables del plugin. El formato sigue
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.34.0]
+
+### Añadido
+- **Autocompletado de etiquetas en el texto de la tarea:** al escribir `#`, se sugieren las
+  etiquetas existentes del repositorio activo, con su color y número de tareas. Al elegir una,
+  pasa a las fichas sin salir del editor. También está disponible al editar una tarea.
+- Se mantienen la escritura de etiquetas con separadores y el texto Markdown, incluido el código.
+  No cambia el formato de los datos.
+
 ## [2.33.0]
 
 ### Añadido
