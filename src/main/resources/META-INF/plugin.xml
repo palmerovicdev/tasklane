@@ -444,6 +444,16 @@
                 configuring every project, and a direct link to the Keymap.</li>
         </ul>
 
+        <h3>Optional system-wide Quick Add</h3>
+        <p>With the IDE running, a configurable system shortcut opens the same task dialog
+            while another application is focused. Enable it in <b>Settings &rarr; Tools &rarr;
+            Tasklane Global Quick Add</b>, choose the key combination and the last active or a
+            fixed open project. Settings are local to this installation; the IDE Keymap is unchanged.</p>
+        <p>Windows, macOS and X11 use registered shortcuts or passive grabs. Wayland requires
+            a supported Global Shortcuts portal; the desktop controls consent, the effective
+            binding and foreground focus. Conflicts and unavailable support are reported explicitly.
+            Disabled by default; no whole-keyboard monitoring.</p>
+
         <h3>From anywhere in the IDE</h3>
         <ul>
             <li><b>Quick Add</b> with <code>&#8984;&#8997;R</code> / <code>Ctrl+Alt+R</code> opens

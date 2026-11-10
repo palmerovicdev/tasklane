@@ -87,4 +87,15 @@ class GlobalQuickAddControllerTest {
         backend.callback!!(null); ui.drain()
         assertEquals(2, calls)
     }
+    @Test fun `stale callback cannot occupy the new generation delivery slot`() {
+        val worker = Queue(); val ui = Queue(); val backend = Backend(); val calls = mutableListOf<String?>()
+        val controller = GlobalQuickAddController(worker, { backend }, { calls += it }, ui)
+        controller.configure(shortcut); worker.drain()
+        val stale = backend.callback!!
+        controller.configure(shortcut.copy(key = "T")); worker.drain()
+        stale("old")
+        backend.callback!!("current")
+        ui.drain()
+        assertEquals(listOf("current"), calls)
+    }
 }

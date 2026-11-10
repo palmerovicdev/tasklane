@@ -96,7 +96,7 @@ private object NativeX11DriverFactory : X11DriverFactory {
     }
 }
 
-private interface Xcb : Library {
+internal interface Xcb : Library {
     fun xcb_connect(display: String, screen: Pointer?): Pointer
     fun xcb_disconnect(connection: Pointer)
     fun xcb_connection_has_error(connection: Pointer): Int
@@ -108,6 +108,9 @@ private interface Xcb : Library {
     fun xcb_get_modifier_mapping(connection: Pointer): XcbCookie
     fun xcb_get_modifier_mapping_reply(connection: Pointer, cookie: XcbCookie, error: Pointer?): Pointer?
     fun xcb_grab_key_checked(connection: Pointer, ownerEvents: Byte, window: Int, modifiers: Short, key: Byte, pointerMode: Byte, keyboardMode: Byte): XcbCookie
+    fun xcb_ungrab_keyboard_checked(connection: Pointer, time: Int): XcbCookie
+    fun xcb_query_keymap(connection: Pointer): XcbCookie
+    fun xcb_query_keymap_reply(connection: Pointer, cookie: XcbCookie, error: Pointer?): Pointer?
     fun xcb_request_check(connection: Pointer, cookie: XcbCookie): Pointer?
     fun xcb_poll_for_event(connection: Pointer): Pointer?
 }
@@ -126,8 +129,8 @@ internal open class XcbScreenIterator : Structure() {
     class ByValue : XcbScreenIterator(), Structure.ByValue
 }
 
-private class NativeX11Driver(private val xcb: Xcb, private val connection: Pointer) : X11Driver {
-    private val presses = X11KeyPressFilter()
+internal class NativeX11Driver(private val xcb: Xcb, private val connection: Pointer) : X11Driver {
+    private var held = false
     private var keycode = 0
 
     override fun grab(shortcut: GlobalShortcut) {
@@ -167,7 +170,11 @@ private class NativeX11Driver(private val xcb: Xcb, private val connection: Poin
         while (roots.remaining > 0) {
             val root = checkNotNull(roots.data).getInt(0)
             for (mask in masks) {
-                val cookie = xcb.xcb_grab_key_checked(connection, 0, root, mask.toShort(), keycode.toByte(), 1, 1)
+                // SYNC queues subsequent keys on the server until we release the active grab.
+                val cookie = xcb.xcb_grab_key_checked(
+                    connection, 0, root, mask.toShort(), keycode.toByte(),
+                    GRAB_MODE_ASYNC, GRAB_MODE_SYNC,
+                )
                 val error = xcb.xcb_request_check(connection, cookie).owned { it.getByte(1).unsigned() }
                 when (error) {
                     null -> Unit
@@ -183,23 +190,49 @@ private class NativeX11Driver(private val xcb: Xcb, private val connection: Poin
 
     override fun pollActivation(): Boolean? {
         checkConnection()
-        return xcb.xcb_poll_for_event(connection).owned { event ->
+        val event = xcb.xcb_poll_for_event(connection)
+        if (event == null) {
+            if (held) held = isShortcutKeyDown()
+            return null
+        }
+        return event.owned {
             // Ignore synthetic events and never process any key other than the configured one.
             val type = event.getByte(0).unsigned()
             // MappingNotify contains the request kind after response_type, pad and sequence.
             if (type == 34 && event.getByte(4).unsigned() < 2) {
                 throw GlobalHotkeyUnavailable("The X11 keyboard mapping changed. Reapply the global shortcut.")
             }
-            if ((type != 2 && type != 3) || event.getByte(1).unsigned() != keycode) return@owned false
-            presses.accept(pressed = type == 2, time = event.getInt(4))
+            if (type != 2 || event.getByte(1).unsigned() != keycode) return@owned false
+
+            // This releases only the active keyboard grab, not the configured passive grabs.
+            // Ungrab before any callback (even on repeat) so unrelated keys go to the focused app.
+            val ungrab = xcb.xcb_ungrab_keyboard_checked(connection, event.getInt(4))
+            val error = xcb.xcb_request_check(connection, ungrab).owned { it.getByte(1).unsigned() }
+            if (error != null) throw GlobalHotkeyUnavailable("The X11 server could not release the active shortcut grab.")
+            checkConnection()
+            val activated = !held
+            held = true
+            activated
         }
     }
+
+    private fun isShortcutKeyDown(): Boolean =
+        xcb.xcb_query_keymap_reply(connection, xcb.xcb_query_keymap(connection), null).owned { reply ->
+            // QueryKeymap returns 32 bytes from offset 8. Inspect only the configured key's bit.
+            val slot = reply.getByte(8L + keycode / 8).unsigned()
+            slot and (1 shl (keycode % 8)) != 0
+        } ?: throw GlobalHotkeyUnavailable("Could not read the X11 shortcut key state.")
 
     private fun checkConnection() {
         if (xcb.xcb_connection_has_error(connection) != 0) throw IllegalStateException("X11 connection lost")
     }
 
-    override fun close() = xcb.xcb_disconnect(connection) // Also releases every successful partial grab.
+    override fun close() = xcb.xcb_disconnect(connection) // Releases active and passive grabs, including partial setup.
+
+    private companion object {
+        const val GRAB_MODE_SYNC: Byte = 0
+        const val GRAB_MODE_ASYNC: Byte = 1
+    }
 }
 
 private fun Byte.unsigned() = toInt() and 0xff
@@ -233,23 +266,5 @@ internal fun x11GrabMasks(shortcut: GlobalShortcut, modifiers: List<Set<Int>>): 
         if (symbols.any { it in locks } && symbols.all { it == 0 || it in locks }) {
             masks + masks.map { it or (1 shl index) }
         } else masks
-    }
-}
-
-/** Core X11 auto-repeat is reported as a same-timestamp release/press pair. */
-internal class X11KeyPressFilter {
-    private var down = false
-    private var releasedAt: Int? = null
-
-    fun accept(pressed: Boolean, time: Int): Boolean {
-        if (!pressed) {
-            releasedAt = time
-            down = false
-            return false
-        }
-        val newPress = !down && releasedAt != time
-        releasedAt = null
-        down = true
-        return newPress
     }
 }

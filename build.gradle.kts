@@ -131,6 +131,19 @@ intellijPlatform {
         // junto con pluginVersion; el historial largo vive en CHANGELOG.md.
         changeNotes = provider {
             """
+            <h3>2.33.0 &mdash; optional system-wide Quick Add</h3>
+            <ul>
+              <li>Open the existing <b>New Task</b> dialog while another application is focused,
+                  with an optional system-wide shortcut. The IDE must be running.</li>
+              <li>Configure the combination and the last active or a fixed open project in
+                  <b>Settings &rarr; Tools &rarr; Tasklane Global Quick Add</b>. Disabled by default;
+                  machine-local settings, visible registration status, conflicts and retry.</li>
+              <li>Native registered shortcuts on Windows and macOS, passive grabs on X11,
+                  and the Global Shortcuts portal on supported Wayland desktops. No whole-keyboard
+                  monitoring. Wayland controls consent, the effective binding and foreground focus.</li>
+              <li>The IDE-local Keymap action and task data format are unchanged.
+                  Windows F12 and macOS F21&ndash;F24 are unavailable.</li>
+            </ul>
             <h3>2.32.0 &mdash; lists that continue, and code you can copy</h3>
             <ul>
               <li>In the task dialog, <b>Enter continues a list</b>: the next number,

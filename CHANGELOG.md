@@ -10,6 +10,27 @@ Todas las versiones publicables del plugin. El formato sigue
 > `changeNotes` en `build.gradle.kts` —que es lo que sale en la ficha del Marketplace y
 > en el diálogo de actualización del IDE— y este fichero.
 
+## [2.33.0]
+
+### Añadido
+- **Quick Add con un atajo del sistema**, opcional y desactivado por defecto: abre el diálogo
+  existente cuando el IDE está abierto aunque otra aplicación tenga el foco.
+- **Configuración independiente del Keymap** en *Settings → Tools → Tasklane Global Quick Add*:
+  combinación de teclas, último proyecto activo o un proyecto abierto fijo, estado de registro
+  y reintento. Los ajustes son locales a la instalación y no se sincronizan.
+- Integración con los atajos registrados de **Windows y macOS**, las capturas pasivas de **X11**
+  y el portal **Global Shortcuts de Wayland**. Se muestran conflictos, permisos rechazados y
+  falta de soporte; no se captura todo el teclado ni se utiliza XWayland como sustituto.
+
+### Compatibilidad y límites
+- El IDE debe estar abierto y el proyecto de destino disponible; un destino fijo cerrado no
+  redirige la tarea a otro proyecto. Se respeta el repositorio activo y su modo de solo lectura.
+- En Wayland, el escritorio autoriza la combinación efectiva y decide si permite poner la
+  ventana en primer plano. La disponibilidad depende del portal del escritorio.
+- Windows reserva F12. El adaptador de macOS admite F1–F20 y posiciones de teclado latinas;
+  F21–F24 se indican como no disponibles.
+- Se conservan el atajo interno del IDE y el formato de las tareas. No hay migración de datos.
+
 ## [2.32.0]
 Escribir Markdown y leer código, pedida por el usuario a la vista de un `behavior` pegado a su
 recuadro y de un bloque de log que no se podía copiar de una vez.

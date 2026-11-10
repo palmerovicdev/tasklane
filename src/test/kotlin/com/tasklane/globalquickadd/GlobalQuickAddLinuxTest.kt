@@ -1,5 +1,8 @@
 package com.tasklane.globalquickadd
 
+import com.sun.jna.Memory
+import com.sun.jna.Native
+import com.sun.jna.Pointer
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.Marshalling
 import org.freedesktop.dbus.types.UInt32
@@ -11,6 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.lang.reflect.Proxy
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -100,14 +104,32 @@ class GlobalQuickAddLinuxTest {
         assertEquals(setOf(12, 14, 28, 30), x11GrabMasks(shortcut, symbols))
     }
 
-    @Test fun `X11 ignores key repeats but accepts the next physical press`() {
-        val presses = X11KeyPressFilter()
-        assertTrue(presses.accept(true, 1))
-        assertFalse(presses.accept(true, 2))
-        assertFalse(presses.accept(false, 3))
-        assertFalse(presses.accept(true, 3))
-        assertFalse(presses.accept(false, 4))
-        assertTrue(presses.accept(true, 5))
+    @Test fun `X11 releases each active grab without taking other keys from the focused app`() {
+        FakeXcb().use { server ->
+            NativeX11Driver(server.api, Pointer(1)).use { driver ->
+                driver.grab(shortcut)
+                server.pressShortcut(100)
+                server.typeUnrelatedKey()
+                assertEquals(true, driver.pollActivation())
+                assertEquals(listOf(100), server.releasedAt)
+                assertEquals(1, server.foregroundKeyPresses)
+                assertNull(driver.pollActivation())
+
+                server.pressShortcut(200) // An auto-repeat can activate another passive grab.
+                assertEquals(false, driver.pollActivation())
+                assertEquals(listOf(100, 200), server.releasedAt)
+
+                server.releaseShortcut()
+                assertNull(driver.pollActivation())
+                assertNull(driver.pollActivation())
+                assertEquals(2, server.keymapReads) // No keyboard polling while the shortcut is idle.
+
+                server.pressShortcut(300)
+                assertEquals(true, driver.pollActivation())
+                assertEquals(listOf(100, 200, 300), server.releasedAt)
+            }
+            assertEquals(1, server.disconnects)
+        }
     }
 
     @Test fun `portal wire types match the published D-Bus interface`() {
@@ -181,6 +203,92 @@ class GlobalQuickAddLinuxTest {
 
     private fun waylandOver(bus: PortalBus) =
         WaylandHotkeyBackend("wayland-0", GlobalShortcutsPortalFactory { DbusGlobalShortcutsPortal(bus, timeoutMillis = 10) })
+
+    /** Models X11's sync freeze and the active grab's routing, without a real server. */
+    private class FakeXcb : AutoCloseable {
+        private val setup = Memory(40).apply { setByte(34, 20); setByte(35, 22) }
+        private val root = Memory(4).apply { setInt(0, 42) }
+        private val events = ArrayDeque<Pair<Int, Int>>()
+        private var keyboardMode: Byte? = null
+        private var active = false
+        private var held = false
+        private var queued = 0
+        val releasedAt = mutableListOf<Int>()
+        var foregroundKeyPresses = 0
+        var keymapReads = 0
+        var disconnects = 0
+
+        val api = Proxy.newProxyInstance(Xcb::class.java.classLoader, arrayOf(Xcb::class.java)) { _, method, args ->
+            when (method.name) {
+                "xcb_get_setup" -> setup
+                "xcb_get_keyboard_mapping", "xcb_get_modifier_mapping" -> XcbCookie()
+                "xcb_get_keyboard_mapping_reply" -> reply(44) {
+                    setByte(1, 1)
+                    setInt(32, 'k'.code)
+                    setInt(36, 0xffe3)
+                    setInt(40, 0xffe9)
+                }
+                "xcb_get_modifier_mapping_reply" -> reply(40) {
+                    setByte(1, 1)
+                    setByte(34, 21)
+                    setByte(35, 22)
+                }
+                "xcb_setup_roots_iterator" -> XcbScreenIterator.ByValue().apply {
+                    data = root
+                    remaining = 1
+                    write()
+                }
+                "xcb_screen_next" -> { (args[0] as Pointer).setInt(Native.POINTER_SIZE.toLong(), 0); null }
+                "xcb_grab_key_checked" -> {
+                    assertEquals(1.toByte(), args[5]) // Pointer stays asynchronous.
+                    keyboardMode = args[6] as Byte
+                    XcbCookie()
+                }
+                "xcb_request_check" -> null
+                "xcb_connection_has_error" -> 0
+                "xcb_poll_for_event" -> events.removeFirstOrNull()?.let { (key, time) ->
+                    reply(32) { setByte(0, 2); setByte(1, key.toByte()); setInt(4, time) }
+                }
+                "xcb_ungrab_keyboard_checked" -> {
+                    assertTrue(active)
+                    active = false
+                    releasedAt += args[1] as Int
+                    foregroundKeyPresses += queued
+                    queued = 0
+                    XcbCookie()
+                }
+                "xcb_query_keymap" -> { keymapReads++; XcbCookie() }
+                "xcb_query_keymap_reply" -> reply(40) {
+                    setByte(10, if (held) 0b00010000 else 0) // keycode 20 is bit 4 of keys[2].
+                }
+                "xcb_disconnect" -> { disconnects++; null }
+                else -> error("Unexpected XCB call: ${method.name}")
+            }
+        } as Xcb
+
+        fun pressShortcut(time: Int) {
+            assertFalse(active)
+            assertEquals(0.toByte(), keyboardMode)
+            active = true
+            held = true
+            events += 20 to time
+        }
+
+        fun typeUnrelatedKey() {
+            when {
+                !active -> foregroundKeyPresses++
+                keyboardMode == 0.toByte() -> queued++
+                else -> events += 30 to 150
+            }
+        }
+
+        fun releaseShortcut() { held = false }
+
+        private fun reply(size: Long, fill: Pointer.() -> Unit) =
+            Pointer(Native.malloc(size)).apply { clear(size); fill() }
+
+        override fun close() { setup.close(); root.close() }
+    }
 
     private class FakeX11Driver(private val failGrab: Boolean = false) : X11Driver {
         var closed = 0
